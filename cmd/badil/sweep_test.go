@@ -305,14 +305,16 @@ func TestParseCleanupInterval(t *testing.T) {
 	}
 }
 
-func TestStartPreviewsCount(t *testing.T) {
+func TestCountPreviews(t *testing.T) {
 	cases := []struct {
-		name      string
-		metrics   bool
-		listErr   error
-		wantCalls int
-		want      float64
-		wantLog   string
+		name        string
+		metrics     bool
+		listErr     error
+		block       bool
+		wantCalls   int
+		want        float64
+		wantElapsed time.Duration
+		wantLog     string
 	}{
 		{name: "metrics enabled", metrics: true, wantCalls: 1, want: 2},
 		{name: "metrics disabled"},
@@ -320,32 +322,43 @@ func TestStartPreviewsCount(t *testing.T) {
 			name: "listing failed", metrics: true, listErr: errors.New("boom"), wantCalls: 1, want: 1,
 			wantLog: `level=WARN msg="previews count failed" err=boom`,
 		},
+		{
+			name: "listing timed out", metrics: true, block: true, wantCalls: 1, want: 1,
+			wantElapsed: previewsCountTimeout,
+			wantLog:     `level=WARN msg="previews count failed" err="context deadline exceeded"`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			logs := captureText(t)
+			synctest.Test(t, func(t *testing.T) {
+				logs := captureText(t)
 
-			f := &loopFake{slugs: []string{"a", "b"}, listErr: tc.listErr}
-			var m *metrics.Metrics
-			if tc.metrics {
-				m = metrics.New()
-				m.PreviewsListed(1)
-			}
-			srv := server.NewServer(nil, nil, "t", 0)
-			startPreviewsCount(context.Background(), srv, f, m)
-			if err := srv.WaitBackground(context.Background()); err != nil {
-				t.Fatalf("WaitBackground: %v", err)
-			}
+				f := &loopFake{slugs: []string{"a", "b"}, listErr: tc.listErr}
+				if tc.block {
+					f.block = make(chan struct{})
+				}
+				var m *metrics.Metrics
+				if tc.metrics {
+					m = metrics.New()
+					m.PreviewsListed(1)
+				}
 
-			if calls, _ := f.counts(); calls != tc.wantCalls {
-				t.Errorf("listings = %d, want %d", calls, tc.wantCalls)
-			}
-			if m != nil {
-				assertPreviews(t, m, tc.want)
-			}
-			if got := strings.TrimSpace(logs.String()); got != tc.wantLog {
-				t.Errorf("logs = %q, want %q", got, tc.wantLog)
-			}
+				start := time.Now()
+				countPreviews(context.Background(), f, m)
+
+				if elapsed := time.Since(start); elapsed != tc.wantElapsed {
+					t.Errorf("countPreviews returned after %v, want %v", elapsed, tc.wantElapsed)
+				}
+				if calls, _ := f.counts(); calls != tc.wantCalls {
+					t.Errorf("listings = %d, want %d", calls, tc.wantCalls)
+				}
+				if m != nil {
+					assertPreviews(t, m, tc.want)
+				}
+				if got := strings.TrimSpace(logs.String()); got != tc.wantLog {
+					t.Errorf("logs = %q, want %q", got, tc.wantLog)
+				}
+			})
 		})
 	}
 }

@@ -39,6 +39,9 @@ const readHeaderTimeout = 10 * time.Second
 // minCleanupInterval is the shortest CLEANUP_INTERVAL accepted.
 const minCleanupInterval = time.Minute
 
+// previewsCountTimeout bounds the startup listing of the previews.
+const previewsCountTimeout = 10 * time.Second
+
 // sweepAPI is the gitops client with the metrics recorder lifecycle.Sweep
 // expects. A nil *metrics.Metrics records nothing.
 type sweepAPI struct {
@@ -110,9 +113,9 @@ func serveCmd() *cobra.Command {
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
+			countPreviews(ctx, gitopsClient, m)
 			serveInBackground(ctx, "server", httpSrv)
 			metricsSrv := startMetricsServer(ctx, cfg.MetricsAddr, m)
-			startPreviewsCount(ctx, srv, gitopsClient, m)
 			startSweepLoop(ctx, srv, sweepAPI{Client: gitopsClient, Metrics: m}, m, interval, ttl)
 
 			<-ctx.Done()
@@ -149,22 +152,23 @@ type previewLister interface {
 	ListPreviews(ctx context.Context) ([]string, error)
 }
 
-// startPreviewsCount sets m's previews gauge from one listing of the gitops
-// repo, in the background of srv so shutdown waits for it. It lists nothing
-// when m is nil (metrics disabled). A failed listing is logged and leaves the
-// gauge as it is.
-func startPreviewsCount(ctx context.Context, srv *server.Server, api previewLister, m *metrics.Metrics) {
+// countPreviews sets m's previews gauge from one listing of the gitops repo,
+// bounded by previewsCountTimeout. serve calls it before the server accepts
+// requests, so no create or delete races the listing. It lists nothing when m
+// is nil (metrics disabled). A failed or timed-out listing is logged and
+// leaves the gauge as it is.
+func countPreviews(ctx context.Context, api previewLister, m *metrics.Metrics) {
 	if m == nil {
 		return
 	}
-	srv.Go(func() {
-		slugs, err := api.ListPreviews(ctx)
-		if err != nil {
-			slog.Default().WarnContext(ctx, "previews count failed", slog.String("err", err.Error()))
-			return
-		}
-		m.PreviewsListed(len(slugs))
-	})
+	listCtx, cancel := context.WithTimeout(ctx, previewsCountTimeout)
+	defer cancel()
+	slugs, err := api.ListPreviews(listCtx)
+	if err != nil {
+		slog.Default().WarnContext(ctx, "previews count failed", slog.String("err", err.Error()))
+		return
+	}
+	m.PreviewsListed(len(slugs))
 }
 
 // serveInBackground runs srv.ListenAndServe in the background, logging it as
