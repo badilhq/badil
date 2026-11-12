@@ -6,9 +6,7 @@ Shipped so far: [CHANGELOG.md](../CHANGELOG.md) and [GitHub releases](https://gi
 
 ## v1
 
-| # | Change | Goal | Depends on |
-|---|---|---|---|
-| 11 | **E2E demo**: agent-opened PR → preview → tests against preview URL → merge → teardown | validate AI output | all |
+All v1 items have shipped. The last one, the end-to-end demo (an agent-opened PR, a preview, tests against the preview URL, merge, teardown), runs on the k3d testbed.
 
 ## Non-goals
 

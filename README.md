@@ -54,7 +54,11 @@ From an empty cluster to a first preview: [docs/INSTALL.md](docs/INSTALL.md).
 
 ## Status
 
-Early development. Working: GitHub App auth, label-triggered previews, `/v1/deploy`, gitops writes with conflict retry, PR comments, webhook verification.
+Pre-1.0, and the v1 scope is complete. The full loop (label a PR, preview deployed by Argo CD, URLs tested, merge, teardown) runs end to end on a k3d testbed with a four-service demo.
+
+Working: label-triggered previews per branch or per `preview:<name>` label across repos, per-service chart overrides, teardown when a PR closes or loses its label, a cleanup sweep with optional TTL (in the server or as a CronJob), the manual `/v1/deploy` endpoint, PR comments with preview links, Prometheus metrics and a Grafana dashboard, preview spin-up time and GitHub deployments through Argo CD notifications.
+
+Until 1.0, env vars, metric names, annotations and chart values can still change between minor releases; the [CHANGELOG](CHANGELOG.md) marks breaking changes.
 
 ## Usage
 
