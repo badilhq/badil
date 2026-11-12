@@ -22,7 +22,7 @@ From an empty cluster to a first preview. Contract details live in [ARCHITECTURE
 
 - If the gitops repo or any service repo is private, register it in Argo CD first (repository credentials; see Argo CD [Private Repositories](https://argo-cd.readthedocs.io/en/stable/user-guide/private-repositories/)). The public `oci://ghcr.io/badilhq/charts` needs no credentials.
 - Copy [`examples/argocd/appproject-previews.yaml`](../examples/argocd/appproject-previews.yaml) and [`applicationset-previews.yaml`](../examples/argocd/applicationset-previews.yaml), and adapt both as listed in [Adapt to your org](../examples/argocd/README.md#adapt-to-your-org).
-- Take the files from the badil release tag you install (`https://github.com/badilhq/badil/tree/vX.Y.Z/examples/argocd`): they carry the matching `preview-env` `targetRevision`. When installing the latest, use `main`'s files.
+- Take the files from the badil release tag you install (`https://github.com/badilhq/badil/tree/vX.Y.Z/examples/argocd`): they carry the matching `preview-env` `targetRevision`. For the latest chart, use the latest release tag: `main` can be ahead of it.
 - Apply both:
 
   ```bash
@@ -112,16 +112,16 @@ helm install badil oci://ghcr.io/badilhq/charts/badil -n badil \
   --set existingSecret=badil \
   --set ingress.enabled=true --set ingress.host=badil.example.com \
   --set cleanup.interval=1h \
-  -f values.yaml
+  -f values.yaml   # leave this line out on a local http cluster
 ```
 
-- Pin `--version` in production. The image tag defaults to the chart `appVersion`.
+- Without `--version`, Helm installs the latest chart. Add `--version X.Y.Z` to pin a release (do so in production), and take the step 3 example files from the same `vX.Y.Z` tag. The image tag defaults to the chart `appVersion`.
 - The Ingress also exposes `POST /v1/deploy`, the manual trigger, protected by the `deploy-token` bearer token (see [README](../README.md)), and `POST /webhooks/argocd`, protected by the optional `argocd-webhook-token` bearer token.
 - `cleanup.ttl` (e.g. `168h`) is optional: it also deletes previews with no deploy for that long.
 - `cleanup.interval=1h` runs the cleanup sweep in the server, which exports its metrics (with the Prometheus Operator, scrape them with `metrics.serviceMonitor.enabled=true` and `metrics.serviceMonitor.labels` matching its selector, e.g. `release: <kube-prometheus-stack release>`); `cleanup.enabled=true`, an hourly CronJob without metrics, is the alternative, not to combine with it.
 - Keep `replicaCount: 1`.
 
-Once the Secret exists, delete the local `.env` and PEM.
+Once the Secret exists, delete the local `.env` and PEM. The non-secret values you set stay readable with `helm get values badil -n badil`, which the [upgrade](#10-upgrade) uses.
 
 Check:
 
@@ -144,7 +144,13 @@ helm upgrade argocd argo/argo-cd -n argocd --version <your installed argo-cd cha
 
 Applying it while pinned previews exist produces one-off spin-up samples for them, measured from their last deploy.
 
-Check: `badil_argocd_events_total` increases after the next labeled PR. Without Helm, see the file's comments. To remove the setup later, revert the Argo CD release without the file, then delete the token, which Helm leaves in the Secret: `kubectl -n argocd patch secret argocd-notifications-secret --type=json -p '[{"op":"remove","path":"/data/badil-webhook-token"}]'`. Details: ARCHITECTURE [Spin-up endpoint](ARCHITECTURE.md#spin-up-endpoint).
+Check: `badil_argocd_events_total{result="recorded"}` increases after the next labeled PR. Without Prometheus, read it through the API server:
+
+```bash
+kubectl get --raw /api/v1/namespaces/badil/services/badil:metrics/proxy/metrics | grep badil_argocd_events_total
+```
+
+Without Helm, see the file's comments. To remove the setup later, revert the Argo CD release without the file, then delete the token, which Helm leaves in the Secret: `kubectl -n argocd patch secret argocd-notifications-secret --type=json -p '[{"op":"remove","path":"/data/badil-webhook-token"}]'`. Details: ARCHITECTURE [Spin-up endpoint](ARCHITECTURE.md#spin-up-endpoint).
 
 ### Preview deployments on GitHub (optional)
 
@@ -238,7 +244,12 @@ Set `preview.domain` in `services.yaml`, create a wildcard DNS record `*.<domain
 
 ## 10. Upgrade
 
-1. Upgrade badil first: `helm upgrade` with the same flags as step 6.
+1. Upgrade badil first, with the values of the installed release:
+
+   ```bash
+   helm get values badil -n badil -o yaml > badil-values.yaml
+   helm upgrade badil oci://ghcr.io/badilhq/charts/badil -n badil --version X.Y.Z -f badil-values.yaml
+   ```
 2. Then set the ApplicationSet's `preview-env` `targetRevision` to the one in the new tag's [`examples/argocd/applicationset-previews.yaml`](../examples/argocd/applicationset-previews.yaml), and re-apply it.
 
 ## 11. Troubleshooting

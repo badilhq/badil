@@ -28,7 +28,7 @@ existingSecret: ""
 service:
   port: 8080
 
-# Ingress exposing /webhooks/github, /webhooks/argocd and /v1/deploy; host is required when enabled.
+# Ingress routing every path of the host to the server port (/webhooks/github, /webhooks/argocd, /v1/deploy, /healthz); host is required when enabled.
 ingress:
   enabled: false
   className: ""
