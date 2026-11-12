@@ -1,6 +1,8 @@
 package preview
 
 import (
+	"maps"
+	"slices"
 	"strings"
 	"time"
 )
@@ -24,31 +26,56 @@ func BuildPreviewValues(serviceName, commitSha string, catalog []string, inputs 
 	return PreviewValues{Services: services}
 }
 
-// UpdatePreviewValues merges a deploy event into an existing PreviewValues:
+// UpdatePreviewValues returns a copy of existing with a deploy event merged in:
 //   - if serviceName already has an entry, overwrite commitSha and metadata
 //     but preserve the original created-at;
 //   - if the service is absent, append a new pinned entry.
 //
-// Other services are left untouched (branch-tracking entries keep their state).
+// Other services are left untouched (branch-tracking entries keep their
+// state). existing is never mutated.
 func UpdatePreviewValues(existing PreviewValues, serviceName, commitSha string, inputs DeployInputs) PreviewValues {
-	for i := range existing.Services {
-		if existing.Services[i].Name != serviceName {
+	services := make([]ServiceEntry, len(existing.Services), len(existing.Services)+1)
+	copy(services, existing.Services)
+
+	for i := range services {
+		if services[i].Name != serviceName {
 			continue
 		}
 		md := BuildServiceMetadata(inputs)
-		if old := existing.Services[i].Metadata; old != nil && old.CreatedAt != "" {
+		if old := services[i].Metadata; old != nil && old.CreatedAt != "" {
 			md.CreatedAt = old.CreatedAt
 		}
-		existing.Services[i].CommitSha = commitSha
-		existing.Services[i].Metadata = md
-		return existing
+		services[i].CommitSha = commitSha
+		services[i].Metadata = md
+		return PreviewValues{Services: services}
 	}
-	existing.Services = append(existing.Services, ServiceEntry{
+	services = append(services, ServiceEntry{
 		Name:      serviceName,
 		CommitSha: commitSha,
 		Metadata:  BuildServiceMetadata(inputs),
 	})
-	return existing
+	return PreviewValues{Services: services}
+}
+
+// EqualExceptUpdatedAt reports whether a and b hold the same entries, in the
+// same order, ignoring only the updated-at of serviceName's entry. Metadata is
+// compared by value; a nil and an empty Extra are equal.
+func EqualExceptUpdatedAt(a, b PreviewValues, serviceName string) bool {
+	return slices.EqualFunc(a.Services, b.Services, func(x, y ServiceEntry) bool {
+		if x.Name != y.Name || x.CommitSha != y.CommitSha || x.Host != y.Host {
+			return false
+		}
+		if x.Metadata == nil || y.Metadata == nil {
+			return x.Metadata == nil && y.Metadata == nil
+		}
+		mx, my := *x.Metadata, *y.Metadata
+		if x.Name == serviceName {
+			mx.UpdatedAt, my.UpdatedAt = "", ""
+		}
+		return mx.PRAuthor == my.PRAuthor && mx.PRURL == my.PRURL && mx.PRNumber == my.PRNumber &&
+			mx.CreatedAt == my.CreatedAt && mx.UpdatedAt == my.UpdatedAt && mx.VCSRefName == my.VCSRefName &&
+			mx.PipelineRunURL == my.PipelineRunURL && maps.Equal(mx.Extra, my.Extra)
+	})
 }
 
 // UnpinPR returns a copy of vals where every entry deployed by the PR

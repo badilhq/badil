@@ -33,6 +33,7 @@ type gitopsAPI interface {
 		serviceName, commitSha string,
 		inputs preview.DeployInputs,
 		createMessage, updateMessage string,
+		skipUnchanged bool,
 	) (*gitops.WriteResult, error)
 	FanOutPRComments(ctx context.Context, vals preview.PreviewValues, body string) error
 	TeardownPreviewWithRetry(
@@ -138,7 +139,9 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		WorkflowRunURL: req.WorkflowRunURL,
 	}
 
-	result, fanErr, err := lifecycle.DeployPR(ctx, s.gitops, services, slug, inputs)
+	// A manual deploy always writes: it refreshes updated-at (the TTL clock)
+	// and always returns a gitops commit URL.
+	result, fanErr, err := lifecycle.DeployPR(ctx, s.gitops, services, slug, inputs, false)
 	if err != nil {
 		writeUpstreamError(ctx, logger, w, "write preview", err)
 		return

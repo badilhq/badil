@@ -78,8 +78,9 @@ func unpinOnly(ctx context.Context, api TeardownAPI, tt Target, reason string) {
 }
 
 // teardown is TeardownPR, which edits the PR's comment only when commentPR is
-// true.
-func teardown(ctx context.Context, api TeardownAPI, tt Target, reason, trigger string, commentPR bool) {
+// true. It reports whether it removed the PR from the preview (unpinned a
+// service or deleted the preview); a failed or no-op teardown removed nothing.
+func teardown(ctx context.Context, api TeardownAPI, tt Target, reason, trigger string, commentPR bool) bool {
 	result, err := api.TeardownPreviewWithRetry(ctx, tt.Slug, tt.Owner, tt.Repo, tt.Number)
 	if err != nil {
 		api.Teardown(trigger, teardownError)
@@ -89,7 +90,7 @@ func teardown(ctx context.Context, api TeardownAPI, tt Target, reason, trigger s
 			slog.Int("pr_number", tt.Number),
 			slog.String("err", err.Error()),
 		)
-		return
+		return false
 	}
 	if len(result.Removed) == 0 {
 		api.Teardown(trigger, teardownNoop)
@@ -99,7 +100,7 @@ func teardown(ctx context.Context, api TeardownAPI, tt Target, reason, trigger s
 			slog.Int("pr_number", tt.Number),
 			slog.String("reason", "no preview or no matching service"),
 		)
-		return
+		return false
 	}
 	if result.Deleted {
 		api.Teardown(trigger, teardownDeleted)
@@ -124,13 +125,13 @@ func teardown(ctx context.Context, api TeardownAPI, tt Target, reason, trigger s
 		}
 	}
 	if result.Deleted {
-		return
+		return true
 	}
 
 	catalog, err := api.FetchServiceCatalog(ctx)
 	if err != nil {
 		teardownCommentFailed(ctx, tt, err)
-		return
+		return true
 	}
 	summary := preview.BuildSummary(
 		tt.Slug, result.Values, catalog.URLs, catalog.Branches, result.CommitMessage, result.CommitURL,
@@ -138,6 +139,7 @@ func teardown(ctx context.Context, api TeardownAPI, tt Target, reason, trigger s
 	if fanErr := api.FanOutPRComments(ctx, result.Values, summary); fanErr != nil {
 		teardownCommentFailed(ctx, tt, fanErr)
 	}
+	return true
 }
 
 // teardownCommentFailed logs a comment or catalog failure after a successful

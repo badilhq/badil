@@ -255,10 +255,17 @@ func statusCode(err error) int {
 // CommitMessage is whichever of {createMessage, updateMessage} was actually
 // used for the gitops commit, so callers can label PR summaries consistently
 // with what GitHub shows when the user clicks through to the commit.
+//
+// Unchanged is true when skipUnchanged skipped the write: Values then holds
+// the fetched file, and CommitURL and CommitMessage are empty. Created is true
+// when the write created the file (the first attempt on a missing file); a
+// write after a 409 re-fetch is an update.
 type WriteResult struct {
 	Values        preview.PreviewValues
 	CommitURL     string
 	CommitMessage string
+	Unchanged     bool
+	Created       bool
 }
 
 // WritePreviewWithRetry composes Get → (Build|Update)PreviewValues → Write and
@@ -274,6 +281,11 @@ type WriteResult struct {
 // After every build or merge, preview.ApplyHosts sets each entry's host from
 // urls, so the written file carries the hosts of the current catalog.
 //
+// With skipUnchanged, when the file exists and the values to write differ
+// from it only in serviceName's updated-at (preview.EqualExceptUpdatedAt),
+// nothing is written: on the first read and after every 409 re-fetch. The
+// result is then Unchanged.
+//
 // Returns a WriteResult capturing the final PreviewValues that was written,
 // the gitops commit URL, and the commit message used — callers (e.g. the
 // deploy handler) can render PR summaries without re-fetching.
@@ -287,10 +299,11 @@ func (c *Client) WritePreviewWithRetry(
 	serviceName, commitSha string,
 	inputs preview.DeployInputs,
 	createMessage, updateMessage string,
+	skipUnchanged bool,
 ) (*WriteResult, error) {
 	start := time.Now()
 	res, err := c.writePreviewWithRetry(
-		ctx, slug, catalog, urls, serviceName, commitSha, inputs, createMessage, updateMessage,
+		ctx, slug, catalog, urls, serviceName, commitSha, inputs, createMessage, updateMessage, skipUnchanged,
 	)
 	c.observe("write", start, err)
 	return res, err
@@ -305,6 +318,7 @@ func (c *Client) writePreviewWithRetry(
 	serviceName, commitSha string,
 	inputs preview.DeployInputs,
 	createMessage, updateMessage string,
+	skipUnchanged bool,
 ) (*WriteResult, error) {
 	existing, sha, err := c.GetPreview(ctx, slug)
 	exists := err == nil
@@ -315,18 +329,21 @@ func (c *Client) writePreviewWithRetry(
 	var vals preview.PreviewValues
 	var message string
 	if exists {
-		vals = preview.UpdatePreviewValues(*existing, serviceName, commitSha, inputs)
+		vals = preview.ApplyHosts(preview.UpdatePreviewValues(*existing, serviceName, commitSha, inputs), slug, urls)
+		if skipUnchanged && preview.EqualExceptUpdatedAt(*existing, vals, serviceName) {
+			return &WriteResult{Values: *existing, Unchanged: true}, nil
+		}
 		message = updateMessage
 	} else {
-		vals = preview.BuildPreviewValues(serviceName, commitSha, catalog, inputs)
+		vals = preview.ApplyHosts(preview.BuildPreviewValues(serviceName, commitSha, catalog, inputs), slug, urls)
 		message = createMessage
 	}
-	vals = preview.ApplyHosts(vals, slug, urls)
 
+	creating := !exists
 	for attempt := 1; attempt <= MaxWriteRetries; attempt++ {
 		commitURL, writeErr := c.WritePreview(ctx, slug, vals, sha, message)
 		if writeErr == nil {
-			return &WriteResult{Values: vals, CommitURL: commitURL, CommitMessage: message}, nil
+			return &WriteResult{Values: vals, CommitURL: commitURL, CommitMessage: message, Created: creating}, nil
 		}
 		if statusCode(writeErr) != http.StatusConflict {
 			return nil, writeErr
@@ -338,7 +355,11 @@ func (c *Client) writePreviewWithRetry(
 		}
 		sha = latestSHA
 		vals = preview.ApplyHosts(preview.UpdatePreviewValues(*latest, serviceName, commitSha, inputs), slug, urls)
+		if skipUnchanged && preview.EqualExceptUpdatedAt(*latest, vals, serviceName) {
+			return &WriteResult{Values: *latest, Unchanged: true}, nil
+		}
 		message = updateMessage
+		creating = false
 	}
 	return nil, fmt.Errorf("write %s: %d attempts exhausted", previewPath(slug), MaxWriteRetries)
 }

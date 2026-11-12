@@ -25,15 +25,18 @@ type deployCall struct {
 	slug, service, commitSha string
 	catalog                  []string
 	inputs                   preview.DeployInputs
+	skipUnchanged            bool
 }
 
 // reconcileFake is an in-memory ReconcileAPI. The catalog is parsed from
 // reconcileServices unless catalogErr is set. teardownBySlug, when it has the
 // slug, overrides teardown, and teardownErr fails every teardown. previews is
 // what GetPreview reads, unless previewErr is set; an unknown slug is
-// ErrNotFound. calls logs, in order, "teardown:<slug>", "get:<slug>",
-// "write:<slug>", "upsert" and "fanout". Metrics records the outcomes; nil
-// records nothing.
+// ErrNotFound. A write of a service in unchanged with skipUnchanged set
+// returns an Unchanged result and is logged in skipped, not in writes. calls
+// logs, in order, "teardown:<slug>", "get:<slug>", "write:<slug>",
+// "unchanged:<slug>", "upsert" and "fanout". Metrics records the outcomes;
+// nil records nothing.
 type reconcileFake struct {
 	*metrics.Metrics
 
@@ -48,8 +51,10 @@ type reconcileFake struct {
 	previews       map[string]*preview.PreviewValues
 	previewErr     error
 	teardownErr    error
+	unchanged      map[string]bool
 
 	prReads   int
+	skipped   []deployCall
 	writes    []deployCall
 	fanOuts   []string
 	teardowns []teardownCall
@@ -92,14 +97,27 @@ func (f *reconcileFake) WritePreviewWithRetry(
 	serviceName, commitSha string,
 	inputs preview.DeployInputs,
 	_, _ string,
+	skipUnchanged bool,
 ) (*gitops.WriteResult, error) {
 	if err := f.writeErr[serviceName]; err != nil {
 		return nil, err
 	}
-	f.calls = append(f.calls, "write:"+slug)
-	f.writes = append(f.writes, deployCall{
+	call := deployCall{
 		slug: slug, service: serviceName, commitSha: commitSha, catalog: catalog, inputs: inputs,
-	})
+		skipUnchanged: skipUnchanged,
+	}
+	if skipUnchanged && f.unchanged[serviceName] {
+		f.calls = append(f.calls, "unchanged:"+slug)
+		f.skipped = append(f.skipped, call)
+		return &gitops.WriteResult{
+			Values: preview.PreviewValues{
+				Services: []preview.ServiceEntry{{Name: serviceName, CommitSha: commitSha}},
+			},
+			Unchanged: true,
+		}, nil
+	}
+	f.calls = append(f.calls, "write:"+slug)
+	f.writes = append(f.writes, call)
 	return &gitops.WriteResult{
 		Values: preview.PreviewValues{
 			Services: []preview.ServiceEntry{{Name: serviceName, CommitSha: commitSha}},
