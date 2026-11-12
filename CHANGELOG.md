@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.15.0](https://github.com/badilhq/badil/compare/v0.14.0...v0.15.0) (2026-11-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* rename project to badil ([#55](https://github.com/badilhq/badil/issues/55))
+
+### Code Refactoring
+
+* rename project to badil ([#55](https://github.com/badilhq/badil/issues/55)) ([c564364](https://github.com/badilhq/badil/commit/c564364442e022541ddc9fa128bd432526c0d109))
+
 ## [0.14.0](https://github.com/doublurehq/doublure/compare/v0.13.0...v0.14.0) (2026-10-30)
 
 
