@@ -9,71 +9,71 @@
 
 ### Code Refactoring
 
-* rename project to badil ([#55](https://github.com/badilhq/badil/issues/55)) ([c564364](https://github.com/badilhq/badil/commit/c564364442e022541ddc9fa128bd432526c0d109))
+* rename project to badil ([#55](https://github.com/badilhq/badil/issues/55)) ([1b6fa79](https://github.com/badilhq/badil/commit/1b6fa79e71ca3bd6348eb7bdf02bec4fd80527b6))
 
 ## [0.14.0](https://github.com/badilhq/badil/compare/v0.13.0...v0.14.0) (2026-10-30)
 
 
 ### Features
 
-* post preview deployments on github from argo cd ([#53](https://github.com/badilhq/badil/issues/53)) ([d98d676](https://github.com/badilhq/badil/commit/d98d67639fd0606b86d57ffc1be7735810a1b42f))
+* post preview deployments on github from argo cd ([#53](https://github.com/badilhq/badil/issues/53)) ([1ed2890](https://github.com/badilhq/badil/commit/1ed2890759b2aeb8beb7f35fb69cad9cdc2366dc))
 
 ## [0.13.0](https://github.com/badilhq/badil/compare/v0.12.0...v0.13.0) (2026-10-29)
 
 
 ### Features
 
-* add a grafana dashboard ([#51](https://github.com/badilhq/badil/issues/51)) ([99343f9](https://github.com/badilhq/badil/commit/99343f92800ace154405454d1cd214f1e88c3669))
+* add a grafana dashboard ([#51](https://github.com/badilhq/badil/issues/51)) ([a1e6ea6](https://github.com/badilhq/badil/commit/a1e6ea6abaa33777a080a6161bd51034471e2925))
 
 ## [0.12.0](https://github.com/badilhq/badil/compare/v0.11.1...v0.12.0) (2026-10-29)
 
 
 ### Features
 
-* expose prometheus metrics and run the sweep in the server ([#47](https://github.com/badilhq/badil/issues/47)) ([69913ad](https://github.com/badilhq/badil/commit/69913adbfcdcf4bfdf9566325ad67b3de025140a))
-* measure preview spin-up time ([#49](https://github.com/badilhq/badil/issues/49)) ([6edcce6](https://github.com/badilhq/badil/commit/6edcce67750398444e98836ba239e733b5fedd74))
+* expose prometheus metrics and run the sweep in the server ([#47](https://github.com/badilhq/badil/issues/47)) ([6aeceea](https://github.com/badilhq/badil/commit/6aeceeaeb00d2ab5c5f40529870671db026438d1))
+* measure preview spin-up time ([#49](https://github.com/badilhq/badil/issues/49)) ([b9695ad](https://github.com/badilhq/badil/commit/b9695ad3ab10c080da13d714fd29442fed78dc9e))
 
 ## [0.11.1](https://github.com/badilhq/badil/compare/v0.11.0...v0.11.1) (2026-10-29)
 
 
 ### Bug Fixes
 
-* **charts:** fail preview-env on non-string serviceCharts values ([#44](https://github.com/badilhq/badil/issues/44)) ([9730aa4](https://github.com/badilhq/badil/commit/9730aa442453e472a103a653faa807c4c6500ad0))
+* **charts:** fail preview-env on non-string serviceCharts values ([#44](https://github.com/badilhq/badil/issues/44)) ([67edcc1](https://github.com/badilhq/badil/commit/67edcc1eb0a2fb121999952575cc8371353e6e08))
 
 ## [0.11.0](https://github.com/badilhq/badil/compare/v0.10.0...v0.11.0) (2026-10-29)
 
 
 ### Features
 
-* let each service set its chart branch, path and parameters ([#42](https://github.com/badilhq/badil/issues/42)) ([c2ba1c1](https://github.com/badilhq/badil/commit/c2ba1c14112569901ecbc4972ab638e99040ec73))
+* let each service set its chart branch, path and parameters ([#42](https://github.com/badilhq/badil/issues/42)) ([dbaabf6](https://github.com/badilhq/badil/commit/dbaabf6153ed3e0eb9e110edf4d7384d2f33157f))
 
 ## [0.10.0](https://github.com/badilhq/badil/compare/v0.9.0...v0.10.0) (2026-10-28)
 
 
 ### Features
 
-* cap preview slugs and hosts to their dns limits ([#40](https://github.com/badilhq/badil/issues/40)) ([51d2957](https://github.com/badilhq/badil/commit/51d29577f6983d7b1ad61fae60e81312a47124f1))
+* cap preview slugs and hosts to their dns limits ([#40](https://github.com/badilhq/badil/issues/40)) ([bbc2e54](https://github.com/badilhq/badil/commit/bbc2e5488b3a21191582e4a003ae7f1a67695d75))
 
 ## [0.9.0](https://github.com/badilhq/badil/compare/v0.8.1...v0.9.0) (2026-10-28)
 
 
 ### Features
 
-* **cli:** create the github app with a given webhook url ([#38](https://github.com/badilhq/badil/issues/38)) ([06f6856](https://github.com/badilhq/badil/commit/06f685673656ce5a1909125ff9ed1e4f67f414c3))
+* **cli:** create the github app with a given webhook url ([#38](https://github.com/badilhq/badil/issues/38)) ([356390a](https://github.com/badilhq/badil/commit/356390a8f99094caac3df8ee3b46823120bbdbc0))
 
 ## [0.8.1](https://github.com/badilhq/badil/compare/v0.8.0...v0.8.1) (2026-10-28)
 
 
 ### Bug Fixes
 
-* **lifecycle:** skip the empty branch slug in payload teardown ([#36](https://github.com/badilhq/badil/issues/36)) ([7388e76](https://github.com/badilhq/badil/commit/7388e76e9558f3250c6c2f829faa02c7169af070))
+* **lifecycle:** skip the empty branch slug in payload teardown ([#36](https://github.com/badilhq/badil/issues/36)) ([47ebd87](https://github.com/badilhq/badil/commit/47ebd87a0bfdb0ca612013945f4bc80298f98236))
 
 ## [0.8.0](https://github.com/badilhq/badil/compare/v0.7.0...v0.8.0) (2026-10-28)
 
 
 ### Features
 
-* share a preview across pull requests with named labels ([#34](https://github.com/badilhq/badil/issues/34)) ([aa1d3df](https://github.com/badilhq/badil/commit/aa1d3dfba31407c1e8e5362d7f5a4f23775ae01e))
+* share a preview across pull requests with named labels ([#34](https://github.com/badilhq/badil/issues/34)) ([8e8d975](https://github.com/badilhq/badil/commit/8e8d975fe14090737bd0f405644b8e2e1f6bf912))
 
 ## [0.7.0](https://github.com/badilhq/badil/compare/v0.6.0...v0.7.0) (2026-10-28)
 
@@ -84,14 +84,14 @@
 
 ### Features
 
-* create previews from a pull request label ([#31](https://github.com/badilhq/badil/issues/31)) ([3062e7b](https://github.com/badilhq/badil/commit/3062e7ba11ecf126d11d96984a416ab5653b3f8b))
+* create previews from a pull request label ([#31](https://github.com/badilhq/badil/issues/31)) ([b84f40d](https://github.com/badilhq/badil/commit/b84f40dfeda9e27fba52076f6ecea19e92f158c0))
 
 ## [0.6.0](https://github.com/badilhq/badil/compare/v0.5.0...v0.6.0) (2026-10-27)
 
 
 ### Features
 
-* add a deploy action for service ci ([#29](https://github.com/badilhq/badil/issues/29)) ([8e3eb94](https://github.com/badilhq/badil/commit/8e3eb94cda11d5b94425ebb365cb624fbe33108c))
+* add a deploy action for service ci ([#29](https://github.com/badilhq/badil/issues/29)) ([eba41ad](https://github.com/badilhq/badil/commit/eba41add6722cc21f68f57e5ea328686fa5a0798))
 
 ## [0.5.0](https://github.com/badilhq/badil/compare/v0.4.1...v0.5.0) (2026-10-27)
 
@@ -102,59 +102,59 @@
 
 ### Features
 
-* make the app chart data-agnostic ([#27](https://github.com/badilhq/badil/issues/27)) ([37905a2](https://github.com/badilhq/badil/commit/37905a23f5d39dfc0cdeaa6ca6f96ea4fc317cdd))
+* make the app chart data-agnostic ([#27](https://github.com/badilhq/badil/issues/27)) ([a519349](https://github.com/badilhq/badil/commit/a5193497bad992c4c1ec353ff9941a3ffebd05f9))
 
 ## [0.4.1](https://github.com/badilhq/badil/compare/v0.4.0...v0.4.1) (2026-10-27)
 
 
 ### Bug Fixes
 
-* run the cleanup job once per schedule ([#25](https://github.com/badilhq/badil/issues/25)) ([ebfa068](https://github.com/badilhq/badil/commit/ebfa068322b6f8e7096826cf8cb38f2119908cea))
+* run the cleanup job once per schedule ([#25](https://github.com/badilhq/badil/issues/25)) ([a6e3759](https://github.com/badilhq/badil/commit/a6e37594a921a4b3f86f3165210607417f15ff31))
 
 ## [0.4.0](https://github.com/badilhq/badil/compare/v0.3.0...v0.4.0) (2026-10-27)
 
 
 ### Features
 
-* sweep stale and expired previews ([#23](https://github.com/badilhq/badil/issues/23)) ([1fed83d](https://github.com/badilhq/badil/commit/1fed83d6b0e76389c9bef8bfd76a47536ff37e7c))
+* sweep stale and expired previews ([#23](https://github.com/badilhq/badil/issues/23)) ([7fb1f16](https://github.com/badilhq/badil/commit/7fb1f1690fbb51df880eb320e4cdcaf880213cb8))
 
 ## [0.3.0](https://github.com/badilhq/badil/compare/v0.2.1...v0.3.0) (2026-10-27)
 
 
 ### Features
 
-* tear down previews when a pull request closes ([#21](https://github.com/badilhq/badil/issues/21)) ([2db444a](https://github.com/badilhq/badil/commit/2db444aa0ab9b2346513eaf3233b1129b2e0c5ab))
+* tear down previews when a pull request closes ([#21](https://github.com/badilhq/badil/issues/21)) ([9b56053](https://github.com/badilhq/badil/commit/9b5605301084b61e58436c4998c7168592985376))
 
 ## [0.2.1](https://github.com/badilhq/badil/compare/v0.2.0...v0.2.1) (2026-10-27)
 
 
 ### Bug Fixes
 
-* quote preview metadata safely and replace hand-rolled helpers ([#19](https://github.com/badilhq/badil/issues/19)) ([8aee7db](https://github.com/badilhq/badil/commit/8aee7db82ba00fded045853e8a7d9b5aa6ab5032))
+* quote preview metadata safely and replace hand-rolled helpers ([#19](https://github.com/badilhq/badil/issues/19)) ([3b220a9](https://github.com/badilhq/badil/commit/3b220a94090031c96d090f3e6b0e2deeb0fdc769))
 
 ## [0.2.0](https://github.com/badilhq/badil/compare/v0.1.1...v0.2.0) (2026-10-27)
 
 
 ### Features
 
-* show per-preview urls for exposed services ([#16](https://github.com/badilhq/badil/issues/16)) ([8c13e76](https://github.com/badilhq/badil/commit/8c13e76b399af7bcbb247841e0505dc6b8366e47))
+* show per-preview urls for exposed services ([#16](https://github.com/badilhq/badil/issues/16)) ([d1e2cd8](https://github.com/badilhq/badil/commit/d1e2cd86b7d3c529c57271987c94e95bd79ee623))
 
 ## [0.1.1](https://github.com/badilhq/badil/compare/v0.1.0...v0.1.1) (2026-10-27)
 
 
 ### Bug Fixes
 
-* remove internal leftovers from docs and dev defaults ([#14](https://github.com/badilhq/badil/issues/14)) ([27ac922](https://github.com/badilhq/badil/commit/27ac922f8b56ac77aef85bb87c4300461536e879))
+* remove internal leftovers from docs and dev defaults ([#14](https://github.com/badilhq/badil/issues/14)) ([87fe108](https://github.com/badilhq/badil/commit/87fe1087dcb458d2d7300f7ddf7a94eecfedb189))
 
 ## 0.1.0 (2026-10-27)
 
 
 ### Features
 
-* **charts:** add preview-env, app and badil helm charts ([79a969e](https://github.com/badilhq/badil/commit/79a969e1dc6428ed0eeafea04109f3c4ad6ade0e))
-* **cli:** add serve, verify-app and bootstrap-app commands ([6a30f65](https://github.com/badilhq/badil/commit/6a30f651ff086c676765c82caaef17244403d033))
-* **config:** load configuration from the environment ([765212f](https://github.com/badilhq/badil/commit/765212f0a0d5b6178c9bafefffa6eceb11a7c303))
-* **github:** authenticate as a github app ([9ef80c8](https://github.com/badilhq/badil/commit/9ef80c8c9980eace036582c9f2bb99402bf99888))
-* **gitops:** write preview values with optimistic locking ([17be26a](https://github.com/badilhq/badil/commit/17be26a4f1555a787d71246f37cdc04d0469dd76))
-* **preview:** compute preview slugs, values and pr summaries ([e566536](https://github.com/badilhq/badil/commit/e56653689050571ce6ebbb727e1951e5a793ea5e))
-* **server:** serve the deploy endpoint and github webhooks ([90bc907](https://github.com/badilhq/badil/commit/90bc9070f4bd3faac06d47d09763746aa5472732))
+* **charts:** add preview-env, app and badil helm charts ([e90978d](https://github.com/badilhq/badil/commit/e90978de29d9e625363185bdec6d553eba07191d))
+* **cli:** add serve, verify-app and bootstrap-app commands ([ee205ee](https://github.com/badilhq/badil/commit/ee205ee40b5bf39d74bc975ebc4bf571f0bcf6f5))
+* **config:** load configuration from the environment ([f63c2f9](https://github.com/badilhq/badil/commit/f63c2f93ad11f7e11625d3d9ed160016990e95cf))
+* **github:** authenticate as a github app ([eeef246](https://github.com/badilhq/badil/commit/eeef246d72867dd04440465cdb654a4404a1e5be))
+* **gitops:** write preview values with optimistic locking ([792087c](https://github.com/badilhq/badil/commit/792087c24f94e8cc5b5a2206aa67ae29bd8ca5cf))
+* **preview:** compute preview slugs, values and pr summaries ([10399ad](https://github.com/badilhq/badil/commit/10399ad355ca16bd880eb64c9167a61767a027a2))
+* **server:** serve the deploy endpoint and github webhooks ([d0591ef](https://github.com/badilhq/badil/commit/d0591ef345bcac48a61aae8bc524ce284cd3586d))
