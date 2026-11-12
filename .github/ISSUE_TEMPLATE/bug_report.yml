@@ -1,0 +1,55 @@
+name: Bug report
+description: Report something that does not work as expected.
+labels: [bug]
+body:
+  - type: input
+    id: badil-version
+    attributes:
+      label: badil version
+      placeholder: v0.15.0
+    validations:
+      required: true
+  - type: input
+    id: chart-versions
+    attributes:
+      label: Chart versions
+      description: Versions of the badil and preview-env charts.
+      placeholder: "badil 0.15.0, preview-env 0.6.0"
+    validations:
+      required: true
+  - type: input
+    id: argocd-version
+    attributes:
+      label: Argo CD version
+    validations:
+      required: true
+  - type: input
+    id: kubernetes-version
+    attributes:
+      label: Kubernetes version
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: badil server logs, Argo CD application events. Redact tokens and secrets.
+      render: shell
