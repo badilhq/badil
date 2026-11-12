@@ -23,8 +23,8 @@ type argoCDEvent struct {
 	Service  string `json:"service"`
 	Preview  string `json:"preview"`
 	Revision string `json:"revision"`
-	// UpdatedAt is the preview.doublure.dev/updated-at annotation: the time
-	// doublure wrote the service to the gitops repo.
+	// UpdatedAt is the preview.badil.dev/updated-at annotation: the time
+	// badil wrote the service to the gitops repo.
 	UpdatedAt string `json:"updatedAt"`
 }
 

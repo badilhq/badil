@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/doublurehq/doublure/internal/preview"
+	"github.com/badilhq/badil/internal/preview"
 )
 
 func TestParseLabel(t *testing.T) {

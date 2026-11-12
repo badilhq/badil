@@ -27,14 +27,14 @@ CI does not run golangci-lint; run `make lint` locally.
 
 Releases are cut by [release-please](https://github.com/googleapis/release-please) from Conventional Commits.
 
-- On `main` it keeps a `chore(main): release X.Y.Z` PR up to date. Merging it tags `vX.Y.Z`, creates the GitHub Release, and publishes `ghcr.io/doublurehq/doublure:X.Y.Z` (also `X.Y` and `latest`, for linux/amd64 and linux/arm64) and the `doublure` chart.
-- Checks on the release PR don't start on their own. A maintainer re-runs them from the PR, checks that the diff only touches `CHANGELOG.md`, `.release-please-manifest.json` and `charts/doublure/Chart.yaml`, then merges.
+- On `main` it keeps a `chore(main): release X.Y.Z` PR up to date. Merging it tags `vX.Y.Z`, creates the GitHub Release, and publishes `ghcr.io/badilhq/badil:X.Y.Z` (also `X.Y` and `latest`, for linux/amd64 and linux/arm64) and the `badil` chart.
+- Checks on the release PR don't start on their own. A maintainer re-runs them from the PR, checks that the diff only touches `CHANGELOG.md`, `.release-please-manifest.json` and `charts/badil/Chart.yaml`, then merges.
 
 Chart versioning:
 
-- Never hand-edit `version`/`appVersion` in `charts/doublure/Chart.yaml`; the release sets both.
+- Never hand-edit `version`/`appVersion` in `charts/badil/Chart.yaml`; the release sets both.
 - A PR that changes `charts/preview-env` or `charts/app` must bump that chart's `version` (enforced by the required `lint` check of the `Charts` workflow).
-- Merged bumps are published to `oci://ghcr.io/doublurehq/charts` on the next push to `main`.
+- Merged bumps are published to `oci://ghcr.io/badilhq/charts` on the next push to `main`.
 - If the image or chart publish of a release fails, re-run the failed jobs of that Release run: later pushes don't retry it.
 
 ## License

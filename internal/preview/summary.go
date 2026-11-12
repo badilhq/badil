@@ -20,7 +20,7 @@ func deriveCommitURL(prURL, sha string) string {
 	return m[1] + "/commit/" + sha
 }
 
-// BuildSummary renders the markdown summary that doublure posts back as a PR
+// BuildSummary renders the markdown summary that badil posts back as a PR
 // comment. Each service line shows the pinned commit (with a link if
 // derivable) or a 🔄 badge naming the branch an unpinned entry tracks,
 // followed by a link to the entry's written host, if any. The trailing line
@@ -65,7 +65,7 @@ func BuildSummary(
 	return b.String()
 }
 
-// BuildTeardownSummary renders the comment doublure leaves on a PR once its
+// BuildTeardownSummary renders the comment badil leaves on a PR once its
 // services were unpinned from the preview, or the preview was deleted. reason
 // says why (for example "PR closed").
 func BuildTeardownSummary(slug string, removed []string, deleted bool, reason, commitMessage, commitURL string) string {
@@ -80,14 +80,14 @@ func BuildTeardownSummary(slug string, removed []string, deleted bool, reason, c
 	return fmt.Sprintf("## 🧹 Preview: `%s`\n\n%s\n\n---\n🔗 [%s](%s)", slug, sentence, commitMessage, commitURL)
 }
 
-// BuildExpirySummary renders the comment doublure leaves on a preview's open
+// BuildExpirySummary renders the comment badil leaves on a preview's open
 // PRs once the cleanup sweeper deleted it for having no deploy within ttl.
 func BuildExpirySummary(slug string, ttl time.Duration, commitMessage, commitURL string) string {
 	return fmt.Sprintf("## 🧹 Preview: `%s`\n\nPreview deleted: no deploy for %s.\n\n---\n🔗 [%s](%s)",
 		slug, ttl, commitMessage, commitURL)
 }
 
-// BuildLabelConflictSummary renders the comment doublure leaves on a PR that
+// BuildLabelConflictSummary renders the comment badil leaves on a PR that
 // carries several named labels of the preview label base. labels are their
 // names, as written.
 func BuildLabelConflictSummary(base string, labels []string) string {
@@ -99,7 +99,7 @@ func BuildLabelConflictSummary(base string, labels []string) string {
 		base, strings.Join(names, ", "))
 }
 
-// BuildServiceHeldSummary renders the comment doublure leaves on a PR it
+// BuildServiceHeldSummary renders the comment badil leaves on a PR it
 // refused to deploy because service is already pinned in the preview slug by
 // the PR at holderURL. base is the preview label.
 func BuildServiceHeldSummary(slug, service, holderURL, base string) string {

@@ -5,24 +5,24 @@ From an empty cluster to a first preview. Contract details live in [ARCHITECTURE
 ## 1. Prerequisites
 
 - A Kubernetes cluster with Argo CD 3.1 or later (OCI chart source, Beta since v3.1.0), installed in the `argocd` namespace: the `preview-env` chart creates its AppProject and Applications there (`namespace: argocd` is hardcoded in its templates and in the examples).
-- An ingress controller with TLS for the doublure webhook URL (GitHub calls it over https), plus wildcard DNS when preview URLs are used.
+- An ingress controller with TLS for the badil webhook URL (GitHub calls it over https), plus wildcard DNS when preview URLs are used.
 - A GitHub gitops repo, and service repos whose CI pushes images tagged with the full commit SHA, all under the one account (user or org) the App is installed on.
 - Service images pullable from the preview namespaces: `preview-env` creates each namespace fresh, with no `imagePullSecrets`. Use public images, node-level registry credentials, or pull secrets set by the service chart.
-- `kubectl`, Helm 3.8+ and Go 1.26+ (for the `doublure` CLI).
+- `kubectl`, Helm 3.8+ and Go 1.26+ (for the `badil` CLI).
 
 ## 2. Gitops repo
 
 - Commit a `services.yaml` at the root, starting from [`examples/argocd/services.yaml`](../examples/argocd/services.yaml). `serviceRepos` is required; `preview` and `serviceCharts` are optional.
 - `serviceRepos` URLs must be `https://github.com/<owner>/<repo>` (with or without `.git`), or the label flow never matches them.
 - Contract: ARCHITECTURE [Gitops repo contract](ARCHITECTURE.md#gitops-repo-contract).
-- doublure creates `previews/` itself; a missing directory reads as no previews.
-- doublure commits straight to the default branch. Its protection must let the App push directly: no required pull request, or the App on the bypass list.
+- badil creates `previews/` itself; a missing directory reads as no previews.
+- badil commits straight to the default branch. Its protection must let the App push directly: no required pull request, or the App on the bypass list.
 
 ## 3. Argo CD wiring
 
-- If the gitops repo or any service repo is private, register it in Argo CD first (repository credentials; see Argo CD [Private Repositories](https://argo-cd.readthedocs.io/en/stable/user-guide/private-repositories/)). The public `oci://ghcr.io/doublurehq/charts` needs no credentials.
+- If the gitops repo or any service repo is private, register it in Argo CD first (repository credentials; see Argo CD [Private Repositories](https://argo-cd.readthedocs.io/en/stable/user-guide/private-repositories/)). The public `oci://ghcr.io/badilhq/charts` needs no credentials.
 - Copy [`examples/argocd/appproject-previews.yaml`](../examples/argocd/appproject-previews.yaml) and [`applicationset-previews.yaml`](../examples/argocd/applicationset-previews.yaml), and adapt both as listed in [Adapt to your org](../examples/argocd/README.md#adapt-to-your-org).
-- Take the files from the doublure release tag you install (`https://github.com/doublurehq/doublure/tree/vX.Y.Z/examples/argocd`): they carry the matching `preview-env` `targetRevision`. When installing the latest, use `main`'s files.
+- Take the files from the badil release tag you install (`https://github.com/badilhq/badil/tree/vX.Y.Z/examples/argocd`): they carry the matching `preview-env` `targetRevision`. When installing the latest, use `main`'s files.
 - Apply both:
 
   ```bash
@@ -32,16 +32,16 @@ From an empty cluster to a first preview. Contract details live in [ARCHITECTURE
 
   Re-apply after a chart bump: Argo CD does not manage the ApplicationSet.
 
-## 4. Public URL for doublure
+## 4. Public URL for badil
 
-Choose the https host GitHub will call, e.g. `https://doublure.example.com`, and create its A or CNAME record pointing at the ingress controller. The chart's Ingress serves it (step 6), and it is the webhook base URL.
+Choose the https host GitHub will call, e.g. `https://badil.example.com`, and create its A or CNAME record pointing at the ingress controller. The chart's Ingress serves it (step 6), and it is the webhook base URL.
 
 ## 5. GitHub App
 
 1. Install the CLI:
 
    ```bash
-   go install github.com/doublurehq/doublure/cmd/doublure@latest
+   go install github.com/badilhq/badil/cmd/badil@latest
    ```
 
    `$(go env GOPATH)/bin` must be on `PATH`. Use `@vX.Y.Z` to match a pinned chart.
@@ -50,7 +50,7 @@ Choose the https host GitHub will call, e.g. `https://doublure.example.com`, and
    - The App is private, so it can only be installed on the account that owns it. When the repos are in an org, `--owner <org>` is required, and creating the App needs org owner (or App manager) rights.
 
    ```bash
-   APP_NAME=my-doublure            # unique on GitHub
+   APP_NAME=my-badil            # unique on GitHub
    GITOPS=my-org/gitops            # owner/repo
    ORG=my-org                      # org that owns the repos
    ```
@@ -58,24 +58,24 @@ Choose the https host GitHub will call, e.g. `https://doublure.example.com`, and
    Repos in an org:
 
    ```bash
-   doublure bootstrap-app --name "$APP_NAME" \
-     --webhook-url https://doublure.example.com \
+   badil bootstrap-app --name "$APP_NAME" \
+     --webhook-url https://badil.example.com \
      --gitops-repo "$GITOPS" --owner "$ORG"
    ```
 
    Repos in your personal account:
 
    ```bash
-   doublure bootstrap-app --name "$APP_NAME" \
-     --webhook-url https://doublure.example.com \
+   badil bootstrap-app --name "$APP_NAME" \
+     --webhook-url https://badil.example.com \
      --gitops-repo "$GITOPS"
    ```
-3. Install the App on the gitops repo and every service repo, all under that one account. doublure accepts webhooks from that single installation only.
+3. Install the App on the gitops repo and every service repo, all under that one account. badil accepts webhooks from that single installation only.
 4. In the same directory, list the installations:
 
    ```bash
    . ./.env
-   doublure verify-app
+   badil verify-app
    ```
 
    Put the listed `id=` into `GITHUB_INSTALLATION_ID` in `.env`, then run `. ./.env` again.
@@ -83,7 +83,7 @@ Choose the https host GitHub will call, e.g. `https://doublure.example.com`, and
 
 `.env` and the PEM are secrets: keep them out of git and store them in a secret manager. The PEM is the only copy; if lost, generate a new private key in the App settings.
 
-## 6. Install doublure
+## 6. Install badil
 
 GitHub needs https, so set `ingress.className` and `ingress.tls` in a `values.yaml`:
 
@@ -91,8 +91,8 @@ GitHub needs https, so set `ingress.className` and `ingress.tls` in a `values.ya
 ingress:
   className: nginx                # your IngressClass
   tls:
-    - hosts: [doublure.example.com]
-      secretName: doublure-tls
+    - hosts: [badil.example.com]
+      secretName: badil-tls
 ```
 
 The chart has no `ingress.annotations`: the TLS Secret must exist beforehand (created by you, or by a cert-manager `Certificate`), or the controller's default certificate must be valid for the host. On a local test cluster you can skip the file and use http.
@@ -100,17 +100,17 @@ The chart has no `ingress.annotations`: the TLS Secret must exist beforehand (cr
 From the directory holding `.env`, after `. ./.env`:
 
 ```bash
-kubectl create namespace doublure
-kubectl create secret generic doublure -n doublure \
+kubectl create namespace badil
+kubectl create secret generic badil -n badil \
   --from-file=github-private-key="$GITHUB_PRIVATE_KEY_PATH" \
   --from-literal=github-webhook-secret="$GITHUB_WEBHOOK_SECRET" \
-  --from-literal=deploy-token="$DOUBLURE_DEPLOY_TOKEN"
-helm install doublure oci://ghcr.io/doublurehq/charts/doublure -n doublure \
+  --from-literal=deploy-token="$BADIL_DEPLOY_TOKEN"
+helm install badil oci://ghcr.io/badilhq/charts/badil -n badil \
   --set-string config.githubAppId="$GITHUB_APP_ID" \
   --set-string config.githubInstallationId="$GITHUB_INSTALLATION_ID" \
   --set config.gitopsRepo="$GITOPS_REPO" \
-  --set existingSecret=doublure \
-  --set ingress.enabled=true --set ingress.host=doublure.example.com \
+  --set existingSecret=badil \
+  --set ingress.enabled=true --set ingress.host=badil.example.com \
   --set cleanup.interval=1h \
   -f values.yaml
 ```
@@ -126,29 +126,29 @@ Once the Secret exists, delete the local `.env` and PEM.
 Check:
 
 ```bash
-curl https://doublure.example.com/healthz   # {"status":"ok"}
+curl https://badil.example.com/healthz   # {"status":"ok"}
 ```
 
 ### Spin-up time (optional)
 
-To measure how long each preview service takes to come up (`doublure_preview_spinup_seconds`), Argo CD's notifications controller calls doublure when a service is Healthy. Generate a token (e.g. `openssl rand -hex 32`) as `ARGOCD_WEBHOOK_TOKEN`, add it to the doublure Secret as `argocd-webhook-token` (a merge patch keeps the other keys) and restart doublure, then apply [`examples/argocd/notifications-values.yaml`](../examples/argocd/notifications-values.yaml) to your Argo CD release:
+To measure how long each preview service takes to come up (`badil_preview_spinup_seconds`), Argo CD's notifications controller calls badil when a service is Healthy. Generate a token (e.g. `openssl rand -hex 32`) as `ARGOCD_WEBHOOK_TOKEN`, add it to the badil Secret as `argocd-webhook-token` (a merge patch keeps the other keys) and restart badil, then apply [`examples/argocd/notifications-values.yaml`](../examples/argocd/notifications-values.yaml) to your Argo CD release:
 
 ```bash
-kubectl patch secret doublure -n doublure --type merge \
+kubectl patch secret badil -n badil --type merge \
   -p "{\"stringData\":{\"argocd-webhook-token\":\"$ARGOCD_WEBHOOK_TOKEN\"}}"
-kubectl rollout restart deployment/doublure -n doublure
+kubectl rollout restart deployment/badil -n badil
 helm upgrade argocd argo/argo-cd -n argocd --version <your installed argo-cd chart version> \
   --reuse-values -f notifications-values.yaml \
-  --set-string notifications.secret.items.doublure-webhook-token="$ARGOCD_WEBHOOK_TOKEN"
+  --set-string notifications.secret.items.badil-webhook-token="$ARGOCD_WEBHOOK_TOKEN"
 ```
 
 Applying it while pinned previews exist produces one-off spin-up samples for them, measured from their last deploy.
 
-Check: `doublure_argocd_events_total` increases after the next labeled PR. Without Helm, see the file's comments. To remove the setup later, revert the Argo CD release without the file, then delete the token, which Helm leaves in the Secret: `kubectl -n argocd patch secret argocd-notifications-secret --type=json -p '[{"op":"remove","path":"/data/doublure-webhook-token"}]'`. Details: ARCHITECTURE [Spin-up endpoint](ARCHITECTURE.md#spin-up-endpoint).
+Check: `badil_argocd_events_total` increases after the next labeled PR. Without Helm, see the file's comments. To remove the setup later, revert the Argo CD release without the file, then delete the token, which Helm leaves in the Secret: `kubectl -n argocd patch secret argocd-notifications-secret --type=json -p '[{"op":"remove","path":"/data/badil-webhook-token"}]'`. Details: ARCHITECTURE [Spin-up endpoint](ARCHITECTURE.md#spin-up-endpoint).
 
 ### Preview deployments on GitHub (optional)
 
-To show each pinned preview service on its PR as a GitHub deployment (with a "View deployment" button, and a `deployment_status` event for anything that waits on it), Argo CD's notifications controller posts GitHub Deployments when the service's Application is synced and Healthy. Argo CD decides health, not doublure. It requires [Spin-up time](#spin-up-time-optional) and `preview-env` 0.5.0 or later.
+To show each pinned preview service on its PR as a GitHub deployment (with a "View deployment" button, and a `deployment_status` event for anything that waits on it), Argo CD's notifications controller posts GitHub Deployments when the service's Application is synced and Healthy. Argo CD decides health, not badil. It requires [Spin-up time](#spin-up-time-optional) and `preview-env` 0.6.0 or later.
 
 Create a second GitHub App, for Argo CD:
 
@@ -193,7 +193,7 @@ To remove the setup later:
      --set notifications.secret.items.github-privateKey=null
    ```
 
-   This restores the single-entry `subscriptions` list. `service.github` and the `template.doublure-preview-*` and `trigger.on-preview-*` keys stay in the release: they are maps, so `--reuse-values` keeps them, but nothing subscribes to them.
+   This restores the single-entry `subscriptions` list. `service.github` and the `template.badil-preview-*` and `trigger.on-preview-*` keys stay in the release: they are maps, so `--reuse-values` keeps them, but nothing subscribes to them.
 2. Helm no longer renders these items, but removing a `stringData` key does not delete it from the live Secret's `data`, so delete them:
 
    ```bash
@@ -212,13 +212,13 @@ With the Prometheus Operator (e.g. kube-prometheus-stack), add to the `helm inst
 
 - `metrics.serviceMonitor.labels.release` must match the operator's `serviceMonitorSelector`; kube-prometheus-stack selects its own release name by default.
 - `dashboard.enabled=true` renders the Grafana dashboard as a ConfigMap labelled `grafana_dashboard: "1"`, which the Grafana sidecar of kube-prometheus-stack loads from any namespace. Change the label with `dashboard.labels` if your sidecar uses another one.
-- Without the sidecar, import [`charts/doublure/dashboards/doublure.json`](../charts/doublure/dashboards/doublure.json) as a Grafana dashboard and pick your Prometheus data source.
+- Without the sidecar, import [`charts/badil/dashboards/badil.json`](../charts/badil/dashboards/badil.json) as a Grafana dashboard and pick your Prometheus data source.
 
 Live previews and last successful sweep need `cleanup.interval`; the spin-up panels need [Spin-up time](#spin-up-time-optional). Details: ARCHITECTURE [Dashboard](ARCHITECTURE.md#dashboard).
 
 ## 7. Service repos
 
-- Create the `preview` label (or your custom `preview.label`) in each service repo, e.g. `gh label create preview --repo <owner>/<repo>`. Create any `preview:<name>` label yourself in each repo too: doublure never creates labels.
+- Create the `preview` label (or your custom `preview.label`) in each service repo, e.g. `gh label create preview --repo <owner>/<repo>`. Create any `preview:<name>` label yourself in each repo too: badil never creates labels.
 - CI must push the image tagged with the full commit SHA: ARCHITECTURE [Pinned and branch-tracking services](ARCHITECTURE.md#pinned-and-branch-tracking-services).
 - Chart contract and `serviceCharts` overrides: ARCHITECTURE [Service repo contract](ARCHITECTURE.md#service-repo-contract).
 
@@ -226,7 +226,7 @@ Live previews and last successful sweep need `cleanup.interval`; the spin-up pan
 
 1. Label a PR `preview`.
 2. Expect:
-   - within seconds, a doublure comment on the PR and `previews/<slug>/values.yaml` in the gitops repo;
+   - within seconds, a badil comment on the PR and `previews/<slug>/values.yaml` in the gitops repo;
    - within the ApplicationSet poll (3 minutes by default), one Argo CD Application per service.
 3. With preview URLs, the comment links each exposed service.
 4. Removing the label or closing the PR tears the preview down.
@@ -238,7 +238,7 @@ Set `preview.domain` in `services.yaml`, create a wildcard DNS record `*.<domain
 
 ## 10. Upgrade
 
-1. Upgrade doublure first: `helm upgrade` with the same flags as step 6.
+1. Upgrade badil first: `helm upgrade` with the same flags as step 6.
 2. Then set the ApplicationSet's `preview-env` `targetRevision` to the one in the new tag's [`examples/argocd/applicationset-previews.yaml`](../examples/argocd/applicationset-previews.yaml), and re-apply it.
 
 ## 11. Troubleshooting
@@ -246,10 +246,10 @@ Set `preview.domain` in `services.yaml`, create a wildcard DNS record `*.<domain
 | Symptom | Cause | Fix |
 |---|---|---|
 | Deliveries return 404 on `POST /` | The webhook URL lacks `/webhooks/github` | Set the App's webhook URL to `<base>/webhooks/github` |
-| Deliveries return 401 `invalid signature` | `github-webhook-secret` differs from the App's webhook secret | Make the Secret key and the App's webhook secret match, then restart doublure |
-| Deliveries return 403 `installation not allowed` | `config.githubInstallationId` is wrong, or the repo is under another account | Set the ID listed by `doublure verify-app`; install the App on repos of that account only |
+| Deliveries return 401 `invalid signature` | `github-webhook-secret` differs from the App's webhook secret | Make the Secret key and the App's webhook secret match, then restart badil |
+| Deliveries return 403 `installation not allowed` | `config.githubInstallationId` is wrong, or the repo is under another account | Set the ID listed by `badil verify-app`; install the App on repos of that account only |
 | Deliveries time out or fail to connect | The ingress or DNS is unreachable from GitHub | Expose the host publicly over https and check `/healthz` from outside |
-| `preview reconcile failed … services.yaml: …` in `kubectl logs -n doublure deploy/doublure` | `services.yaml` is malformed; the error names the key | Fix that key in `services.yaml` |
+| `preview reconcile failed … services.yaml: …` in `kubectl logs -n badil deploy/badil` | `services.yaml` is malformed; the error names the key | Fix that key in `services.yaml` |
 | `preview reconcile skipped … reason="repo not in catalog"` | The `serviceRepos` URL isn't `https://github.com/<owner>/<repo>[.git]` | Fix the URL in `services.yaml` |
 | `preview reconcile skipped … reason="fork pr"` | The PR comes from a fork | Expected: fork PRs never get a preview |
 | No comment after labeling | The App isn't installed on that repo, or the label differs from `preview.label` | Install the App on the repo, or use the configured label |

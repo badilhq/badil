@@ -2,9 +2,9 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "doublure.fullname" . }}
+  name: {{ include "badil.fullname" . }}
   labels:
-    {{- include "doublure.labels" . | nindent 4 }}
+    {{- include "badil.labels" . | nindent 4 }}
 spec:
   {{- with .Values.ingress.className }}
   ingressClassName: {{ . }}
@@ -21,7 +21,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: {{ include "doublure.fullname" . }}
+                name: {{ include "badil.fullname" . }}
                 port:
                   name: http
 {{- end }}

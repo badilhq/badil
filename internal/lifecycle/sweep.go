@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/doublurehq/doublure/internal/gitops"
-	"github.com/doublurehq/doublure/internal/preview"
+	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/preview"
 )
 
 // Sweep rules that delete a preview, the rule label of Recorder.SweepDeleted.

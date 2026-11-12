@@ -11,8 +11,8 @@ import (
 	gh "github.com/google/go-github/v71/github"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"github.com/doublurehq/doublure/internal/gitops"
-	"github.com/doublurehq/doublure/internal/metrics"
+	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/metrics"
 )
 
 const (
@@ -413,11 +413,11 @@ func TestReconcile_RecordsMetrics(t *testing.T) {
 	deliver(t, s, labelEvent("labeled", "preview", "preview"))
 
 	expected := `
-# HELP doublure_reconciles_total Pull request reconciles, by outcome.
-# TYPE doublure_reconciles_total counter
-doublure_reconciles_total{outcome="deployed"} 1
+# HELP badil_reconciles_total Pull request reconciles, by outcome.
+# TYPE badil_reconciles_total counter
+badil_reconciles_total{outcome="deployed"} 1
 `
-	err := testutil.GatherAndCompare(m.Gatherer(), strings.NewReader(expected), "doublure_reconciles_total")
+	err := testutil.GatherAndCompare(m.Gatherer(), strings.NewReader(expected), "badil_reconciles_total")
 	if err != nil {
 		t.Error(err)
 	}

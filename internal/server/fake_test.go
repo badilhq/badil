@@ -3,8 +3,8 @@ package server
 import (
 	"context"
 
-	"github.com/doublurehq/doublure/internal/gitops"
-	"github.com/doublurehq/doublure/internal/preview"
+	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/preview"
 )
 
 // fakeGitops captures calls and returns canned responses. Each field controls

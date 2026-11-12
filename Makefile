@@ -1,5 +1,5 @@
-BINARY := doublure
-CMD := ./cmd/doublure
+BINARY := badil
+CMD := ./cmd/badil
 
 .PHONY: build test lint docker-build dev-bootstrap dev-verify dev-serve dev-cleanup
 
@@ -16,15 +16,15 @@ docker-build:
 	docker build -t $(BINARY):latest .
 
 # Creates a GitHub App via the manifest flow and writes .env + PEM in this
-# directory. The webhook goes to DOUBLURE_WEBHOOK_URL (doublure's public base
+# directory. The webhook goes to BADIL_WEBHOOK_URL (badil's public base
 # URL; /webhooks/github is appended) when set, otherwise to the ngrok tunnel,
 # which then must be running in another terminal (`ngrok http 8080`).
 # Pass GITOPS_REPO=<owner>/<repo> to prefill it in .env, otherwise edit .env
 # after the fact:
 #   GITOPS_REPO=myorg/my-gitops make dev-bootstrap
-#   DOUBLURE_WEBHOOK_URL=https://doublure.example.com make dev-bootstrap
+#   BADIL_WEBHOOK_URL=https://badil.example.com make dev-bootstrap
 dev-bootstrap:
-	go run $(CMD) bootstrap-app --gitops-repo "$(GITOPS_REPO)" --webhook-url "$(DOUBLURE_WEBHOOK_URL)"
+	go run $(CMD) bootstrap-app --gitops-repo "$(GITOPS_REPO)" --webhook-url "$(BADIL_WEBHOOK_URL)"
 
 # Sanity-check the App credentials currently in .env / dev.private-key.pem.
 dev-verify:

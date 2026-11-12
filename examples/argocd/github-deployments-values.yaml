@@ -1,4 +1,4 @@
-# Argo CD notifications posting GitHub Deployments for doublure previews:
+# Argo CD notifications posting GitHub Deployments for badil previews:
 # values for the argo-helm argo-cd chart.
 #
 # When a pinned preview service's Application is synced and Healthy at a
@@ -21,7 +21,7 @@
 #     --set-file notifications.secret.items.github-privateKey=<path to the App's .pem>
 #
 # Argo CD installed without Helm: put the keys service.github,
-# template.doublure-preview-deployed, template.doublure-preview-deleted,
+# template.badil-preview-deployed, template.badil-preview-deleted,
 # trigger.on-preview-deployed, trigger.on-preview-deleted and subscriptions
 # (with both entries below) under `data` of the argocd-notifications-cm
 # ConfigMap, and the github-appID, github-installationID and github-privateKey
@@ -34,7 +34,7 @@ notifications:
       privateKey: $github-privateKey
 
   templates:
-    template.doublure-preview-deployed: |
+    template.badil-preview-deployed: |
       message: "{{ index .app.metadata.labels \"app.kubernetes.io/name\" }} healthy in preview {{ index .app.metadata.labels \"app.kubernetes.io/instance\" }}"
       github:
         repoURLPath: "{{.app.spec.source.repoURL}}"
@@ -43,11 +43,11 @@ notifications:
           state: success
           environment: "preview-{{ index .app.metadata.labels \"app.kubernetes.io/instance\" }}-{{ index .app.metadata.labels \"app.kubernetes.io/name\" }}"
           # Use http:// when preview.tls: false.
-          environmentURL: "{{ with index .app.metadata.annotations \"preview.doublure.dev/host\" }}https://{{ . }}/{{ end }}"
+          environmentURL: "{{ with index .app.metadata.annotations \"preview.badil.dev/host\" }}https://{{ . }}/{{ end }}"
           requiredContexts: []
           autoMerge: false
           transientEnvironment: false
-    template.doublure-preview-deleted: |
+    template.badil-preview-deleted: |
       message: "preview {{ index .app.metadata.labels \"app.kubernetes.io/instance\" }} removed"
       github:
         repoURLPath: "{{.app.spec.source.repoURL}}"
@@ -56,7 +56,7 @@ notifications:
           state: inactive
           environment: "preview-{{ index .app.metadata.labels \"app.kubernetes.io/instance\" }}-{{ index .app.metadata.labels \"app.kubernetes.io/name\" }}"
           # Use http:// when preview.tls: false.
-          environmentURL: "{{ with index .app.metadata.annotations \"preview.doublure.dev/host\" }}https://{{ . }}/{{ end }}"
+          environmentURL: "{{ with index .app.metadata.annotations \"preview.badil.dev/host\" }}https://{{ . }}/{{ end }}"
           requiredContexts: []
           autoMerge: false
           transientEnvironment: false
@@ -64,20 +64,20 @@ notifications:
   triggers:
     # Fires once per revision of a pinned service's Application.
     trigger.on-preview-deployed: |
-      - when: app.status?.operationState?.phase in ['Succeeded'] and app.status?.health?.status == 'Healthy' and app.metadata.annotations['preview.doublure.dev/vcs.ref.revision'] != ''
+      - when: app.status?.operationState?.phase in ['Succeeded'] and app.status?.health?.status == 'Healthy' and app.metadata.annotations['preview.badil.dev/vcs.ref.revision'] != ''
         oncePer: app.status?.operationState?.syncResult?.revision
-        send: [doublure-preview-deployed]
+        send: [badil-preview-deployed]
     # Best effort: fires only if the controller sees the deletion before the
     # Application's finalizer completes.
     trigger.on-preview-deleted: |
-      - when: app.metadata.deletionTimestamp != nil and app.metadata.annotations['preview.doublure.dev/vcs.ref.revision'] != ''
+      - when: app.metadata.deletionTimestamp != nil and app.metadata.annotations['preview.badil.dev/vcs.ref.revision'] != ''
         oncePer: app.metadata.name
-        send: [doublure-preview-deleted]
+        send: [badil-preview-deleted]
 
   # Full list: repeats the spin-up subscription from notifications-values.yaml.
   subscriptions:
     - recipients:
-        - doublure
+        - badil
       triggers:
         - on-preview-healthy
       selector: app.kubernetes.io/part-of=preview-environments,app.kubernetes.io/managed-by=argocd

@@ -6,8 +6,8 @@ metadata:
 spec:
   description: Parent project for preview environment ApplicationSet
   sourceRepos:
-    - "https://github.com/doublurehq/demo-gitops.git"
-    - "oci://ghcr.io/doublurehq/charts/*"
+    - "https://github.com/badilhq/demo-gitops.git"
+    - "oci://ghcr.io/badilhq/charts/*"
   destinations:
     - namespace: argocd
       server: https://kubernetes.default.svc

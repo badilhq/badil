@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/doublurehq/doublure/internal/gitops"
-	"github.com/doublurehq/doublure/internal/preview"
+	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/preview"
 )
 
 // DeployAPI is the subset of gitops.Client used by DeployPR.

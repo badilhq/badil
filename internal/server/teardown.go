@@ -7,9 +7,9 @@ import (
 
 	gh "github.com/google/go-github/v71/github"
 
-	"github.com/doublurehq/doublure/internal/gitops"
-	"github.com/doublurehq/doublure/internal/lifecycle"
-	"github.com/doublurehq/doublure/internal/preview"
+	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/lifecycle"
+	"github.com/badilhq/badil/internal/preview"
 )
 
 // reconcileTimeout caps the background work for a single reconcile, shared by

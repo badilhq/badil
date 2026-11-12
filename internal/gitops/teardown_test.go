@@ -12,7 +12,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/doublurehq/doublure/internal/gitops"
+	"github.com/badilhq/badil/internal/gitops"
 )
 
 const teardownPath = "/repos/acme/gitops/contents/previews/feature-x/values.yaml"

@@ -1,4 +1,4 @@
-module github.com/doublurehq/doublure
+module github.com/badilhq/badil
 
 go 1.26.0
 

@@ -10,9 +10,9 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"github.com/doublurehq/doublure/internal/github"
-	"github.com/doublurehq/doublure/internal/metrics"
-	"github.com/doublurehq/doublure/internal/server"
+	"github.com/badilhq/badil/internal/github"
+	"github.com/badilhq/badil/internal/metrics"
+	"github.com/badilhq/badil/internal/server"
 )
 
 // newMetricsServer is newWebhookServer recording into a fresh *Metrics.
@@ -50,27 +50,27 @@ func TestWebhookMetrics(t *testing.T) {
 		{
 			name: "signed ping",
 			req:  signedRequest("ping", []byte(`{"zen":"x"}`)),
-			want: `doublure_webhook_deliveries_total{event="ping",status="200"}`,
+			want: `badil_webhook_deliveries_total{event="ping",status="200"}`,
 		},
 		{
 			name: "signed other event",
 			req:  signedRequest("discussion", []byte(`{"action":"created","installation":{"id":123}}`)),
-			want: `doublure_webhook_deliveries_total{event="other",status="200"}`,
+			want: `badil_webhook_deliveries_total{event="other",status="200"}`,
 		},
 		{
 			name: "signed unparsable",
 			req:  signedRequest("pull_request", []byte(`{not json`)),
-			want: `doublure_webhook_deliveries_total{event="pull_request",status="200"}`,
+			want: `badil_webhook_deliveries_total{event="pull_request",status="200"}`,
 		},
 		{
 			name: "signed foreign installation",
 			req:  signedRequest("installation", []byte(`{"action":"created","installation":{"id":999}}`)),
-			want: `doublure_webhook_deliveries_total{event="installation",status="403"}`,
+			want: `badil_webhook_deliveries_total{event="installation",status="403"}`,
 		},
 		{
 			name: "unsigned with an arbitrary event",
 			req:  unsigned("random-123"),
-			want: `doublure_webhook_deliveries_total{event="unverified",status="401"}`,
+			want: `badil_webhook_deliveries_total{event="unverified",status="401"}`,
 		},
 	}
 	for _, tc := range cases {
@@ -78,11 +78,11 @@ func TestWebhookMetrics(t *testing.T) {
 			srv, m := newMetricsServer(t)
 			srv.Handler().ServeHTTP(httptest.NewRecorder(), tc.req)
 
-			expected := "# HELP doublure_webhook_deliveries_total GitHub webhook deliveries, by verified event and HTTP status.\n" +
-				"# TYPE doublure_webhook_deliveries_total counter\n" +
+			expected := "# HELP badil_webhook_deliveries_total GitHub webhook deliveries, by verified event and HTTP status.\n" +
+				"# TYPE badil_webhook_deliveries_total counter\n" +
 				tc.want + " 1\n"
 			if err := testutil.GatherAndCompare(m.Gatherer(), strings.NewReader(expected),
-				"doublure_webhook_deliveries_total"); err != nil {
+				"badil_webhook_deliveries_total"); err != nil {
 				t.Error(err)
 			}
 		})

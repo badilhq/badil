@@ -12,7 +12,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/doublurehq/doublure/internal/preview"
+	"github.com/badilhq/badil/internal/preview"
 )
 
 // ServiceCatalog is the parsed services.yaml of the gitops repo.

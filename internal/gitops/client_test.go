@@ -16,8 +16,8 @@ import (
 
 	gh "github.com/google/go-github/v71/github"
 
-	"github.com/doublurehq/doublure/internal/gitops"
-	"github.com/doublurehq/doublure/internal/preview"
+	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/preview"
 )
 
 // newClient wires a go-github client to a httptest server. The trailing slash
@@ -438,20 +438,20 @@ func TestFanOutPRComments_UpdateAndCreate(t *testing.T) {
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/pulls/"):
 			_, _ = io.WriteString(w, `{"state":"open"}`)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/issues/42/comments"):
-			_, _ = io.WriteString(w, `[{"id": 999, "body": "<!-- doublure:preview -->\n old body"}]`)
+			_, _ = io.WriteString(w, `[{"id": 999, "body": "<!-- badil:preview -->\n old body"}]`)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/issues/7/comments"):
 			_, _ = io.WriteString(w, `[{"id": 111, "body": "unrelated"}]`)
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/issues/comments/999"):
 			sawEdit.Store(true)
 			body, _ := io.ReadAll(r.Body)
-			if !strings.Contains(string(body), "<!-- doublure:preview -->") {
+			if !strings.Contains(string(body), "<!-- badil:preview -->") {
 				t.Errorf("PATCH body missing marker: %s", body)
 			}
 			_, _ = io.WriteString(w, `{"id":999}`)
 		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/issues/7/comments"):
 			sawCreate.Store(true)
 			body, _ := io.ReadAll(r.Body)
-			if !strings.Contains(string(body), "<!-- doublure:preview -->") {
+			if !strings.Contains(string(body), "<!-- badil:preview -->") {
 				t.Errorf("POST body missing marker: %s", body)
 			}
 			w.WriteHeader(http.StatusCreated)

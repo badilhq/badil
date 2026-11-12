@@ -3,7 +3,7 @@ package preview_test
 import (
 	"testing"
 
-	"github.com/doublurehq/doublure/internal/preview"
+	"github.com/badilhq/badil/internal/preview"
 )
 
 func TestParsePRURL(t *testing.T) {

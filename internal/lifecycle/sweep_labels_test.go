@@ -7,8 +7,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/doublurehq/doublure/internal/lifecycle"
-	"github.com/doublurehq/doublure/internal/preview"
+	"github.com/badilhq/badil/internal/lifecycle"
+	"github.com/badilhq/badil/internal/preview"
 )
 
 // openPRAt is a sweep fake whose only preview, slug, is pinned by the open PR

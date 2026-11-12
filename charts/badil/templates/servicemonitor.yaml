@@ -2,16 +2,16 @@
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: {{ include "doublure.fullname" . }}
+  name: {{ include "badil.fullname" . }}
   labels:
-    {{- include "doublure.labels" . | nindent 4 }}
+    {{- include "badil.labels" . | nindent 4 }}
     {{- with .Values.metrics.serviceMonitor.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
   selector:
     matchLabels:
-      {{- include "doublure.selectorLabels" . | nindent 6 }}
+      {{- include "badil.selectorLabels" . | nindent 6 }}
   endpoints:
     - port: metrics
       path: /metrics
