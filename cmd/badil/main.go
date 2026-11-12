@@ -47,9 +47,17 @@ type sweepAPI struct {
 }
 
 func main() {
+	if err := rootCmd().Execute(); err != nil {
+		os.Exit(1)
+	}
+}
+
+// rootCmd builds the badil command and its subcommands.
+func rootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:          "badil",
 		Short:        "Preview environment manager",
+		Version:      buildVersion(),
 		SilenceUsage: true,
 	}
 
@@ -57,10 +65,8 @@ func main() {
 	root.AddCommand(cleanupCmd())
 	root.AddCommand(verifyAppCmd())
 	root.AddCommand(bootstrapAppCmd())
-
-	if err := root.Execute(); err != nil {
-		os.Exit(1)
-	}
+	root.AddCommand(versionCmd())
+	return root
 }
 
 func serveCmd() *cobra.Command {
