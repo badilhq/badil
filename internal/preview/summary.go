@@ -20,16 +20,25 @@ func deriveCommitURL(prURL, sha string) string {
 	return m[1] + "/commit/" + sha
 }
 
+// pinnedImageNote is the paragraph BuildSummary adds when at least one
+// service is pinned: badil pins the PR head SHA before CI has pushed that
+// commit's image, so the pod cannot start until the image is in the registry.
+const pinnedImageNote = "> ⏳ A pinned service starts once CI has pushed the image for its commit. " +
+	"Until then its link may not respond."
+
 // BuildSummary renders the markdown summary that badil posts back as a PR
 // comment. Each service line shows the pinned commit (with a link if
 // derivable) or a 🔄 badge naming the branch an unpinned entry tracks,
-// followed by a link to the entry's written host, if any. The trailing line
-// links to the gitops commit that recorded the change.
+// followed by a link to the entry's written host, if any. When at least one
+// service is pinned, a note follows the list saying a pinned service starts
+// once CI has pushed its image. The trailing line links to the gitops commit
+// that recorded the change.
 func BuildSummary(
 	slug string, values PreviewValues, urls URLConfig, branches map[string]string, commitMessage, commitURL string,
 ) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## 🚀 Preview: `%s`\n\n", slug)
+	pinned := false
 	for _, svc := range values.Services {
 		branch := cmp.Or(branches[svc.Name], "main")
 		sha := svc.CommitSha
@@ -38,6 +47,7 @@ func BuildSummary(
 			prURL, prNumber = svc.Metadata.PRURL, svc.Metadata.PRNumber
 		}
 		if sha != "" {
+			pinned = true
 			shaShort := sha
 			if len(shaShort) >= 8 {
 				shaShort = shaShort[:8]
@@ -59,6 +69,9 @@ func BuildSummary(
 			fmt.Fprintf(&b, " · [%s](%s)", text, url)
 		}
 		b.WriteString("\n")
+	}
+	if pinned {
+		b.WriteString("\n" + pinnedImageNote + "\n")
 	}
 	b.WriteString("\n---\n")
 	fmt.Fprintf(&b, "🔗 [%s](%s)", commitMessage, commitURL)

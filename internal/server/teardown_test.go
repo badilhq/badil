@@ -197,6 +197,8 @@ func TestTeardown_UpdateComments(t *testing.T) {
 		"- **backend-2** · 📌 [`bbbbbbbb`](https://github.com/acme/backend-2/commit/bbbbbbbbbb)" +
 		" · [PR #7](https://github.com/acme/backend-2/pull/7)\n" +
 		"- **front** · 🔄 `main`\n\n" +
+		"> ⏳ A pinned service starts once CI has pushed the image for its commit. " +
+		"Until then its link may not respond.\n\n" +
 		"---\n" +
 		"🔗 [" + msg + "](" + teardownCommitURL + ")"
 	if !fg.fanOutBodyCalled || fg.capturedSummary != wantSummary {
