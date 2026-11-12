@@ -14,8 +14,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/doublurehq/doublure/internal/github"
-	"github.com/doublurehq/doublure/internal/server"
+	"github.com/badilhq/badil/internal/github"
+	"github.com/badilhq/badil/internal/server"
 )
 
 const testWebhookSecret = "test-webhook-secret"

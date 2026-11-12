@@ -1,40 +1,40 @@
 {{/*
 Resource name.
 */}}
-{{- define "doublure.fullname" -}}
+{{- define "badil.fullname" -}}
 {{- .Release.Name -}}
 {{- end -}}
 
 {{/*
 Common labels.
 */}}
-{{- define "doublure.labels" -}}
-app.kubernetes.io/name: doublure
+{{- define "badil.labels" -}}
+app.kubernetes.io/name: badil
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
-helm.sh/chart: doublure-{{ .Chart.Version }}
+helm.sh/chart: badil-{{ .Chart.Version }}
 {{- end -}}
 
 {{/*
 Selector labels.
 */}}
-{{- define "doublure.selectorLabels" -}}
-app.kubernetes.io/name: doublure
+{{- define "badil.selectorLabels" -}}
+app.kubernetes.io/name: badil
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{/*
 Container image.
 */}}
-{{- define "doublure.image" -}}
+{{- define "badil.image" -}}
 {{- printf "%s:%s" .Values.image.repository (.Values.image.tag | default .Chart.AppVersion) -}}
 {{- end -}}
 
 {{/*
 Server environment.
 */}}
-{{- define "doublure.env" -}}
+{{- define "badil.env" -}}
 {{- $secret := required "existingSecret is required" .Values.existingSecret -}}
 - name: GITHUB_APP_ID
   value: {{ required "config.githubAppId is required" .Values.config.githubAppId | int64 | quote }}
@@ -54,7 +54,7 @@ Server environment.
     secretKeyRef:
       name: {{ $secret }}
       key: github-webhook-secret
-- name: DOUBLURE_DEPLOY_TOKEN
+- name: BADIL_DEPLOY_TOKEN
   valueFrom:
     secretKeyRef:
       name: {{ $secret }}
@@ -64,7 +64,7 @@ Server environment.
 {{/*
 Pod securityContext.
 */}}
-{{- define "doublure.podSecurityContext" -}}
+{{- define "badil.podSecurityContext" -}}
 runAsNonRoot: true
 runAsUser: 65532
 runAsGroup: 65532
@@ -75,7 +75,7 @@ seccompProfile:
 {{/*
 Container securityContext.
 */}}
-{{- define "doublure.containerSecurityContext" -}}
+{{- define "badil.containerSecurityContext" -}}
 allowPrivilegeEscalation: false
 readOnlyRootFilesystem: true
 capabilities:

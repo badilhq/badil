@@ -1,33 +1,33 @@
-# doublure
+# badil
 
 Per-pull-request preview environments for teams running Kubernetes and ArgoCD. Self-hosted, open source.
 
-Every branch gets its own isolated, full-stack environment: the services changed in the PR run at their PR version, every other service runs at its branch (default `main`). doublure writes the desired state to your gitops repo; your ArgoCD deploys it. doublure never touches your cluster directly.
+Every branch gets its own isolated, full-stack environment: the services changed in the PR run at their PR version, every other service runs at its branch (default `main`). badil writes the desired state to your gitops repo; your ArgoCD deploys it. badil never touches your cluster directly.
 
 ## Why
 
-When code is written at machine speed, the bottleneck is validating and integrating it, and a shared staging environment becomes a queue. doublure applies the practices from [AI Writes Code in Hours. It Still Takes Weeks to Ship.](https://medium.com/@aminebenseddik/ai-writes-code-in-hours-it-still-takes-weeks-to-ship-7fb07f87cc07):
+When code is written at machine speed, the bottleneck is validating and integrating it, and a shared staging environment becomes a queue. badil applies the practices from [AI Writes Code in Hours. It Still Takes Weeks to Ship.](https://medium.com/@aminebenseddik/ai-writes-code-in-hours-it-still-takes-weeks-to-ship-7fb07f87cc07):
 
 - One isolated preview per branch, or per `preview:<name>` label, across repos: PRs on the same branch, or with the same `preview:<name>` label, share one preview.
 - Changed services run at their PR commit, everything else at their branch (default `main`).
-- CI builds once; doublure only writes desired state. It never builds images and never touches the cluster.
+- CI builds once; badil only writes desired state. It never builds images and never touches the cluster.
 - Argo CD deploys from git.
 - Previews are torn down when their PR closes or the label is removed, and swept so they don't accumulate: the sweep also unpins open PRs whose label moved, conflicts or is gone.
 
 ## How it works
 
 1. CI in a service repo builds and pushes the image.
-2. Adding the `preview` label to the PR makes doublure write `previews/<slug>/values.yaml` (every catalog service, the PR's at its head SHA) and comment on the PR; a push to the labeled PR updates it. The slug is the PR's branch, slugified; a `preview:<name>` label picks the preview name instead.
+2. Adding the `preview` label to the PR makes badil write `previews/<slug>/values.yaml` (every catalog service, the PR's at its head SHA) and comment on the PR; a push to the labeled PR updates it. The slug is the PR's branch, slugified; a `preview:<name>` label picks the preview name instead.
 3. An ArgoCD ApplicationSet picks up `previews/*` and deploys one namespace per preview, one Application per service.
 4. Removing the label or closing the PR unpins its service, or deletes the file when no PR remains, and ArgoCD prunes the preview.
-5. `doublure cleanup` (in the server on an interval, or an hourly CronJob) sweeps every preview: it deletes previews with no pinned service, or with no deploy within `CLEANUP_TTL` when set, and tears down the pins of closed PRs that step 4 missed, and of open PRs whose label moved, conflicts or is gone. ArgoCD prunes what it removes.
+5. `badil cleanup` (in the server on an interval, or an hourly CronJob) sweeps every preview: it deletes previews with no pinned service, or with no deploy within `CLEANUP_TTL` when set, and tears down the pins of closed PRs that step 4 missed, and of open PRs whose label moved, conflicts or is gone. ArgoCD prunes what it removes.
 
 ### Sharing a preview across repos
 
 To test changes from several repos together, either:
 
 - use the same branch name in every repo, or
-- label every PR `preview:<name>` (for example `preview:pricing`), whatever its branch. Labels are per repo: create the `preview:<name>` label in each repo first; doublure never creates labels.
+- label every PR `preview:<name>` (for example `preview:pricing`), whatever its branch. Labels are per repo: create the `preview:<name>` label in each repo first; badil never creates labels.
 
 Each PR pins its own services in the preview `<name>` (slugified), and every other service runs at its branch (default `main`).
 
@@ -40,7 +40,7 @@ Manual trigger:
 
 ```
 POST /v1/deploy
-Authorization: Bearer $DOUBLURE_DEPLOY_TOKEN
+Authorization: Bearer $BADIL_DEPLOY_TOKEN
 
 { "service": "backend-1", "head_ref": "feature/pricing", "commit_sha": "<sha>",
   "pr_url": "...", "pr_number": "42", "pr_author": "...", "workflow_run_url": "..." }
@@ -59,10 +59,10 @@ Early development. Working: GitHub App auth, label-triggered previews, `/v1/depl
 ## Usage
 
 ```bash
-doublure serve           # API + webhook server
-doublure cleanup         # stale preview cleanup
-doublure bootstrap-app   # create a GitHub App (webhook from --webhook-url or an ngrok tunnel; see DEVELOPMENT.md)
-doublure verify-app      # check GitHub App credentials, list installations
+badil serve           # API + webhook server
+badil cleanup         # stale preview cleanup
+badil bootstrap-app   # create a GitHub App (webhook from --webhook-url or an ngrok tunnel; see DEVELOPMENT.md)
+badil verify-app      # check GitHub App credentials, list installations
 ```
 
 Configuration (env):
@@ -74,7 +74,7 @@ Configuration (env):
 | `GITHUB_WEBHOOK_SECRET` | yes | |
 | `GITHUB_INSTALLATION_ID` | yes | |
 | `GITOPS_REPO` | yes | `owner/repo` |
-| `DOUBLURE_DEPLOY_TOKEN` | yes | bearer token for manual `/v1/deploy` calls |
+| `BADIL_DEPLOY_TOKEN` | yes | bearer token for manual `/v1/deploy` calls |
 | `LISTEN_ADDR` | no | default `:8080` |
 | `METRICS_ADDR` | no | Prometheus `/metrics` listener, default `:9090`; set to empty to disable |
 | `ARGOCD_WEBHOOK_TOKEN` | no | bearer token of Argo CD notifications; enables `/webhooks/argocd` |
@@ -87,11 +87,11 @@ Local setup: [DEVELOPMENT.md](DEVELOPMENT.md).
 
 | Chart | Purpose |
 |---|---|
-| [`charts/doublure`](charts/doublure) | Installs the doublure server; the cleanup CronJob is disabled by default |
+| [`charts/badil`](charts/badil) | Installs the badil server; the cleanup CronJob is disabled by default |
 | [`charts/preview-env`](charts/preview-env) | One preview: AppProject, Namespace, one ArgoCD Application per service |
 | [`charts/app`](charts/app) | Generic service chart; service charts wrap it as a dependency aliased `app` |
 
-Install: [docs/INSTALL.md](docs/INSTALL.md); ArgoCD wiring: [examples/argocd](examples/argocd/README.md). Charts are published to `oci://ghcr.io/doublurehq/charts`; see [CONTRIBUTING.md](CONTRIBUTING.md#releases) for how versions are set.
+Install: [docs/INSTALL.md](docs/INSTALL.md); ArgoCD wiring: [examples/argocd](examples/argocd/README.md). Charts are published to `oci://ghcr.io/badilhq/charts`; see [CONTRIBUTING.md](CONTRIBUTING.md#releases) for how versions are set.
 
 ## Docs
 

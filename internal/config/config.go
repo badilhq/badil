@@ -52,7 +52,7 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
-	deployToken, err := requireEnv("DOUBLURE_DEPLOY_TOKEN")
+	deployToken, err := requireEnv("BADIL_DEPLOY_TOKEN")
 	if err != nil {
 		return nil, err
 	}

@@ -15,13 +15,13 @@ import (
 	gh "github.com/google/go-github/v71/github"
 	"gopkg.in/yaml.v3"
 
-	"github.com/doublurehq/doublure/internal/metrics"
-	"github.com/doublurehq/doublure/internal/preview"
+	"github.com/badilhq/badil/internal/metrics"
+	"github.com/badilhq/badil/internal/preview"
 )
 
 // PRCommentMarker is the HTML comment used as a sentinel for find-or-create
 // semantics on PR comments.
-const PRCommentMarker = "<!-- doublure:preview -->"
+const PRCommentMarker = "<!-- badil:preview -->"
 
 // MaxWriteRetries is the cap on 409-conflict retries for WritePreviewWithRetry.
 const MaxWriteRetries = 3
@@ -518,7 +518,7 @@ func (c *Client) FanOutPRComments(ctx context.Context, vals preview.PreviewValue
 	return errors.Join(errs...)
 }
 
-// UpsertPRComment posts body as doublure's comment on owner/repo#prNumber,
+// UpsertPRComment posts body as badil's comment on owner/repo#prNumber,
 // prefixed with PRCommentMarker: the existing marked comment is updated, or a
 // new one is created.
 func (c *Client) UpsertPRComment(ctx context.Context, owner, repo string, prNumber int, body string) error {

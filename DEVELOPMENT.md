@@ -1,11 +1,11 @@
 # Development
 
-Local setup for doublure: ngrok tunnel (or a public URL), GitHub App, env, smoke test.
+Local setup for badil: ngrok tunnel (or a public URL), GitHub App, env, smoke test.
 
 ## Prerequisites
 
 - Go 1.25+
-- `ngrok` (unless doublure has a public URL you pass as `DOUBLURE_WEBHOOK_URL`)
+- `ngrok` (unless badil has a public URL you pass as `BADIL_WEBHOOK_URL`)
 - `gh` CLI, authenticated (`gh auth status`)
 - GitHub account with admin access to the gitops repo
 
@@ -32,7 +32,7 @@ That's the whole loop. The sections below explain each step in case something go
 
 ## What `make dev-bootstrap` does
 
-1. Uses `--webhook-url` (`DOUBLURE_WEBHOOK_URL`) when set; otherwise reads the public HTTPS URL of your ngrok tunnel from the local ngrok inspector (`http://127.0.0.1:4040/api/tunnels`). `/webhooks/github` is appended.
+1. Uses `--webhook-url` (`BADIL_WEBHOOK_URL`) when set; otherwise reads the public HTTPS URL of your ngrok tunnel from the local ngrok inspector (`http://127.0.0.1:4040/api/tunnels`). `/webhooks/github` is appended.
 2. Generates a webhook secret and a deploy token locally.
 3. Starts a temp HTTP listener on an ephemeral port and opens your browser to a page that POSTs a GitHub App manifest to `github.com/settings/apps/new`.
 4. After you click **Create GitHub App**, GitHub redirects back to the listener with a one-time code.
@@ -46,12 +46,12 @@ Flags worth knowing:
 
 | Flag | Default | Purpose |
 |---|---|---|
-| `--name` | `doublure-dev-<6 random hex chars>` | App name (must be globally unique on GitHub) |
+| `--name` | `badil-dev-<6 random hex chars>` | App name (must be globally unique on GitHub) |
 | `--owner` | (your personal account) | Org login if the App should live in an org |
 | `--gitops-repo` | (empty) | Pre-fills `GITOPS_REPO` in `.env` |
 | `--env-file` | `.env` | Where to write env vars |
 | `--pem-file` | `dev.private-key.pem` | Where to write the private key |
-| `--webhook-url` | (the ngrok tunnel) | Public base URL of doublure; `/webhooks/github` is appended |
+| `--webhook-url` | (the ngrok tunnel) | Public base URL of badil; `/webhooks/github` is appended |
 
 The `Makefile` target forwards `GITOPS_REPO` if set, otherwise the `.env` is written with `GITOPS_REPO=` and a comment reminding you to fill it in:
 
@@ -68,7 +68,7 @@ source .env
 ORG=$(gh api /user --jq .login)
 
 curl -s -X POST http://localhost:8080/v1/deploy \
-  -H "Authorization: Bearer $DOUBLURE_DEPLOY_TOKEN" \
+  -H "Authorization: Bearer $BADIL_DEPLOY_TOKEN" \
   -H "Content-Type: application/json" \
   -d @- <<EOF | jq
 {
@@ -97,7 +97,7 @@ Open the gitops repo on GitHub to confirm the commit landed on `main`.
 
 ## Verify webhook plumbing
 
-GitHub App settings → **Advanced** → **Recent Deliveries** → pick any → **Redeliver**. The server answers 200 and logs one line per event type (`webhook ping`, `webhook installation`, `webhook installation_repositories`, `webhook pull_request`); other event types log `unhandled webhook event` (or `webhook parse failed` if go-github doesn't know the type). A 401 means the webhook secret in `.env` doesn't match what GitHub has — fix on either side. A 403 means the delivery's installation is not `GITHUB_INSTALLATION_ID`: the `webhook installation rejected` log shows the received `installation_id`; compare it with `doublure verify-app`.
+GitHub App settings → **Advanced** → **Recent Deliveries** → pick any → **Redeliver**. The server answers 200 and logs one line per event type (`webhook ping`, `webhook installation`, `webhook installation_repositories`, `webhook pull_request`); other event types log `unhandled webhook event` (or `webhook parse failed` if go-github doesn't know the type). A 401 means the webhook secret in `.env` doesn't match what GitHub has — fix on either side. A 403 means the delivery's installation is not `GITHUB_INSTALLATION_ID`: the `webhook installation rejected` log shows the received `installation_id`; compare it with `badil verify-app`.
 
 To exercise the handler without GitHub, sign the body yourself. The HMAC covers the exact body bytes, so use `printf '%s'` (no trailing newline), never `echo`:
 
@@ -122,16 +122,16 @@ A signed-but-unparseable delivery is authentic and there is nothing to re-queue,
 | `no https tunnel found in ngrok` | ngrok is running but on a non-HTTPS protocol | `ngrok http 8080` (not tcp/tls) |
 | Deliveries return 404 on `POST /` (Recent Deliveries, or `http request … path=/ status=404` in the logs) | The App's webhook URL lacks `/webhooks/github` | In the App settings, set **Webhook URL** to `<base>/webhooks/github` |
 | `manifest exchange returned empty credentials` | The browser callback fired without a valid code | Retry `make dev-bootstrap`; check the GitHub tab for an error |
-| `doublure verify-app` returns `401 A JSON web token could not be decoded` | `GITHUB_APP_ID` and `dev.private-key.pem` don't match | Re-run `make dev-bootstrap`, or regenerate the private key from the App settings page and replace `dev.private-key.pem` |
-| `doublure verify-app` shows `Installations (0)` | App created but not installed anywhere | Open the App settings, click **Install App**, pick repos |
-| `doublure serve` fails with `DOUBLURE_DEPLOY_TOKEN is required` | `.env` not sourced | `source .env` first, or use `make dev-serve` which sources for you |
+| `badil verify-app` returns `401 A JSON web token could not be decoded` | `GITHUB_APP_ID` and `dev.private-key.pem` don't match | Re-run `make dev-bootstrap`, or regenerate the private key from the App settings page and replace `dev.private-key.pem` |
+| `badil verify-app` shows `Installations (0)` | App created but not installed anywhere | Open the App settings, click **Install App**, pick repos |
+| `badil serve` fails with `BADIL_DEPLOY_TOKEN is required` | `.env` not sourced | `source .env` first, or use `make dev-serve` which sources for you |
 
 ## Appendix B — manual App creation (manifest-flow fallback)
 
 If `make dev-bootstrap` doesn't work in your environment, create the App by hand:
 
 1. https://github.com/settings/apps/new — fill in:
-   - **GitHub App name**: `doublure-dev-<your-handle>` (globally unique)
+   - **GitHub App name**: `badil-dev-<your-handle>` (globally unique)
    - **Homepage URL**: `http://localhost:8080`
    - **Webhook URL**: `<your-public-base-url>/webhooks/github`
    - **Webhook secret**: `openssl rand -hex 32` — save the value
@@ -150,7 +150,7 @@ If `make dev-bootstrap` doesn't work in your environment, create the App by hand
    export GITHUB_WEBHOOK_SECRET=<from step 1>
    export GITHUB_INSTALLATION_ID=<from the install URL>
    export GITOPS_REPO=<your-org>/<your-gitops-repo>
-   export DOUBLURE_DEPLOY_TOKEN=$(openssl rand -hex 32)
+   export BADIL_DEPLOY_TOKEN=$(openssl rand -hex 32)
    export LISTEN_ADDR=:8080
    EOF
    chmod 600 .env

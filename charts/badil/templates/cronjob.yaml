@@ -2,9 +2,9 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: {{ include "doublure.fullname" . }}-cleanup
+  name: {{ include "badil.fullname" . }}-cleanup
   labels:
-    {{- include "doublure.labels" . | nindent 4 }}
+    {{- include "badil.labels" . | nindent 4 }}
 spec:
   schedule: {{ .Values.cleanup.schedule | quote }}
   concurrencyPolicy: Forbid
@@ -20,20 +20,20 @@ spec:
             app.kubernetes.io/component: cleanup
         spec:
           restartPolicy: Never
-          serviceAccountName: {{ include "doublure.fullname" . }}
+          serviceAccountName: {{ include "badil.fullname" . }}
           {{- with .Values.imagePullSecrets }}
           imagePullSecrets:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           securityContext:
-            {{- include "doublure.podSecurityContext" . | nindent 12 }}
+            {{- include "badil.podSecurityContext" . | nindent 12 }}
           containers:
             - name: cleanup
-              image: {{ include "doublure.image" . }}
+              image: {{ include "badil.image" . }}
               imagePullPolicy: {{ .Values.image.pullPolicy }}
               args: ["cleanup"]
               env:
-                {{- include "doublure.env" . | nindent 16 }}
+                {{- include "badil.env" . | nindent 16 }}
                 {{- with .Values.cleanup.ttl }}
                 - name: CLEANUP_TTL
                   value: {{ . | quote }}
@@ -43,5 +43,5 @@ spec:
                 {{- toYaml . | nindent 16 }}
               {{- end }}
               securityContext:
-                {{- include "doublure.containerSecurityContext" . | nindent 16 }}
+                {{- include "badil.containerSecurityContext" . | nindent 16 }}
 {{- end }}

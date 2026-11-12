@@ -18,12 +18,12 @@ import (
 	gh "github.com/google/go-github/v71/github"
 	"github.com/spf13/cobra"
 
-	"github.com/doublurehq/doublure/internal/config"
-	"github.com/doublurehq/doublure/internal/github"
-	"github.com/doublurehq/doublure/internal/gitops"
-	"github.com/doublurehq/doublure/internal/lifecycle"
-	"github.com/doublurehq/doublure/internal/metrics"
-	"github.com/doublurehq/doublure/internal/server"
+	"github.com/badilhq/badil/internal/config"
+	"github.com/badilhq/badil/internal/github"
+	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/lifecycle"
+	"github.com/badilhq/badil/internal/metrics"
+	"github.com/badilhq/badil/internal/server"
 )
 
 // shutdownTimeout bounds graceful shutdown: draining in-flight requests and
@@ -48,7 +48,7 @@ type sweepAPI struct {
 
 func main() {
 	root := &cobra.Command{
-		Use:          "doublure",
+		Use:          "badil",
 		Short:        "Preview environment manager",
 		SilenceUsage: true,
 	}
@@ -375,7 +375,7 @@ func verifyAppCmd() *cobra.Command {
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "\nInstallations (%d):\n", len(insts))
 			if len(insts) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "  (none — install the App on an account before running `doublure serve`)")
+				fmt.Fprintln(cmd.OutOrStdout(), "  (none — install the App on an account before running `badil serve`)")
 			}
 			for _, ins := range insts {
 				fmt.Fprintf(cmd.OutOrStdout(), "  - id=%d  account=%s (%s)\n",

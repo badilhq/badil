@@ -10,7 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/doublurehq/doublure/internal/metrics"
+	"github.com/badilhq/badil/internal/metrics"
 )
 
 // WebhookValidator validates GitHub webhook signatures and parses payloads

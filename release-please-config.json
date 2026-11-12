@@ -5,12 +5,12 @@
   "packages": {
     ".": {
       "release-type": "go",
-      "package-name": "doublure",
+      "package-name": "badil",
       "initial-version": "0.1.0",
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
-        {"type": "yaml", "path": "charts/doublure/Chart.yaml", "jsonpath": "$.version"},
-        {"type": "yaml", "path": "charts/doublure/Chart.yaml", "jsonpath": "$.appVersion"}
+        {"type": "yaml", "path": "charts/badil/Chart.yaml", "jsonpath": "$.version"},
+        {"type": "yaml", "path": "charts/badil/Chart.yaml", "jsonpath": "$.appVersion"}
       ]
     }
   }

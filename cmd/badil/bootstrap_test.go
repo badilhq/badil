@@ -10,7 +10,7 @@ import (
 func TestDefaultAppName(t *testing.T) {
 	t.Parallel()
 
-	re := regexp.MustCompile(`^doublure-dev-[0-9a-f]{6}$`)
+	re := regexp.MustCompile(`^badil-dev-[0-9a-f]{6}$`)
 	name := defaultAppName()
 	if !re.MatchString(name) {
 		t.Fatalf("defaultAppName() = %q, want match %s", name, re)
@@ -42,8 +42,8 @@ func TestResolveWebhookURL(t *testing.T) {
 		},
 		{
 			name: "base path",
-			flag: "https://x.example.com/doublure",
-			want: "https://x.example.com/doublure/webhooks/github",
+			flag: "https://x.example.com/badil",
+			want: "https://x.example.com/badil/webhooks/github",
 		},
 		{
 			name: "encoded segment",

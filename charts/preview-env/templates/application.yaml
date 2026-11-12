@@ -28,16 +28,16 @@ metadata:
     app.kubernetes.io/managed-by: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "0"
-    preview.doublure.dev/vcs.ref.revision: {{ .commitSha | default "" | quote }}
-    preview.doublure.dev/host: {{ .host | default "" | quote }}
+    preview.badil.dev/vcs.ref.revision: {{ .commitSha | default "" | quote }}
+    preview.badil.dev/host: {{ .host | default "" | quote }}
     {{- if .metadata }}
-    preview.doublure.dev/pr-author: {{ index .metadata "pr-author" | quote }}
-    preview.doublure.dev/pr-url: {{ index .metadata "pr-url" | quote }}
-    preview.doublure.dev/pr-number: {{ index .metadata "pr-number" | quote }}
-    preview.doublure.dev/created-at: {{ index .metadata "created-at" | quote }}
-    preview.doublure.dev/updated-at: {{ index .metadata "updated-at" | quote }}
-    preview.doublure.dev/vcs.ref.name: {{ index .metadata "vcs.ref.name" | quote }}
-    preview.doublure.dev/cicd.pipeline.run.url: {{ index .metadata "cicd.pipeline.run.url" | quote }}
+    preview.badil.dev/pr-author: {{ index .metadata "pr-author" | quote }}
+    preview.badil.dev/pr-url: {{ index .metadata "pr-url" | quote }}
+    preview.badil.dev/pr-number: {{ index .metadata "pr-number" | quote }}
+    preview.badil.dev/created-at: {{ index .metadata "created-at" | quote }}
+    preview.badil.dev/updated-at: {{ index .metadata "updated-at" | quote }}
+    preview.badil.dev/vcs.ref.name: {{ index .metadata "vcs.ref.name" | quote }}
+    preview.badil.dev/cicd.pipeline.run.url: {{ index .metadata "cicd.pipeline.run.url" | quote }}
     {{- end }}
   finalizers:
     - resources-finalizer.argocd.argoproj.io

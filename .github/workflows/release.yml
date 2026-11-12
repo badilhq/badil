@@ -48,7 +48,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/doublurehq/doublure
+          images: ghcr.io/badilhq/badil
           flavor: latest=true
           tags: |
             type=semver,pattern={{version}},value=${{ needs.release-please.outputs.tag_name }}
@@ -91,11 +91,11 @@ jobs:
           for c in charts/*/; do
             name=$(helm show chart "$c" | awk '/^name:/ {print $2}')
             version=$(helm show chart "$c" | awk '/^version:/ {print $2}')
-            if [ "$name" = doublure ] && [ "$RELEASE_CREATED" != true ]; then
-              echo "doublure chart is published only with a release"
+            if [ "$name" = badil ] && [ "$RELEASE_CREATED" != true ]; then
+              echo "badil chart is published only with a release"
               continue
             fi
-            if out=$(helm show chart "oci://ghcr.io/doublurehq/charts/$name" --version "$version" 2>&1); then
+            if out=$(helm show chart "oci://ghcr.io/badilhq/charts/$name" --version "$version" 2>&1); then
               echo "$name $version already published"
               continue
             fi
@@ -107,7 +107,7 @@ jobs:
             # ghcr.io can briefly answer "not found" when helm tags a manifest it
             # just accepted; pushing the same archive again only applies the tag.
             for attempt in 1 2 3; do
-              if helm push "$RUNNER_TEMP/charts/$name-$version.tgz" oci://ghcr.io/doublurehq/charts; then
+              if helm push "$RUNNER_TEMP/charts/$name-$version.tgz" oci://ghcr.io/badilhq/charts; then
                 continue 2
               fi
               echo "helm push $name $version failed (attempt $attempt/3)"

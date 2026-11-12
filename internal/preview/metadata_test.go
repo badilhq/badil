@@ -8,11 +8,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/doublurehq/doublure/internal/preview"
+	"github.com/badilhq/badil/internal/preview"
 )
 
 // singleQuotedValues is a values file as written before metadata moved to
-// yaml.v3's own quoting. Existing gitops files keep this form until doublure
+// yaml.v3's own quoting. Existing gitops files keep this form until badil
 // next writes them, so it must still decode.
 const singleQuotedValues = `services:
   - name: backend-1

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/doublurehq/doublure/internal/preview"
+	"github.com/badilhq/badil/internal/preview"
 )
 
 func TestSlugify(t *testing.T) {

@@ -1,8 +1,8 @@
 # Roadmap to v1
 
-v1 = anyone can install doublure on their own cluster and get the full loop: a preview per branch, deployed by Argo CD, torn down when it is no longer needed.
+v1 = anyone can install badil on their own cluster and get the full loop: a preview per branch, deployed by Argo CD, torn down when it is no longer needed.
 
-Shipped so far: [CHANGELOG.md](../CHANGELOG.md) and [GitHub releases](https://github.com/doublurehq/doublure/releases).
+Shipped so far: [CHANGELOG.md](../CHANGELOG.md) and [GitHub releases](https://github.com/badilhq/badil/releases).
 
 ## v1
 

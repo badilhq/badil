@@ -4,7 +4,7 @@ replicaCount: 1
 
 # Container image; an empty tag defaults to .Chart.AppVersion.
 image:
-  repository: ghcr.io/doublurehq/doublure
+  repository: ghcr.io/badilhq/badil
   tag: ""
   pullPolicy: IfNotPresent
 

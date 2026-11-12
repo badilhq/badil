@@ -10,9 +10,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/doublurehq/doublure/internal/gitops"
-	"github.com/doublurehq/doublure/internal/lifecycle"
-	"github.com/doublurehq/doublure/internal/preview"
+	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/lifecycle"
+	"github.com/badilhq/badil/internal/preview"
 )
 
 // deployTimeout caps the upstream work for a single deploy. Catalog + read +

@@ -12,8 +12,8 @@ import (
 
 	gh "github.com/google/go-github/v71/github"
 
-	"github.com/doublurehq/doublure/internal/gitops"
-	"github.com/doublurehq/doublure/internal/metrics"
+	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/metrics"
 )
 
 func TestClientMetrics_TimesRetryOperations(t *testing.T) {
@@ -61,7 +61,7 @@ func TestClientMetrics_TimesRetryOperations(t *testing.T) {
 	}
 	got := map[string]uint64{}
 	for _, mf := range families {
-		if mf.GetName() != "doublure_gitops_operation_duration_seconds" {
+		if mf.GetName() != "badil_gitops_operation_duration_seconds" {
 			continue
 		}
 		for _, metric := range mf.GetMetric() {

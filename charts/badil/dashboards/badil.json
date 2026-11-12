@@ -1,7 +1,7 @@
 {
   "id": null,
-  "uid": "doublure",
-  "title": "doublure",
+  "uid": "badil",
+  "title": "badil",
   "schemaVersion": 39,
   "refresh": "30s",
   "time": { "from": "now-24h", "to": "now" },
@@ -22,7 +22,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "doublure_previews"
+          "expr": "badil_previews"
         }
       ]
     },
@@ -37,7 +37,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "sum(increase(doublure_reconciles_total{outcome=\"deployed\"}[1h]))",
+          "expr": "sum(increase(badil_reconciles_total{outcome=\"deployed\"}[1h]))",
           "legendFormat": "deploys"
         }
       ]
@@ -53,7 +53,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "sum by (trigger) (increase(doublure_teardowns_total{result=~\"deleted|unpinned\"}[1h]))",
+          "expr": "sum by (trigger) (increase(badil_teardowns_total{result=~\"deleted|unpinned\"}[1h]))",
           "legendFormat": "{{trigger}}"
         }
       ]
@@ -62,7 +62,7 @@
       "id": 4,
       "type": "timeseries",
       "title": "Spin-up p50 / p90",
-      "description": "Time from doublure's gitops write to the service's Argo CD Application synced and Healthy, over the last hour. Needs the Argo CD notifications callback.",
+      "description": "Time from badil's gitops write to the service's Argo CD Application synced and Healthy, over the last hour. Needs the Argo CD notifications callback.",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
@@ -70,13 +70,13 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(doublure_preview_spinup_seconds_bucket[1h])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(badil_preview_spinup_seconds_bucket[1h])))",
           "legendFormat": "p50"
         },
         {
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "histogram_quantile(0.9, sum by (le) (rate(doublure_preview_spinup_seconds_bucket[1h])))",
+          "expr": "histogram_quantile(0.9, sum by (le) (rate(badil_preview_spinup_seconds_bucket[1h])))",
           "legendFormat": "p90"
         }
       ]
@@ -93,7 +93,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "histogram_quantile(0.9, sum by (le, catalog_service) (rate(doublure_preview_spinup_seconds_bucket[24h])))",
+          "expr": "histogram_quantile(0.9, sum by (le, catalog_service) (rate(badil_preview_spinup_seconds_bucket[24h])))",
           "legendFormat": "{{catalog_service}}"
         }
       ]
@@ -109,7 +109,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "sum(increase(doublure_sweep_previews_deleted_total[24h]))"
+          "expr": "sum(increase(badil_sweep_previews_deleted_total[24h]))"
         }
       ]
     },
@@ -124,7 +124,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "sum by (reason) (increase(doublure_reconcile_skips_total[24h]))",
+          "expr": "sum by (reason) (increase(badil_reconcile_skips_total[24h]))",
           "format": "table",
           "instant": true
         }
@@ -142,7 +142,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "sum by (status) (rate(doublure_webhook_deliveries_total[5m]))",
+          "expr": "sum by (status) (rate(badil_webhook_deliveries_total[5m]))",
           "legendFormat": "{{status}}"
         }
       ]
@@ -159,7 +159,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "histogram_quantile(0.9, sum by (le, op) (rate(doublure_gitops_operation_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.9, sum by (le, op) (rate(badil_gitops_operation_duration_seconds_bucket[5m])))",
           "legendFormat": "{{op}}"
         }
       ]
@@ -176,7 +176,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "doublure_sweep_last_success_timestamp_seconds * 1000"
+          "expr": "badil_sweep_last_success_timestamp_seconds * 1000"
         }
       ]
     }

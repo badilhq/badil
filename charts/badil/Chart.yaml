@@ -1,0 +1,6 @@
+apiVersion: v2
+name: badil
+description: badil preview-environment control plane
+version: 0.14.0
+appVersion: 0.14.0
+home: https://github.com/badilhq/badil

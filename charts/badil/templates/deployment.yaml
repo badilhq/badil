@@ -1,29 +1,29 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "doublure.fullname" . }}
+  name: {{ include "badil.fullname" . }}
   labels:
-    {{- include "doublure.labels" . | nindent 4 }}
+    {{- include "badil.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      {{- include "doublure.selectorLabels" . | nindent 6 }}
+      {{- include "badil.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "doublure.selectorLabels" . | nindent 8 }}
+        {{- include "badil.selectorLabels" . | nindent 8 }}
     spec:
-      serviceAccountName: {{ include "doublure.fullname" . }}
+      serviceAccountName: {{ include "badil.fullname" . }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext:
-        {{- include "doublure.podSecurityContext" . | nindent 8 }}
+        {{- include "badil.podSecurityContext" . | nindent 8 }}
       containers:
-        - name: doublure
-          image: {{ include "doublure.image" . }}
+        - name: badil
+          image: {{ include "badil.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args: ["serve"]
           ports:
@@ -36,7 +36,7 @@ spec:
               protocol: TCP
             {{- end }}
           env:
-            {{- include "doublure.env" . | nindent 12 }}
+            {{- include "badil.env" . | nindent 12 }}
             - name: ARGOCD_WEBHOOK_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -66,4 +66,4 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           securityContext:
-            {{- include "doublure.containerSecurityContext" . | nindent 12 }}
+            {{- include "badil.containerSecurityContext" . | nindent 12 }}

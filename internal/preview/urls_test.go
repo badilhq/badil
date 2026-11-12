@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/doublurehq/doublure/internal/preview"
+	"github.com/badilhq/badil/internal/preview"
 )
 
 const longSlug = "feature-very-long-branch-name-that-keeps-going-5bec34"

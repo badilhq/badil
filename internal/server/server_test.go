@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/doublurehq/doublure/internal/server"
-	"github.com/doublurehq/doublure/internal/server/mocks"
+	"github.com/badilhq/badil/internal/server"
+	"github.com/badilhq/badil/internal/server/mocks"
 )
 
 func TestHealthz(t *testing.T) {
