@@ -92,7 +92,7 @@ func NewServer(
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(accessLog)
-	r.Get("/healthz", s.handleHealthz)
+	r.Get(healthzPath, s.handleHealthz)
 	r.Post("/webhooks/github", s.handleWebhook)
 	if s.argoCDToken != "" {
 		r.With(requireBearer(s.argoCDToken)).Post("/webhooks/argocd", s.handleArgoCDEvent)

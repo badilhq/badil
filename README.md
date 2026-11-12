@@ -67,6 +67,7 @@ badil serve           # API + webhook server
 badil cleanup         # stale preview cleanup
 badil bootstrap-app   # create a GitHub App (webhook from --webhook-url or an ngrok tunnel; see DEVELOPMENT.md)
 badil verify-app      # check GitHub App credentials, list installations
+badil version         # print the version (also badil --version)
 ```
 
 Configuration (env):

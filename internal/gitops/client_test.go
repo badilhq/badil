@@ -15,14 +15,16 @@ import (
 	"testing"
 
 	gh "github.com/google/go-github/v71/github"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
 )
 
 // newClient wires a go-github client to a httptest server. The trailing slash
 // on BaseURL is required by go-github's URL resolution.
-func newClient(t *testing.T, srv *httptest.Server) *gitops.Client {
+func newClient(t *testing.T, srv *httptest.Server, opts ...gitops.Option) *gitops.Client {
 	t.Helper()
 	u, err := url.Parse(srv.URL + "/")
 	if err != nil {
@@ -31,7 +33,7 @@ func newClient(t *testing.T, srv *httptest.Server) *gitops.Client {
 	c := gh.NewClient(nil)
 	c.BaseURL = u
 	c.UploadURL = u
-	return gitops.NewClient(c, "acme", "gitops")
+	return gitops.NewClient(c, "acme", "gitops", opts...)
 }
 
 // encodeContent returns a Repository contents response body for a single file.
@@ -311,6 +313,7 @@ func TestWritePreviewWithRetry_ConflictThenSuccess(t *testing.T) {
 		"backend-1", "newsha", in,
 		"chore(preview): create slug preview",
 		"chore(preview): update backend-1 in slug",
+		false,
 	)
 	if err != nil {
 		t.Fatalf("WritePreviewWithRetry: %v", err)
@@ -397,6 +400,7 @@ func TestWritePreviewWithRetry_FreshCreateUsesCatalog(t *testing.T) {
 		"backend-1", "abc1234567890", sampleInputs(),
 		"chore(preview): create fresh-slug preview",
 		"chore(preview): update backend-1 in fresh-slug",
+		false,
 	)
 	if err != nil {
 		t.Fatalf("WritePreviewWithRetry: %v", err)
@@ -483,5 +487,205 @@ func TestFanOutPRComments_UpdateAndCreate(t *testing.T) {
 	}
 	if !sawCreate.Load() {
 		t.Error("expected POST for PR #7")
+	}
+}
+
+// pinnedFile is previews/slug/values.yaml as a deploy of sampleInputs with
+// hostURLs writes it, except updated-at, which is older. Its replacer
+// arguments are applied to it.
+func pinnedFile(replace ...string) string {
+	const file = `services:
+  - name: backend-1
+    commitSha: abc1234567890
+    host: backend-1-slug.127.0.0.1.nip.io
+    metadata:
+      pr-author: octocat
+      pr-url: https://github.com/acme/backend-1/pull/42
+      pr-number: "42"
+      created-at: "2026-05-26T09:00:00Z"
+      updated-at: "2026-05-26T09:00:00Z"
+      vcs.ref.name: feature/add-pricing
+      cicd.pipeline.run.url: https://github.com/acme/backend-1/actions/runs/1
+  - name: backend-2
+`
+	return strings.NewReplacer(replace...).Replace(file)
+}
+
+// writeServer serves files to successive GETs of previews/slug/values.yaml
+// (the last one repeats; blob-<n> is the n-th file's sha; an empty file or no
+// file is a 404) and answers PUTs with conflicts first, then success. It
+// counts the requests.
+type writeServer struct {
+	files     []string
+	conflicts int32
+	gets      atomic.Int32
+	puts      atomic.Int32
+}
+
+func (s *writeServer) start(t *testing.T, opts ...gitops.Option) *gitops.Client {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			n := int(s.gets.Add(1))
+			i := min(n, len(s.files)) - 1
+			if i < 0 || s.files[i] == "" {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = io.WriteString(w, `{"message":"Not Found"}`)
+				return
+			}
+			_, _ = io.WriteString(
+				w,
+				encodeContent("previews/slug/values.yaml", fmt.Sprintf("blob-%d", i+1), s.files[i]),
+			)
+		case http.MethodPut:
+			if s.puts.Add(1) <= s.conflicts {
+				w.WriteHeader(http.StatusConflict)
+				_, _ = io.WriteString(w, `{"message":"sha does not match"}`)
+				return
+			}
+			_, _ = io.WriteString(w, `{"commit":{"html_url":"https://github.com/x/y/commit/written"}}`)
+		default:
+			t.Errorf("unexpected method %s", r.Method)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return newClient(t, srv, opts...)
+}
+
+func TestWritePreviewWithRetry_SkipUnchanged(t *testing.T) {
+	tests := []struct {
+		name          string
+		files         []string
+		conflicts     int32
+		skipUnchanged bool
+		wantUnchanged bool
+		wantGets      int32
+		wantPuts      int32
+	}{
+		{
+			name:  "unchanged",
+			files: []string{pinnedFile()}, skipUnchanged: true, wantUnchanged: true, wantGets: 1,
+		},
+		{
+			name:  "unchanged without skipUnchanged",
+			files: []string{pinnedFile()}, wantGets: 1, wantPuts: 1,
+		},
+		{
+			name:  "new head sha",
+			files: []string{pinnedFile("abc1234567890", "0000000old")}, skipUnchanged: true, wantGets: 1, wantPuts: 1,
+		},
+		{
+			name:  "changed host",
+			files: []string{pinnedFile("    host: backend-1-slug.127.0.0.1.nip.io\n", "")}, skipUnchanged: true,
+			wantGets: 1, wantPuts: 1,
+		},
+		{
+			name:  "changed pr metadata",
+			files: []string{pinnedFile("pr-author: octocat", "pr-author: someone")}, skipUnchanged: true,
+			wantGets: 1, wantPuts: 1,
+		},
+		{
+			name:  "changed head ref",
+			files: []string{pinnedFile("vcs.ref.name: feature/add-pricing", "vcs.ref.name: old")}, skipUnchanged: true,
+			wantGets: 1, wantPuts: 1,
+		},
+		{
+			name:  "unchanged after a 409 re-fetch",
+			files: []string{pinnedFile("abc1234567890", "0000000old"), pinnedFile()}, conflicts: 1, skipUnchanged: true,
+			wantUnchanged: true, wantGets: 2, wantPuts: 1,
+		},
+		{
+			name: "changed after a 409 re-fetch",
+			files: []string{
+				pinnedFile("abc1234567890", "0000000old"),
+				pinnedFile("abc1234567890", "0000000other"),
+			},
+			conflicts: 1, skipUnchanged: true, wantGets: 2, wantPuts: 2,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &writeServer{files: tt.files, conflicts: tt.conflicts}
+			c := s.start(t)
+
+			result, err := c.WritePreviewWithRetry(
+				context.Background(), "slug", []string{"backend-1", "backend-2"}, hostURLs(),
+				"backend-1", "abc1234567890", sampleInputs(), "create", "update", tt.skipUnchanged,
+			)
+			if err != nil {
+				t.Fatalf("WritePreviewWithRetry: %v", err)
+			}
+			if gets, puts := s.gets.Load(), s.puts.Load(); gets != tt.wantGets || puts != tt.wantPuts {
+				t.Errorf("gets, puts = %d, %d; want %d, %d", gets, puts, tt.wantGets, tt.wantPuts)
+			}
+			assertSkipResult(t, result, tt.wantUnchanged)
+		})
+	}
+}
+
+// assertSkipResult checks result is an update written as "update", or, when
+// unchanged, the fetched file with no commit.
+func assertSkipResult(t *testing.T, result *gitops.WriteResult, unchanged bool) {
+	t.Helper()
+	if result.Unchanged != unchanged || result.Created {
+		t.Errorf("Unchanged, Created = %v, %v; want %v, false", result.Unchanged, result.Created, unchanged)
+	}
+	if !unchanged {
+		if result.CommitURL != "https://github.com/x/y/commit/written" || result.CommitMessage != "update" {
+			t.Errorf("CommitURL, CommitMessage = %q, %q", result.CommitURL, result.CommitMessage)
+		}
+		return
+	}
+	if result.CommitURL != "" || result.CommitMessage != "" {
+		t.Errorf("CommitURL, CommitMessage = %q, %q; want empty", result.CommitURL, result.CommitMessage)
+	}
+	if got := result.Values.Services[0].Metadata.UpdatedAt; got != "2026-05-26T09:00:00Z" {
+		t.Errorf("Values updated-at = %q, want the fetched file's", got)
+	}
+}
+
+// TestWritePreviewWithRetry_Created checks Created and that only a create
+// increments the previews gauge, from 1.
+func TestWritePreviewWithRetry_Created(t *testing.T) {
+	tests := []struct {
+		name      string
+		files     []string
+		conflicts int32
+		want      bool
+	}{
+		{name: "create", want: true},
+		{name: "update", files: []string{pinnedFile("abc1234567890", "0000000old")}},
+		{name: "create lost to a 409", files: []string{"", pinnedFile("abc1234567890", "0000000old")}, conflicts: 1},
+		{name: "unchanged", files: []string{pinnedFile()}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &writeServer{files: tt.files, conflicts: tt.conflicts}
+			m := metrics.New()
+			m.PreviewsListed(1)
+			c := s.start(t, gitops.WithMetrics(m))
+
+			result, err := c.WritePreviewWithRetry(
+				context.Background(), "slug", []string{"backend-1", "backend-2"}, hostURLs(),
+				"backend-1", "abc1234567890", sampleInputs(), "create", "update", tt.name == "unchanged",
+			)
+			if err != nil {
+				t.Fatalf("WritePreviewWithRetry: %v", err)
+			}
+			if result.Created != tt.want {
+				t.Errorf("Created = %v, want %v", result.Created, tt.want)
+			}
+			want := "1"
+			if tt.want {
+				want = "2"
+			}
+			expected := "# HELP badil_previews Previews in the gitops repo: listed at startup, " +
+				"counted on each create and delete by this server, and reset by each in-server cleanup sweep.\n" +
+				"# TYPE badil_previews gauge\nbadil_previews " + want + "\n"
+			if err := testutil.GatherAndCompare(m.Gatherer(), strings.NewReader(expected), "badil_previews"); err != nil {
+				t.Error(err)
+			}
+		})
 	}
 }

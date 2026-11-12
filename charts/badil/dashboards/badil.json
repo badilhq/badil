@@ -15,7 +15,7 @@
       "id": 1,
       "type": "stat",
       "title": "Live previews",
-      "description": "Previews in the gitops repo as of the last in-server sweep. Needs cleanup.interval: reads 0 until the first in-server sweep.",
+      "description": "Previews in the gitops repo: listed at startup, counted on each create and delete, and reset by each in-server sweep. Deletions by the cleanup CronJob show after the next restart or in-server sweep.",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "gridPos": { "x": 0, "y": 0, "w": 8, "h": 8 },
       "targets": [

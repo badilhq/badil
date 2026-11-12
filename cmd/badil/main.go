@@ -39,6 +39,9 @@ const readHeaderTimeout = 10 * time.Second
 // minCleanupInterval is the shortest CLEANUP_INTERVAL accepted.
 const minCleanupInterval = time.Minute
 
+// previewsCountTimeout bounds the startup listing of the previews.
+const previewsCountTimeout = 10 * time.Second
+
 // sweepAPI is the gitops client with the metrics recorder lifecycle.Sweep
 // expects. A nil *metrics.Metrics records nothing.
 type sweepAPI struct {
@@ -47,9 +50,17 @@ type sweepAPI struct {
 }
 
 func main() {
+	if err := rootCmd().Execute(); err != nil {
+		os.Exit(1)
+	}
+}
+
+// rootCmd builds the badil command and its subcommands.
+func rootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:          "badil",
 		Short:        "Preview environment manager",
+		Version:      buildVersion(),
 		SilenceUsage: true,
 	}
 
@@ -57,10 +68,8 @@ func main() {
 	root.AddCommand(cleanupCmd())
 	root.AddCommand(verifyAppCmd())
 	root.AddCommand(bootstrapAppCmd())
-
-	if err := root.Execute(); err != nil {
-		os.Exit(1)
-	}
+	root.AddCommand(versionCmd())
+	return root
 }
 
 func serveCmd() *cobra.Command {
@@ -104,6 +113,7 @@ func serveCmd() *cobra.Command {
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
+			countPreviews(ctx, gitopsClient, m)
 			serveInBackground(ctx, "server", httpSrv)
 			metricsSrv := startMetricsServer(ctx, cfg.MetricsAddr, m)
 			startSweepLoop(ctx, srv, sweepAPI{Client: gitopsClient, Metrics: m}, m, interval, ttl)
@@ -135,6 +145,30 @@ func startMetricsServer(ctx context.Context, addr string, m *metrics.Metrics) *h
 	}
 	serveInBackground(ctx, "metrics server", metricsSrv)
 	return metricsSrv
+}
+
+// previewLister lists the previews of the gitops repo.
+type previewLister interface {
+	ListPreviews(ctx context.Context) ([]string, error)
+}
+
+// countPreviews sets m's previews gauge from one listing of the gitops repo,
+// bounded by previewsCountTimeout. serve calls it before the server accepts
+// requests, so no create or delete races the listing. It lists nothing when m
+// is nil (metrics disabled). A failed or timed-out listing is logged and
+// leaves the gauge as it is.
+func countPreviews(ctx context.Context, api previewLister, m *metrics.Metrics) {
+	if m == nil {
+		return
+	}
+	listCtx, cancel := context.WithTimeout(ctx, previewsCountTimeout)
+	defer cancel()
+	slugs, err := api.ListPreviews(listCtx)
+	if err != nil {
+		slog.Default().WarnContext(ctx, "previews count failed", slog.String("err", err.Error()))
+		return
+	}
+	m.PreviewsListed(len(slugs))
 }
 
 // serveInBackground runs srv.ListenAndServe in the background, logging it as

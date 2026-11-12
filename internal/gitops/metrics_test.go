@@ -44,7 +44,7 @@ func TestClientMetrics_TimesRetryOperations(t *testing.T) {
 
 	ctx := context.Background()
 	if _, err := c.WritePreviewWithRetry(ctx, "fresh", []string{"backend-1"}, hostURLs(),
-		"backend-1", "abc", sampleInputs(), "create", "update"); err != nil {
+		"backend-1", "abc", sampleInputs(), "create", "update", false); err != nil {
 		t.Fatalf("WritePreviewWithRetry: %v", err)
 	}
 	if _, err := c.TeardownPreviewWithRetry(ctx, "broken", "acme", "backend-1", 42); err == nil {

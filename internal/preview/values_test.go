@@ -2,6 +2,7 @@ package preview_test
 
 import (
 	"bytes"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -126,6 +127,98 @@ func TestUpdatePreviewValues_FreshTimestampsWhenNoExistingMetadata(t *testing.T)
 	if svc.Metadata.CreatedAt != in2.Timestamp {
 		t.Errorf("created-at = %q, want fresh %q",
 			svc.Metadata.CreatedAt, in2.Timestamp)
+	}
+}
+
+func TestUpdatePreviewValues_DoesNotMutateInput(t *testing.T) {
+	catalog := []string{"backend-1", "backend-2"}
+	in := sampleInputs()
+	existing := preview.BuildPreviewValues(in.ServiceName, in.CommitSha, catalog, in)
+	oldMetadata := existing.Services[0].Metadata
+	snapshot := *oldMetadata
+
+	in2 := in
+	in2.CommitSha = "newsha000"
+	in2.Timestamp = "2026-05-26T11:00:00Z"
+	preview.UpdatePreviewValues(existing, in2.ServiceName, in2.CommitSha, in2)
+	in3 := in
+	in3.ServiceName = "extra-svc"
+	preview.UpdatePreviewValues(existing, in3.ServiceName, in3.CommitSha, in3)
+
+	if got := existing.Services[0].CommitSha; got != in.CommitSha {
+		t.Errorf("input CommitSha = %q, want %q", got, in.CommitSha)
+	}
+	if existing.Services[0].Metadata != oldMetadata || !reflect.DeepEqual(*oldMetadata, snapshot) {
+		t.Errorf("input metadata changed: %+v, want %+v", existing.Services[0].Metadata, snapshot)
+	}
+	if got := len(existing.Services); got != 2 {
+		t.Errorf("input has %d services, want 2", got)
+	}
+}
+
+func TestEqualExceptUpdatedAt(t *testing.T) {
+	in := sampleInputs()
+	base := preview.BuildPreviewValues(in.ServiceName, in.CommitSha, []string{"backend-1", "front"}, in)
+	base.Services[1] = preview.ServiceEntry{
+		Name: "front", CommitSha: "f00", Host: "front.example.com",
+		Metadata: &preview.Metadata{PRURL: "https://github.com/acme/front/pull/7", UpdatedAt: "2026-05-26T09:00:00Z"},
+	}
+	clone := func() preview.PreviewValues {
+		out := preview.PreviewValues{Services: slices.Clone(base.Services)}
+		for i := range out.Services {
+			if md := out.Services[i].Metadata; md != nil {
+				cp := *md
+				out.Services[i].Metadata = &cp
+			}
+		}
+		return out
+	}
+
+	tests := []struct {
+		name   string
+		change func(*preview.PreviewValues)
+		want   bool
+	}{
+		{name: "identical", change: func(*preview.PreviewValues) {}, want: true},
+		{
+			name:   "triggering updated-at",
+			change: func(v *preview.PreviewValues) { v.Services[0].Metadata.UpdatedAt = "2026-05-26T11:00:00Z" },
+			want:   true,
+		},
+		{
+			name:   "empty extra",
+			change: func(v *preview.PreviewValues) { v.Services[0].Metadata.Extra = map[string]string{} },
+			want:   true,
+		},
+		{
+			name:   "other service updated-at",
+			change: func(v *preview.PreviewValues) { v.Services[1].Metadata.UpdatedAt = "2026-05-26T11:00:00Z" },
+		},
+		{name: "commit sha", change: func(v *preview.PreviewValues) { v.Services[0].CommitSha = "new" }},
+		{name: "host", change: func(v *preview.PreviewValues) { v.Services[1].Host = "" }},
+		{name: "pr author", change: func(v *preview.PreviewValues) { v.Services[0].Metadata.PRAuthor = "x" }},
+		{name: "head ref", change: func(v *preview.PreviewValues) { v.Services[0].Metadata.VCSRefName = "x" }},
+		{name: "created-at", change: func(v *preview.PreviewValues) { v.Services[0].Metadata.CreatedAt = "x" }},
+		{
+			name:   "extra key",
+			change: func(v *preview.PreviewValues) { v.Services[0].Metadata.Extra = map[string]string{"k": "v"} },
+		},
+		{name: "metadata removed", change: func(v *preview.PreviewValues) { v.Services[0].Metadata = nil }},
+		{
+			name: "entry appended",
+			change: func(v *preview.PreviewValues) {
+				v.Services = append(v.Services, preview.ServiceEntry{Name: "extra"})
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			changed := clone()
+			tt.change(&changed)
+			if got := preview.EqualExceptUpdatedAt(base, changed, "backend-1"); got != tt.want {
+				t.Errorf("EqualExceptUpdatedAt = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

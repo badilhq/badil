@@ -97,11 +97,11 @@ A preview runs each service in one of two modes, set by `commitSha` in `previews
 - **Pinned** (`commitSha` set): the Application uses `targetRevision: <sha>` and sets the image tag parameter (default `app.image.tag`) to `<sha>`. It changes only when badil writes a new SHA.
 - **Branch-tracking** (no `commitSha`): the Application uses `targetRevision: <branch>` (default `main`) and sets the image tag parameter (default `app.image.tag`) to `$ARGOCD_APP_REVISION`, which Argo CD resolves to the commit it syncs. It follows new commits on that branch.
 
-A branch-tracking service can briefly sit in `ImagePullBackOff`: when Argo CD syncs a new commit on that branch before that commit's CI has pushed the image, the image tag does not exist yet. This is accepted because it resolves without intervention:
+A service can briefly sit in `ImagePullBackOff` because its image tag does not exist yet. A branch-tracking service hits it when Argo CD syncs a new commit on that branch before that commit's CI has pushed the image. A pinned service hits it because badil pins the PR head SHA as soon as the label or a push arrives, before CI has pushed that commit's image; the pod starts when the image is in the registry, and the PR comment says so. This is accepted because it resolves without intervention:
 
 - The kubelet keeps retrying the pull, with a back-off capped at 300 seconds, and the pod starts once the image is in the registry.
 - The Applications sync with `selfHeal: true`, and Argo CD polls Git every 3 minutes by default.
-- Only services that are not under review in the preview are affected.
+- Branch-tracking services are affected after a new commit on their branch; pinned services after the label or a push on their PR, until CI has pushed that commit's image.
 
 Alternatives considered, and why they were not chosen:
 
@@ -109,6 +109,7 @@ Alternatives considered, and why they were not chosen:
 - **Argo CD webhook from CI** after the image push, instead of polling: needs CI-to-cluster network access and an exposed Argo CD API, and does not help while Argo CD also polls.
 - **Argo CD Image Updater**: another controller with registry credentials and write-back config, built for tracking the latest tag rather than previews.
 - **Init container that waits for the image**: adds registry access and a wait to every service chart, and still delays startup.
+- **badil waits for CI checks or for the image in the registry before pinning**: needs an extra GitHub App permission (Checks) or registry credentials, delays the other services of the preview, which today start while CI builds, and gains no time (measured: CI 3m34s, pinned service Healthy at 216 s).
 
 References: [Helm build environment in Argo CD](https://argo-cd.readthedocs.io/en/stable/user-guide/helm/), [Argo CD tracking strategies](https://argo-cd.readthedocs.io/en/latest/user-guide/tracking_strategies/).
 
@@ -165,7 +166,7 @@ POST /webhooks/argocd       # only when ARGOCD_WEBHOOK_TOKEN is set (404 otherwi
   → 204, recorded or ignored (see Spin-up endpoint)
 ```
 
-Manual deploy flow (`/v1/deploy`): validate `service` against `services.yaml` → slugify `head_ref` → read or bootstrap `previews/<slug>/values.yaml` → write with SHA optimistic locking + 409 retry → PR comment fan-out (best-effort, failures returned as `warnings`).
+Manual deploy flow (`/v1/deploy`): validate `service` against `services.yaml` → slugify `head_ref` → read or bootstrap `previews/<slug>/values.yaml` → write with SHA optimistic locking + 409 retry → PR comment fan-out (best-effort, failures returned as `warnings`). It always writes, even when only `updated-at` changes, so a repeated deploy of the same commit refreshes the TTL clock.
 
 Label flow: CI only builds and pushes images; the `preview` label (`preview.label`) on a PR decides whether it has a preview, and in which one. badil answers `opened`, `reopened`, `synchronize`, `labeled`, `unlabeled` and `closed` deliveries 200 at once and reconciles the PR in the background:
 
@@ -174,7 +175,7 @@ Label flow: CI only builds and pushes images; the `preview` label (`preview.labe
 3. Otherwise badil re-reads the PR from GitHub and acts on its current state, labels and head SHA, never the payload's, so late or out-of-order deliveries, `closed` included, converge on the current truth: a `closed` delivery running after the PR was reopened and labeled deploys it. Fork PRs (head repo different from the base repo) are skipped: CI can't push a fork's image; a closed fork PR is still torn down.
 4. The PR's labels resolve its target preview (see Target preview below).
 5. The PR is torn down from every other preview it may still be pinned in (the cleanup set below), before anything is deployed.
-6. An open PR with a target deploys every catalog service of its repo, in catalog order, at the PR's head SHA, to the target slug, through the manual flow's write and comment fan-out, unless another PR holds one of its services there (see One PR per service below). A failed service is logged and the next one still deploys. The deploy fan-out is the last write to the PR's comment, so a PR that moved shows its new preview.
+6. An open PR with a target deploys every catalog service of its repo, in catalog order, at the PR's head SHA, to the target slug, through the manual flow's write and comment fan-out, unless another PR holds one of its services there (see One PR per service below). A failed service is logged and the next one still deploys. A service whose write would change nothing but its `updated-at` (same SHA, host and PR metadata, on the first read and after a 409 re-fetch) writes no commit and posts no comment, and logs `preview deploy unchanged`, unless step 5 removed the PR from another preview; when every service is unchanged, the reconcile is skipped with reason `already deployed`. A PR comment that failed to post, or that a failed teardown left stale, is therefore not repaired by a later label event at the same head SHA: the next push to the PR or a manual `/v1/deploy` repairs it. The deploy fan-out is the last write to the PR's comment, so a PR that moved shows its new preview.
 7. An open PR with conflicting named labels gets no preview. Its comment is replaced last by:
 
    ```
@@ -275,18 +276,18 @@ Every label has a closed set of values. Go runtime (`go_*`) and process (`proces
 | Metric | Type | Labels | |
 |---|---|---|---|
 | `badil_webhook_deliveries_total` | counter | `event`, `status` | Webhook deliveries. `event` is `ping`, `installation`, `installation_repositories`, `pull_request` or `other` once the signature is verified, `unverified` before. `status` is the HTTP status: `200`, `401` or `403`. |
-| `badil_reconciles_total` | counter | `outcome` | One per pull request reconcile: `failed` (catalog, PR or preview read error, or every service write failed), else `skipped`, else `deployed` (a service write succeeded), else `torn_down`. |
-| `badil_reconcile_skips_total` | counter | `reason` | Skipped reconciles by reason: `other label`, `not labeled`, `repo not in catalog`, `fork pr`, `service held by another pr`, `conflicting preview labels`. |
+| `badil_reconciles_total` | counter | `outcome` | One per pull request reconcile: `failed` (catalog, PR or preview read error, or no service write succeeded and at least one failed), else `skipped`, else `deployed` (a service write succeeded), else `torn_down`. |
+| `badil_reconcile_skips_total` | counter | `reason` | Skipped reconciles by reason: `other label`, `not labeled`, `repo not in catalog`, `fork pr`, `service held by another pr`, `conflicting preview labels`, `already deployed`. |
 | `badil_teardowns_total` | counter | `trigger`, `result` | Teardowns of a PR from a preview. `trigger` is `webhook` or `sweep`; `result` is `deleted`, `unpinned`, `noop` (nothing pinned) or `error`. |
 | `badil_gitops_operation_duration_seconds` | histogram | `op`, `result` | Duration of gitops `write` and `teardown` operations, 409 retries included; `result` is `ok` or `error`. |
 | `badil_sweep_runs_total` | counter | `result` | In-server sweep runs, `ok` or `error`. A run cancelled by shutdown is not counted. |
 | `badil_sweep_last_success_timestamp_seconds` | gauge | | Unix time of the last successful in-server sweep. |
 | `badil_sweep_previews_deleted_total` | counter | `rule` | Previews deleted by the sweep: `no_pin` (rule 1) or `ttl` (rule 2). |
-| `badil_previews` | gauge | | Previews listed by the last in-server sweep, minus those it deleted. |
+| `badil_previews` | gauge | | Previews in the gitops repo: listed at server startup, incremented when a deploy creates a preview, decremented when a teardown or sweep deletes one, and reset by each in-server sweep. |
 | `badil_preview_spinup_seconds` | histogram | `catalog_service` | Spin-up time of a pinned service, from badil's gitops write to its Application synced and Healthy (see [Spin-up endpoint](#spin-up-endpoint)). Buckets: 15, 30, 60, 120, 180, 300, 600, 900, 1800 s. `catalog_service` is a catalog service; it is not named `service` because that collides with the `service` target label Prometheus adds when scraping through a ServiceMonitor. |
 | `badil_argocd_events_total` | counter | `result` | Events accepted by `/webhooks/argocd`: `recorded` (a spin-up was observed) or `ignored`. 400 and 401 answers are not counted. |
 
-`badil_previews` and `badil_sweep_last_success_timestamp_seconds` are always exported and read 0 until the first in-server sweep: with the CronJob alone they stay at 0.
+`badil_sweep_last_success_timestamp_seconds` is always exported and reads 0 until the first in-server sweep: with the CronJob alone it stays at 0. `badil_previews` is set at server startup, from a listing taken before the server accepts requests and limited to 10 seconds; when that listing fails, the gauge stays as it is until the next in-server sweep or restart. Deletions made by the `badil cleanup` CronJob show only after the next server restart or in-server sweep.
 
 ### Spin-up endpoint
 
@@ -321,7 +322,7 @@ Limitations:
 
 ### Dashboard
 
-[`charts/badil/dashboards/badil.json`](../charts/badil/dashboards/badil.json) is a Grafana dashboard (uid `badil`) over these metrics: live previews, deploys and teardowns per hour, spin-up p50/p90 and p90 by service, zombies swept, reconcile skips by reason, webhook deliveries by status, gitops operation p90 and the last successful sweep. It picks its Prometheus data source through a `datasource` variable. With `dashboard.enabled`, the chart renders it as a ConfigMap labelled `dashboard.labels` (default `grafana_dashboard: "1"`), which the Grafana sidecar of kube-prometheus-stack loads; the JSON also imports on its own. Live previews and last successful sweep need `cleanup.interval`, and the spin-up panels need the Argo CD notifications callback.
+[`charts/badil/dashboards/badil.json`](../charts/badil/dashboards/badil.json) is a Grafana dashboard (uid `badil`) over these metrics: live previews, deploys and teardowns per hour, spin-up p50/p90 and p90 by service, zombies swept, reconcile skips by reason, webhook deliveries by status, gitops operation p90 and the last successful sweep. It picks its Prometheus data source through a `datasource` variable. With `dashboard.enabled`, the chart renders it as a ConfigMap labelled `dashboard.labels` (default `grafana_dashboard: "1"`), which the Grafana sidecar of kube-prometheus-stack loads; the JSON also imports on its own. Last successful sweep needs `cleanup.interval`, and the spin-up panels need the Argo CD notifications callback.
 
 ## Demo setup
 

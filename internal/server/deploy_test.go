@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -82,6 +83,43 @@ func TestDeploy_HappyPath(t *testing.T) {
 	}
 	if !fg.fanOutBodyCalled {
 		t.Error("FanOutPRComments was not called")
+	}
+}
+
+// TestDeploy_UnchangedCommitStillWrites deploys the same commit twice: a
+// manual deploy never asks to skip an unchanged write, so each one writes and
+// returns its gitops commit URL.
+func TestDeploy_UnchangedCommitStillWrites(t *testing.T) {
+	fg := &fakeGitops{
+		catalog: []string{"backend-1"},
+		writeResult: &gitops.WriteResult{
+			Values: preview.PreviewValues{
+				Services: []preview.ServiceEntry{{Name: "backend-1", CommitSha: "abc1234567890"}},
+			},
+			CommitURL:     "https://github.com/acme/gitops/commit/deadbeef",
+			CommitMessage: "chore(preview): update backend-1 in feature-add-pricing",
+		},
+	}
+	srv := newTestServer(t, fg)
+	for i := range 2 {
+		fg.fanOutBodyCalled = false
+		rec := postDeploy(t, srv, validBody(), "test-token")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("deploy %d: status = %d, body = %s", i, rec.Code, rec.Body.String())
+		}
+		var resp DeployResponse
+		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if resp.GitOpsCommitURL != "https://github.com/acme/gitops/commit/deadbeef" {
+			t.Errorf("deploy %d: GitOpsCommitURL = %q", i, resp.GitOpsCommitURL)
+		}
+		if !fg.fanOutBodyCalled {
+			t.Errorf("deploy %d: FanOutPRComments was not called", i)
+		}
+	}
+	if want := []bool{false, false}; !slices.Equal(fg.capturedSkipUnchanged, want) {
+		t.Errorf("skipUnchanged = %v, want %v", fg.capturedSkipUnchanged, want)
 	}
 }
 

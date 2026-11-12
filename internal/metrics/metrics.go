@@ -5,6 +5,7 @@ package metrics
 
 import (
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -16,7 +17,6 @@ const (
 	namespace = "badil"
 
 	outcomeSkipped = "skipped"
-	triggerSweep   = "sweep"
 	resultDeleted  = "deleted"
 	resultOK       = "ok"
 	resultError    = "error"
@@ -41,6 +41,11 @@ type Metrics struct {
 	previews          prometheus.Gauge
 	spinUp            *prometheus.HistogramVec
 	argoCDEvents      *prometheus.CounterVec
+
+	// previewsMu guards previewsN, the value of previews, which never goes
+	// below 0.
+	previewsMu sync.Mutex
+	previewsN  int
 }
 
 // New builds a registry holding the Go and process collectors and every
@@ -92,7 +97,8 @@ func New() *Metrics {
 		previews: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: namespace,
 			Name:      "previews",
-			Help:      "Previews in the gitops repo as of the last in-server cleanup sweep, 0 before the first one.",
+			Help: "Previews in the gitops repo: listed at startup, counted on each create and delete by this server, " +
+				"and reset by each in-server cleanup sweep.",
 		}),
 		spinUp: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -154,24 +160,39 @@ func (m *Metrics) Reconcile(outcome, reason string) {
 	}
 }
 
-// Teardown counts one teardown. A sweep teardown that deleted its preview
-// also decrements the previews gauge.
+// Teardown counts one teardown. A teardown that deleted its preview, whatever
+// its trigger, also decrements the previews gauge.
 func (m *Metrics) Teardown(trigger, result string) {
 	if m == nil {
 		return
 	}
 	m.teardowns.WithLabelValues(trigger, result).Inc()
-	if trigger == triggerSweep && result == resultDeleted {
-		m.previews.Dec()
+	if result == resultDeleted {
+		m.updatePreviews(func(n int) int { return n - 1 })
 	}
+}
+
+// PreviewsListed sets the previews gauge to the n previews listed in the
+// gitops repo.
+func (m *Metrics) PreviewsListed(n int) {
+	if m == nil {
+		return
+	}
+	m.updatePreviews(func(int) int { return n })
+}
+
+// PreviewCreated increments the previews gauge for a preview a deploy
+// created.
+func (m *Metrics) PreviewCreated() {
+	if m == nil {
+		return
+	}
+	m.updatePreviews(func(n int) int { return n + 1 })
 }
 
 // SweepListed sets the previews gauge to the n previews a sweep listed.
 func (m *Metrics) SweepListed(n int) {
-	if m == nil {
-		return
-	}
-	m.previews.Set(float64(n))
+	m.PreviewsListed(n)
 }
 
 // SweepDeleted counts one preview deleted by the sweep's rule and decrements
@@ -181,7 +202,16 @@ func (m *Metrics) SweepDeleted(rule string) {
 		return
 	}
 	m.sweepDeleted.WithLabelValues(rule).Inc()
-	m.previews.Dec()
+	m.updatePreviews(func(n int) int { return n - 1 })
+}
+
+// updatePreviews sets the previews gauge to f of its value, or to 0 when f
+// returns less.
+func (m *Metrics) updatePreviews(f func(int) int) {
+	m.previewsMu.Lock()
+	defer m.previewsMu.Unlock()
+	m.previewsN = max(f(m.previewsN), 0)
+	m.previews.Set(float64(m.previewsN))
 }
 
 // WebhookDelivery counts one webhook delivery answered with status.

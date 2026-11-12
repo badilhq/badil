@@ -44,6 +44,8 @@ type fakeGitops struct {
 	capturedSlug     string
 	fanOutBodyCalled bool
 	capturedSummary  string
+	// capturedSkipUnchanged holds the skipUnchanged of each write, in order.
+	capturedSkipUnchanged []bool
 
 	teardownSlug   string
 	teardownOwner  string
@@ -77,7 +79,9 @@ func (f *fakeGitops) WritePreviewWithRetry(
 	serviceName, _ string,
 	inputs preview.DeployInputs,
 	_, _ string,
+	skipUnchanged bool,
 ) (*gitops.WriteResult, error) {
+	f.capturedSkipUnchanged = append(f.capturedSkipUnchanged, skipUnchanged)
 	f.capturedSlug = slug
 	f.capturedCatalog = catalog
 	f.capturedURLs = urls

@@ -44,7 +44,7 @@ Choose the https host GitHub will call, e.g. `https://badil.example.com`, and cr
    go install github.com/badilhq/badil/cmd/badil@latest
    ```
 
-   `$(go env GOPATH)/bin` must be on `PATH`. Use `@vX.Y.Z` to match a pinned chart.
+   `$(go env GOPATH)/bin` must be on `PATH`. Use `@vX.Y.Z` to match a pinned chart. `badil version` prints the installed version.
 2. In an empty working directory, create the App. It writes `.env` and `dev.private-key.pem` there.
    - Run it on a machine with a desktop browser signed in to GitHub, not over SSH on a remote host: it listens on `127.0.0.1` and waits 5 minutes for the browser redirect. Otherwise create the App by hand (item 5).
    - The App is private, so it can only be installed on the account that owns it. When the repos are in an org, `--owner <org>` is required, and creating the App needs org owner (or App manager) rights.
@@ -220,7 +220,7 @@ With the Prometheus Operator (e.g. kube-prometheus-stack), add to the `helm inst
 - `dashboard.enabled=true` renders the Grafana dashboard as a ConfigMap labelled `grafana_dashboard: "1"`, which the Grafana sidecar of kube-prometheus-stack loads from any namespace. Change the label with `dashboard.labels` if your sidecar uses another one.
 - Without the sidecar, import [`charts/badil/dashboards/badil.json`](../charts/badil/dashboards/badil.json) as a Grafana dashboard and pick your Prometheus data source.
 
-Live previews and last successful sweep need `cleanup.interval`; the spin-up panels need [Spin-up time](#spin-up-time-optional). Details: ARCHITECTURE [Dashboard](ARCHITECTURE.md#dashboard).
+Last successful sweep needs `cleanup.interval`; the spin-up panels need [Spin-up time](#spin-up-time-optional). Details: ARCHITECTURE [Dashboard](ARCHITECTURE.md#dashboard).
 
 ## 7. Service repos
 

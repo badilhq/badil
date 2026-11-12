@@ -17,6 +17,10 @@ import (
 // actionUnlabeled is the webhook action of a removed label.
 const actionUnlabeled = "unlabeled"
 
+// alreadyDeployedReason is the skip reason of a reconcile whose every service
+// was already deployed as it would be written.
+const alreadyDeployedReason = "already deployed"
+
 // Reconcile outcomes, the outcome label of Recorder.Reconcile.
 const (
 	outcomeDeployed = "deployed"
@@ -64,11 +68,16 @@ type Event struct {
 // the PR can't be read, it falls back to tearing down the payload's head
 // branch and named labels as closed.
 //
+// A service already deployed as it would be written (only its updated-at
+// would change) is not written nor commented again, unless the cleanup removed
+// the PR from another preview. When every service is, the reconcile is
+// skipped as already deployed.
+//
 // Each call records exactly one outcome through the Recorder: failed when the
 // catalog, the PR or the target preview can't be read on a non-closed event,
-// or when every service write failed; otherwise skipped (with its reason)
-// when the reconcile was skipped; otherwise deployed when a service write
-// succeeded; otherwise torn_down.
+// or when no service write succeeded and at least one failed; otherwise
+// skipped (with its reason) when the reconcile was skipped; otherwise deployed
+// when a service write succeeded; otherwise torn_down.
 func ReconcilePR(ctx context.Context, api ReconcileAPI, ev Event) {
 	o, r := reconcile(ctx, api, ev)
 	api.Reconcile(o, r)
@@ -113,19 +122,21 @@ func reconcile(ctx context.Context, api ReconcileAPI, ev Event) (string, string)
 	if deploy && len(services) == 0 {
 		return reconcileSkipped(ctx, ev, "repo not in catalog")
 	}
-	cleanup(ctx, api, ev, pr, t, catalog.Label)
+	removed := cleanup(ctx, api, ev, pr, t, catalog.Label)
 	if o, r := refusedByHolder(ctx, api, ev, pr, t, services, catalog.Label); o != "" {
 		return o, r
 	}
-	outcome := outcomeTornDown
+	outcome, reason := outcomeTornDown, ""
 	if deploy {
-		outcome = deployServices(ctx, api, catalog, services, ev, pr, t.Slug)
+		// After a teardown in this reconcile, the deploy always writes and
+		// comments, so its summary stays the last write to the PR's comment.
+		outcome, reason = deployServices(ctx, api, catalog, services, ev, pr, t.Slug, !removed)
 	}
 	// A conflict leaves the PR without a target, so nothing was deployed.
 	if o, r := postLabelConflict(ctx, api, ev, pr, catalog.Label, t); o != "" {
 		return o, r
 	}
-	return outcome, ""
+	return outcome, reason
 }
 
 // logIgnored logs each named label of t whose name has no slug.
@@ -140,7 +151,8 @@ func logIgnored(ctx context.Context, ev Event, t preview.Resolution) {
 }
 
 // cleanup tears the PR down from every slug of cleanupSlugs, with
-// cleanupReason.
+// cleanupReason. It reports whether any teardown removed the PR from a
+// preview.
 func cleanup(
 	ctx context.Context,
 	api TeardownAPI,
@@ -148,13 +160,17 @@ func cleanup(
 	pr *gitops.PullRequest,
 	t preview.Resolution,
 	label string,
-) {
+) bool {
 	reason := cleanupReason(t, pr, ev, label)
+	removed := false
 	for _, slug := range cleanupSlugs(t, pr, ev, label) {
 		tt := ev.Target
 		tt.Slug = slug
-		TeardownPR(ctx, api, tt, reason, triggerWebhook)
+		if teardown(ctx, api, tt, reason, triggerWebhook, true) {
+			removed = true
+		}
 	}
+	return removed
 }
 
 // cleanupSlugs returns, sorted and deduplicated, the previews the PR may still
@@ -332,8 +348,12 @@ func previewLabel(name, label string) bool {
 
 // deployServices deploys each of services, in order, at pr's head SHA in the
 // preview slug. A failed service is logged and the next one is still deployed.
-// It returns outcomeDeployed when at least one service write succeeded, and
-// outcomeFailed otherwise.
+// With skipUnchanged, a service whose write would change nothing but its
+// updated-at is not written nor commented, and is logged as unchanged. It
+// returns, as reconcile does, outcomeDeployed when at least one service write
+// succeeded, outcomeFailed when none did and at least one failed, and
+// otherwise, every service being unchanged, the skip of reconcileSkipped with
+// reason alreadyDeployedReason.
 func deployServices(
 	ctx context.Context,
 	api DeployAPI,
@@ -342,8 +362,9 @@ func deployServices(
 	ev Event,
 	pr *gitops.PullRequest,
 	slug string,
-) string {
-	outcome := outcomeFailed
+	skipUnchanged bool,
+) (string, string) {
+	written, failed := false, false
 	timestamp := time.Now().UTC().Format(time.RFC3339)
 	for _, service := range services {
 		attrs := func(extra ...any) []any {
@@ -367,21 +388,32 @@ func deployServices(
 				PRNumber:       strconv.Itoa(ev.Number),
 				Timestamp:      timestamp,
 				WorkflowRunURL: "",
-			})
+			}, skipUnchanged)
 		}
 		if err != nil {
+			failed = true
 			slog.ErrorContext(ctx, "preview deploy failed",
 				attrs(slog.String("commit_sha", pr.HeadSHA), slog.String("err", err.Error()))...)
 			continue
 		}
-		outcome = outcomeDeployed
+		if result.Unchanged {
+			slog.InfoContext(ctx, "preview deploy unchanged", attrs(slog.String("commit_sha", pr.HeadSHA))...)
+			continue
+		}
+		written = true
 		slog.InfoContext(ctx, "preview deploy",
 			attrs(slog.String("commit_sha", pr.HeadSHA), slog.String("gitops_commit_url", result.CommitURL))...)
 		if fanErr != nil {
 			slog.WarnContext(ctx, "preview deploy comment failed", attrs(slog.String("err", fanErr.Error()))...)
 		}
 	}
-	return outcome
+	switch {
+	case written:
+		return outcomeDeployed, ""
+	case failed:
+		return outcomeFailed, ""
+	}
+	return reconcileSkipped(ctx, ev, alreadyDeployedReason)
 }
 
 // reconcileSkipped logs a skipped reconcile and returns the skipped outcome

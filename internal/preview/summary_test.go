@@ -8,6 +8,10 @@ import (
 	"github.com/badilhq/badil/internal/preview"
 )
 
+// pinnedNote is the paragraph BuildSummary adds when a service is pinned.
+const pinnedNote = "> ⏳ A pinned service starts once CI has pushed the image for its commit. " +
+	"Until then its link may not respond."
+
 func TestBuildSummary_PinnedAndMainTracking(t *testing.T) {
 	catalog := []string{"backend-1", "backend-2", "front"}
 	in := sampleInputs()
@@ -43,7 +47,9 @@ func TestBuildSummary_BranchBadge(t *testing.T) {
 
 	got := preview.BuildSummary("slug", vals, preview.URLConfig{}, branches, "m", "u")
 
-	want := "## 🚀 Preview: `slug`\n\n- **backend-1** · 🔄 `master`\n- **backend-2** · 📌 `abc12345`\n- **front** · 🔄 `main`\n\n---\n🔗 [m](u)"
+	want := "## 🚀 Preview: `slug`\n\n- **backend-1** · 🔄 `master`\n- **backend-2** · 📌 `abc12345`\n- **front** · 🔄 `main`\n\n" +
+		pinnedNote + "\n" +
+		"\n---\n🔗 [m](u)"
 	if got != want {
 		t.Errorf("summary mismatch\n got:\n%s\nwant:\n%s", got, want)
 	}
@@ -67,10 +73,31 @@ func TestBuildSummary_ExactOutput(t *testing.T) {
 		"- **backend-2** · 🔄 `main`\n" +
 		"- **front** · 🔄 `main`\n" +
 		"\n" +
+		pinnedNote + "\n" +
+		"\n" +
 		"---\n" +
 		"🔗 [chore(preview): create feature-add-pricing preview](https://github.com/acme/gitops/commit/deadbeef)"
 	if got != want {
 		t.Errorf("summary mismatch\n got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestBuildSummary_NoPinNoNote pins the output when no entry is pinned: no
+// pinned-image note, byte for byte the list then the separator.
+func TestBuildSummary_NoPinNoNote(t *testing.T) {
+	vals := preview.PreviewValues{Services: []preview.ServiceEntry{
+		{Name: "backend-1"},
+		{Name: "front"},
+	}}
+
+	got := preview.BuildSummary("slug", vals, preview.URLConfig{}, nil, "m", "u")
+
+	want := "## 🚀 Preview: `slug`\n\n- **backend-1** · 🔄 `main`\n- **front** · 🔄 `main`\n\n---\n🔗 [m](u)"
+	if got != want {
+		t.Errorf("summary mismatch\n got:\n%s\nwant:\n%s", got, want)
+	}
+	if strings.Contains(got, "⏳") {
+		t.Errorf("summary has the pinned-image note with no pin:\n%s", got)
 	}
 }
 
@@ -130,6 +157,8 @@ func TestBuildSummary_PreviewURLs(t *testing.T) {
 		" · [backend-1-feature-pricing.127.0.0.1.nip.io/docs](http://backend-1-feature-pricing.127.0.0.1.nip.io/docs)\n" +
 		"- **backend-2** · 🔄 `main`\n" +
 		"- **front** · 🔄 `main` · [front-feature-pricing.127.0.0.1.nip.io/](http://front-feature-pricing.127.0.0.1.nip.io/)\n" +
+		"\n" +
+		pinnedNote + "\n" +
 		"\n" +
 		"---\n" +
 		"🔗 [msg](url)"
