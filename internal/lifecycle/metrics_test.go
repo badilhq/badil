@@ -27,8 +27,9 @@ func assertMetrics(t *testing.T, m *metrics.Metrics, want map[string]float64, na
 			"# TYPE badil_reconcile_skips_total counter\n",
 		"badil_teardowns_total": "# HELP badil_teardowns_total Preview teardowns of a pull request, by trigger and result.\n" +
 			"# TYPE badil_teardowns_total counter\n",
-		"badil_previews": "# HELP badil_previews Previews in the gitops repo as of the last in-server cleanup sweep, " +
-			"0 before the first one.\n# TYPE badil_previews gauge\n",
+		"badil_previews": "# HELP badil_previews Previews in the gitops repo: listed at startup, " +
+			"counted on each create and delete by this server, and reset by each in-server cleanup sweep.\n" +
+			"# TYPE badil_previews gauge\n",
 		"badil_sweep_previews_deleted_total": "# HELP badil_sweep_previews_deleted_total " +
 			"Previews deleted by the cleanup sweep, by rule.\n# TYPE badil_sweep_previews_deleted_total counter\n",
 	}
@@ -213,6 +214,20 @@ func TestTeardownMetrics_Results(t *testing.T) {
 			}, "badil_teardowns_total")
 		})
 	}
+}
+
+func TestTeardownMetrics_WebhookDeleteDecrementsPreviews(t *testing.T) {
+	captureLogs(t)
+	f := &reconcileFake{
+		Metrics:  metrics.New(),
+		teardown: &gitops.TeardownResult{Removed: []string{"front"}, Deleted: true},
+	}
+	f.PreviewsListed(2)
+	target := event("", "front", "").Target
+	target.Slug = "feature-x"
+	lifecycle.TeardownPR(context.Background(), f, target, lifecycle.PRClosedReason, "webhook")
+
+	assertMetrics(t, f.Metrics, map[string]float64{`badil_previews`: 1}, "badil_previews")
 }
 
 func TestSweepMetrics(t *testing.T) {

@@ -15,14 +15,16 @@ import (
 	"testing"
 
 	gh "github.com/google/go-github/v71/github"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
 )
 
 // newClient wires a go-github client to a httptest server. The trailing slash
 // on BaseURL is required by go-github's URL resolution.
-func newClient(t *testing.T, srv *httptest.Server) *gitops.Client {
+func newClient(t *testing.T, srv *httptest.Server, opts ...gitops.Option) *gitops.Client {
 	t.Helper()
 	u, err := url.Parse(srv.URL + "/")
 	if err != nil {
@@ -31,7 +33,7 @@ func newClient(t *testing.T, srv *httptest.Server) *gitops.Client {
 	c := gh.NewClient(nil)
 	c.BaseURL = u
 	c.UploadURL = u
-	return gitops.NewClient(c, "acme", "gitops")
+	return gitops.NewClient(c, "acme", "gitops", opts...)
 }
 
 // encodeContent returns a Repository contents response body for a single file.
@@ -520,7 +522,7 @@ type writeServer struct {
 	puts      atomic.Int32
 }
 
-func (s *writeServer) start(t *testing.T) *gitops.Client {
+func (s *writeServer) start(t *testing.T, opts ...gitops.Option) *gitops.Client {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -548,7 +550,7 @@ func (s *writeServer) start(t *testing.T) *gitops.Client {
 		}
 	}))
 	t.Cleanup(srv.Close)
-	return newClient(t, srv)
+	return newClient(t, srv, opts...)
 }
 
 func TestWritePreviewWithRetry_SkipUnchanged(t *testing.T) {
@@ -643,6 +645,8 @@ func assertSkipResult(t *testing.T, result *gitops.WriteResult, unchanged bool) 
 	}
 }
 
+// TestWritePreviewWithRetry_Created checks Created and that only a create
+// increments the previews gauge, from 1.
 func TestWritePreviewWithRetry_Created(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -653,21 +657,34 @@ func TestWritePreviewWithRetry_Created(t *testing.T) {
 		{name: "create", want: true},
 		{name: "update", files: []string{pinnedFile("abc1234567890", "0000000old")}},
 		{name: "create lost to a 409", files: []string{"", pinnedFile("abc1234567890", "0000000old")}, conflicts: 1},
+		{name: "unchanged", files: []string{pinnedFile()}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &writeServer{files: tt.files, conflicts: tt.conflicts}
-			c := s.start(t)
+			m := metrics.New()
+			m.PreviewsListed(1)
+			c := s.start(t, gitops.WithMetrics(m))
 
 			result, err := c.WritePreviewWithRetry(
 				context.Background(), "slug", []string{"backend-1", "backend-2"}, hostURLs(),
-				"backend-1", "abc1234567890", sampleInputs(), "create", "update", false,
+				"backend-1", "abc1234567890", sampleInputs(), "create", "update", tt.name == "unchanged",
 			)
 			if err != nil {
 				t.Fatalf("WritePreviewWithRetry: %v", err)
 			}
 			if result.Created != tt.want {
 				t.Errorf("Created = %v, want %v", result.Created, tt.want)
+			}
+			want := "1"
+			if tt.want {
+				want = "2"
+			}
+			expected := "# HELP badil_previews Previews in the gitops repo: listed at startup, " +
+				"counted on each create and delete by this server, and reset by each in-server cleanup sweep.\n" +
+				"# TYPE badil_previews gauge\nbadil_previews " + want + "\n"
+			if err := testutil.GatherAndCompare(m.Gatherer(), strings.NewReader(expected), "badil_previews"); err != nil {
+				t.Error(err)
 			}
 		})
 	}

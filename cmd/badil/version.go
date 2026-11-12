@@ -10,7 +10,7 @@ import (
 
 // version is the badil version set at link time with
 // -ldflags "-X main.version=<v>"; it is empty in a build that does not set it.
-var version string //nolint:gochecknoglobals // set by the linker
+var version string
 
 // develVersion is the main module version Go records when it has none.
 const develVersion = "(devel)"

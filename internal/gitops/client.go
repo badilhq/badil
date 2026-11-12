@@ -43,7 +43,8 @@ type Client struct {
 // Option configures a Client built by NewClient.
 type Option func(*Client)
 
-// WithMetrics times WritePreviewWithRetry and TeardownPreviewWithRetry in m.
+// WithMetrics times WritePreviewWithRetry and TeardownPreviewWithRetry in m,
+// and counts the previews WritePreviewWithRetry creates.
 func WithMetrics(m *metrics.Metrics) Option {
 	return func(c *Client) {
 		c.metrics = m
@@ -290,7 +291,8 @@ type WriteResult struct {
 // the gitops commit URL, and the commit message used — callers (e.g. the
 // deploy handler) can render PR summaries without re-fetching.
 //
-// Its duration, retries included, is observed as the write operation.
+// Its duration, retries included, is observed as the write operation, and a
+// write that Created the file increments the previews gauge.
 func (c *Client) WritePreviewWithRetry(
 	ctx context.Context,
 	slug string,
@@ -306,6 +308,9 @@ func (c *Client) WritePreviewWithRetry(
 		ctx, slug, catalog, urls, serviceName, commitSha, inputs, createMessage, updateMessage, skipUnchanged,
 	)
 	c.observe("write", start, err)
+	if err == nil && res.Created {
+		c.metrics.PreviewCreated()
+	}
 	return res, err
 }
 

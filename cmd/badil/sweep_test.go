@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
@@ -152,8 +154,9 @@ badil_sweep_runs_total{result="ok"} 2
 # TYPE badil_sweep_last_success_timestamp_seconds gauge
 badil_sweep_last_success_timestamp_seconds `+strconv.FormatInt(at.Unix(), 10)+`
 `)
-		expected := "# HELP badil_previews Previews in the gitops repo as of the last in-server cleanup sweep, " +
-			"0 before the first one.\n# TYPE badil_previews gauge\nbadil_previews 2\n"
+		expected := "# HELP badil_previews Previews in the gitops repo: listed at startup, " +
+			"counted on each create and delete by this server, and reset by each in-server cleanup sweep.\n" +
+			"# TYPE badil_previews gauge\nbadil_previews 2\n"
 		err := testutil.GatherAndCompare(f.Gatherer(), strings.NewReader(expected), "badil_previews")
 		if err != nil {
 			t.Error(err)
@@ -299,5 +302,79 @@ func TestParseCleanupInterval(t *testing.T) {
 				t.Errorf("parseCleanupInterval(%q) = %v, want %v", tc.raw, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestStartPreviewsCount(t *testing.T) {
+	cases := []struct {
+		name      string
+		metrics   bool
+		listErr   error
+		wantCalls int
+		want      float64
+		wantLog   string
+	}{
+		{name: "metrics enabled", metrics: true, wantCalls: 1, want: 2},
+		{name: "metrics disabled"},
+		{
+			name: "listing failed", metrics: true, listErr: errors.New("boom"), wantCalls: 1, want: 1,
+			wantLog: `level=WARN msg="previews count failed" err=boom`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := captureText(t)
+
+			f := &loopFake{slugs: []string{"a", "b"}, listErr: tc.listErr}
+			var m *metrics.Metrics
+			if tc.metrics {
+				m = metrics.New()
+				m.PreviewsListed(1)
+			}
+			srv := server.NewServer(nil, nil, "t", 0)
+			startPreviewsCount(context.Background(), srv, f, m)
+			if err := srv.WaitBackground(context.Background()); err != nil {
+				t.Fatalf("WaitBackground: %v", err)
+			}
+
+			if calls, _ := f.counts(); calls != tc.wantCalls {
+				t.Errorf("listings = %d, want %d", calls, tc.wantCalls)
+			}
+			if m != nil {
+				assertPreviews(t, m, tc.want)
+			}
+			if got := strings.TrimSpace(logs.String()); got != tc.wantLog {
+				t.Errorf("logs = %q, want %q", got, tc.wantLog)
+			}
+		})
+	}
+}
+
+// captureText routes the default logger to the returned buffer, as text
+// without timestamps, for the rest of t.
+func captureText(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{
+		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return a
+		},
+	})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &logs
+}
+
+// assertPreviews fails t unless m's previews gauge is want.
+func assertPreviews(t *testing.T, m *metrics.Metrics, want float64) {
+	t.Helper()
+	expected := "# HELP badil_previews Previews in the gitops repo: listed at startup, " +
+		"counted on each create and delete by this server, and reset by each in-server cleanup sweep.\n" +
+		"# TYPE badil_previews gauge\nbadil_previews " + strconv.FormatFloat(want, 'f', -1, 64) + "\n"
+	if err := testutil.GatherAndCompare(m.Gatherer(), strings.NewReader(expected), "badil_previews"); err != nil {
+		t.Error(err)
 	}
 }

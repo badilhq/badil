@@ -87,8 +87,8 @@ func TestMetrics_PreviewsGauge(t *testing.T) {
 	at := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
 	m.SweepRun(true, at)
 
-	if got := testutil.ToFloat64(m.PreviewsGauge()); got != 2 {
-		t.Errorf("previews = %v, want 2", got)
+	if got := testutil.ToFloat64(m.PreviewsGauge()); got != 1 {
+		t.Errorf("previews = %v, want 1", got)
 	}
 	if got, want := testutil.ToFloat64(m.SweepLastSuccessGauge()), float64(at.Unix()); got != want {
 		t.Errorf("sweep last success = %v, want %v", got, want)
@@ -102,6 +102,34 @@ badil_sweep_previews_deleted_total{rule="ttl"} 1
 # TYPE badil_sweep_runs_total counter
 badil_sweep_runs_total{result="ok"} 1
 `, "badil_sweep_previews_deleted_total", "badil_sweep_runs_total")
+}
+
+func TestMetrics_PreviewsCountedLive(t *testing.T) {
+	m := metrics.New()
+	m.PreviewsListed(2)
+	m.PreviewCreated()
+	m.Teardown("webhook", "deleted")
+	m.Teardown("webhook", "unpinned")
+	m.Teardown("webhook", "noop")
+
+	assertGathered(t, m, `
+# HELP badil_previews Previews in the gitops repo: listed at startup, counted on each create and delete by this server, and reset by each in-server cleanup sweep.
+# TYPE badil_previews gauge
+badil_previews 2
+`, "badil_previews")
+}
+
+func TestMetrics_PreviewsNeverNegative(t *testing.T) {
+	m := metrics.New()
+	m.Teardown("webhook", "deleted")
+	m.SweepDeleted("ttl")
+	if got := testutil.ToFloat64(m.PreviewsGauge()); got != 0 {
+		t.Errorf("previews = %v, want 0", got)
+	}
+	m.PreviewCreated()
+	if got := testutil.ToFloat64(m.PreviewsGauge()); got != 1 {
+		t.Errorf("previews = %v after a create from 0, want 1", got)
+	}
 }
 
 func TestMetrics_GitopsOp(t *testing.T) {
@@ -186,6 +214,8 @@ func TestMetrics_NilIsSafe(t *testing.T) {
 	m.Reconcile("skipped", "fork pr")
 	m.Teardown("sweep", "deleted")
 	m.SweepListed(3)
+	m.PreviewsListed(3)
+	m.PreviewCreated()
 	m.SweepDeleted("ttl")
 	m.GitopsOp("write", "ok", time.Second)
 	m.SweepRun(true, time.Now())

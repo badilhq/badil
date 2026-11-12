@@ -112,6 +112,7 @@ func serveCmd() *cobra.Command {
 
 			serveInBackground(ctx, "server", httpSrv)
 			metricsSrv := startMetricsServer(ctx, cfg.MetricsAddr, m)
+			startPreviewsCount(ctx, srv, gitopsClient, m)
 			startSweepLoop(ctx, srv, sweepAPI{Client: gitopsClient, Metrics: m}, m, interval, ttl)
 
 			<-ctx.Done()
@@ -141,6 +142,29 @@ func startMetricsServer(ctx context.Context, addr string, m *metrics.Metrics) *h
 	}
 	serveInBackground(ctx, "metrics server", metricsSrv)
 	return metricsSrv
+}
+
+// previewLister lists the previews of the gitops repo.
+type previewLister interface {
+	ListPreviews(ctx context.Context) ([]string, error)
+}
+
+// startPreviewsCount sets m's previews gauge from one listing of the gitops
+// repo, in the background of srv so shutdown waits for it. It lists nothing
+// when m is nil (metrics disabled). A failed listing is logged and leaves the
+// gauge as it is.
+func startPreviewsCount(ctx context.Context, srv *server.Server, api previewLister, m *metrics.Metrics) {
+	if m == nil {
+		return
+	}
+	srv.Go(func() {
+		slugs, err := api.ListPreviews(ctx)
+		if err != nil {
+			slog.Default().WarnContext(ctx, "previews count failed", slog.String("err", err.Error()))
+			return
+		}
+		m.PreviewsListed(len(slugs))
+	})
 }
 
 // serveInBackground runs srv.ListenAndServe in the background, logging it as
