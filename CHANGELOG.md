@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/badilhq/badil/compare/v0.15.0...v0.15.1) (2026-11-12)
+
+
+### Documentation
+
+* point changelog commit links at the current history ([#59](https://github.com/badilhq/badil/issues/59)) ([e40eb60](https://github.com/badilhq/badil/commit/e40eb6084e57e9103135169afc20de6c52d5186d))
+
 ## [0.15.0](https://github.com/badilhq/badil/compare/v0.14.0...v0.15.0) (2026-11-12)
 
 
