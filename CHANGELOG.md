@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/badilhq/badil/compare/v0.15.1...v0.16.0) (2026-11-12)
+
+
+### Features
+
+* add a version command, skip no-op deploys and count previews live ([#62](https://github.com/badilhq/badil/issues/62)) ([38259ed](https://github.com/badilhq/badil/commit/38259edd98aa8765fb82f60cc673910dea5cf75f))
+
 ## [0.15.1](https://github.com/badilhq/badil/compare/v0.15.0...v0.15.1) (2026-11-12)
 
 
