@@ -9,10 +9,10 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"github.com/doublurehq/doublure/internal/gitops"
-	"github.com/doublurehq/doublure/internal/lifecycle"
-	"github.com/doublurehq/doublure/internal/metrics"
-	"github.com/doublurehq/doublure/internal/preview"
+	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/lifecycle"
+	"github.com/badilhq/badil/internal/metrics"
+	"github.com/badilhq/badil/internal/preview"
 )
 
 // assertMetrics fails t unless the samples of m's metrics named names are
@@ -21,16 +21,16 @@ func assertMetrics(t *testing.T, m *metrics.Metrics, want map[string]float64, na
 	t.Helper()
 	// headers holds the HELP and TYPE lines of the metrics these tests assert.
 	headers := map[string]string{
-		"doublure_reconciles_total": "# HELP doublure_reconciles_total Pull request reconciles, by outcome.\n" +
-			"# TYPE doublure_reconciles_total counter\n",
-		"doublure_reconcile_skips_total": "# HELP doublure_reconcile_skips_total Skipped pull request reconciles, by reason.\n" +
-			"# TYPE doublure_reconcile_skips_total counter\n",
-		"doublure_teardowns_total": "# HELP doublure_teardowns_total Preview teardowns of a pull request, by trigger and result.\n" +
-			"# TYPE doublure_teardowns_total counter\n",
-		"doublure_previews": "# HELP doublure_previews Previews in the gitops repo as of the last in-server cleanup sweep, " +
-			"0 before the first one.\n# TYPE doublure_previews gauge\n",
-		"doublure_sweep_previews_deleted_total": "# HELP doublure_sweep_previews_deleted_total " +
-			"Previews deleted by the cleanup sweep, by rule.\n# TYPE doublure_sweep_previews_deleted_total counter\n",
+		"badil_reconciles_total": "# HELP badil_reconciles_total Pull request reconciles, by outcome.\n" +
+			"# TYPE badil_reconciles_total counter\n",
+		"badil_reconcile_skips_total": "# HELP badil_reconcile_skips_total Skipped pull request reconciles, by reason.\n" +
+			"# TYPE badil_reconcile_skips_total counter\n",
+		"badil_teardowns_total": "# HELP badil_teardowns_total Preview teardowns of a pull request, by trigger and result.\n" +
+			"# TYPE badil_teardowns_total counter\n",
+		"badil_previews": "# HELP badil_previews Previews in the gitops repo as of the last in-server cleanup sweep, " +
+			"0 before the first one.\n# TYPE badil_previews gauge\n",
+		"badil_sweep_previews_deleted_total": "# HELP badil_sweep_previews_deleted_total " +
+			"Previews deleted by the cleanup sweep, by rule.\n# TYPE badil_sweep_previews_deleted_total counter\n",
 	}
 	var expected strings.Builder
 	matched := 0
@@ -70,7 +70,7 @@ func TestReconcileMetrics_Outcomes(t *testing.T) {
 			f:    &reconcileFake{pr: fetchedPR("front", true, "preview")},
 			ev:   event("labeled", "front", "preview", "preview"),
 			want: map[string]float64{
-				`doublure_reconciles_total{outcome="deployed"}`: 1,
+				`badil_reconciles_total{outcome="deployed"}`: 1,
 			},
 		},
 		{
@@ -81,7 +81,7 @@ func TestReconcileMetrics_Outcomes(t *testing.T) {
 			},
 			ev: event("labeled", "monorepo", "preview", "preview"),
 			want: map[string]float64{
-				`doublure_reconciles_total{outcome="deployed"}`: 1,
+				`badil_reconciles_total{outcome="deployed"}`: 1,
 			},
 		},
 		{
@@ -89,8 +89,8 @@ func TestReconcileMetrics_Outcomes(t *testing.T) {
 			f:    &reconcileFake{},
 			ev:   event("labeled", "front", "bug", "bug"),
 			want: map[string]float64{
-				`doublure_reconciles_total{outcome="skipped"}`:         1,
-				`doublure_reconcile_skips_total{reason="other label"}`: 1,
+				`badil_reconciles_total{outcome="skipped"}`:         1,
+				`badil_reconcile_skips_total{reason="other label"}`: 1,
 			},
 		},
 		{
@@ -98,8 +98,8 @@ func TestReconcileMetrics_Outcomes(t *testing.T) {
 			f:    &reconcileFake{pr: fork},
 			ev:   event("labeled", "front", "preview", "preview"),
 			want: map[string]float64{
-				`doublure_reconciles_total{outcome="skipped"}`:     1,
-				`doublure_reconcile_skips_total{reason="fork pr"}`: 1,
+				`badil_reconciles_total{outcome="skipped"}`:     1,
+				`badil_reconcile_skips_total{reason="fork pr"}`: 1,
 			},
 		},
 		{
@@ -111,9 +111,9 @@ func TestReconcileMetrics_Outcomes(t *testing.T) {
 			},
 			ev: event("labeled", "front", "preview:pricing", "preview:pricing"),
 			want: map[string]float64{
-				`doublure_reconciles_total{outcome="skipped"}`:                        1,
-				`doublure_reconcile_skips_total{reason="service held by another pr"}`: 1,
-				`doublure_teardowns_total{result="deleted",trigger="webhook"}`:        1,
+				`badil_reconciles_total{outcome="skipped"}`:                        1,
+				`badil_reconcile_skips_total{reason="service held by another pr"}`: 1,
+				`badil_teardowns_total{result="deleted",trigger="webhook"}`:        1,
 			},
 		},
 		{
@@ -121,24 +121,24 @@ func TestReconcileMetrics_Outcomes(t *testing.T) {
 			f:    &reconcileFake{pr: fetchedPR("front", true, "preview:a", "preview:b")},
 			ev:   event("labeled", "front", "preview:b", "preview:b"),
 			want: map[string]float64{
-				`doublure_reconciles_total{outcome="skipped"}`:                        1,
-				`doublure_reconcile_skips_total{reason="conflicting preview labels"}`: 1,
-				`doublure_teardowns_total{result="noop",trigger="webhook"}`:           3,
+				`badil_reconciles_total{outcome="skipped"}`:                        1,
+				`badil_reconcile_skips_total{reason="conflicting preview labels"}`: 1,
+				`badil_teardowns_total{result="noop",trigger="webhook"}`:           3,
 			},
 		},
 		{
 			name: "catalog failure",
 			f:    &reconcileFake{catalogErr: errors.New("boom")},
 			ev:   event("labeled", "front", "preview", "preview"),
-			want: map[string]float64{`doublure_reconciles_total{outcome="failed"}`: 1},
+			want: map[string]float64{`badil_reconciles_total{outcome="failed"}`: 1},
 		},
 		{
 			name: "preview read failure",
 			f:    &reconcileFake{pr: fetchedPR("front", true, "preview:pricing"), previewErr: errors.New("boom")},
 			ev:   event("labeled", "front", "preview:pricing", "preview:pricing"),
 			want: map[string]float64{
-				`doublure_reconciles_total{outcome="failed"}`:               1,
-				`doublure_teardowns_total{result="noop",trigger="webhook"}`: 1,
+				`badil_reconciles_total{outcome="failed"}`:               1,
+				`badil_teardowns_total{result="noop",trigger="webhook"}`: 1,
 			},
 		},
 		{
@@ -148,15 +148,15 @@ func TestReconcileMetrics_Outcomes(t *testing.T) {
 				writeErr: map[string]error{"front": errors.New("boom")},
 			},
 			ev:   event("labeled", "front", "preview", "preview"),
-			want: map[string]float64{`doublure_reconciles_total{outcome="failed"}`: 1},
+			want: map[string]float64{`badil_reconciles_total{outcome="failed"}`: 1},
 		},
 		{
 			name: "torn down",
 			f:    &reconcileFake{pr: fetchedPR("front", true, "bug"), teardown: deleted},
 			ev:   event("labeled", "front", "preview", "preview"),
 			want: map[string]float64{
-				`doublure_reconciles_total{outcome="torn_down"}`:               1,
-				`doublure_teardowns_total{result="deleted",trigger="webhook"}`: 1,
+				`badil_reconciles_total{outcome="torn_down"}`:               1,
+				`badil_teardowns_total{result="deleted",trigger="webhook"}`: 1,
 			},
 		},
 		{
@@ -164,8 +164,8 @@ func TestReconcileMetrics_Outcomes(t *testing.T) {
 			f:    &reconcileFake{catalogErr: errors.New("boom"), teardown: deleted},
 			ev:   lifecycle.Event{Target: event("", "front", "").Target, Action: "closed", HeadRef: "feature/x"},
 			want: map[string]float64{
-				`doublure_reconciles_total{outcome="torn_down"}`:               1,
-				`doublure_teardowns_total{result="deleted",trigger="webhook"}`: 1,
+				`badil_reconciles_total{outcome="torn_down"}`:               1,
+				`badil_teardowns_total{result="deleted",trigger="webhook"}`: 1,
 			},
 		},
 	}
@@ -176,7 +176,7 @@ func TestReconcileMetrics_Outcomes(t *testing.T) {
 			lifecycle.ReconcilePR(context.Background(), tc.f, tc.ev)
 
 			assertMetrics(t, tc.f.Metrics, tc.want,
-				"doublure_reconciles_total", "doublure_reconcile_skips_total", "doublure_teardowns_total")
+				"badil_reconciles_total", "badil_reconcile_skips_total", "badil_teardowns_total")
 		})
 	}
 }
@@ -209,8 +209,8 @@ func TestTeardownMetrics_Results(t *testing.T) {
 			lifecycle.TeardownPR(context.Background(), tc.f, target, lifecycle.PRClosedReason, "webhook")
 
 			assertMetrics(t, tc.f.Metrics, map[string]float64{
-				`doublure_teardowns_total{result="` + tc.result + `",trigger="webhook"}`: 1,
-			}, "doublure_teardowns_total")
+				`badil_teardowns_total{result="` + tc.result + `",trigger="webhook"}`: 1,
+			}, "badil_teardowns_total")
 		})
 	}
 }
@@ -236,11 +236,11 @@ func TestSweepMetrics(t *testing.T) {
 	}
 
 	assertMetrics(t, f.Metrics, map[string]float64{
-		`doublure_previews`: 1,
-		`doublure_sweep_previews_deleted_total{rule="no_pin"}`:       1,
-		`doublure_sweep_previews_deleted_total{rule="ttl"}`:          1,
-		`doublure_teardowns_total{result="deleted",trigger="sweep"}`: 1,
-	}, "doublure_previews", "doublure_sweep_previews_deleted_total", "doublure_teardowns_total")
+		`badil_previews`: 1,
+		`badil_sweep_previews_deleted_total{rule="no_pin"}`:       1,
+		`badil_sweep_previews_deleted_total{rule="ttl"}`:          1,
+		`badil_teardowns_total{result="deleted",trigger="sweep"}`: 1,
+	}, "badil_previews", "badil_sweep_previews_deleted_total", "badil_teardowns_total")
 }
 
 func TestSweepMetrics_UnpinOnlyIsASweepTeardown(t *testing.T) {
@@ -252,6 +252,6 @@ func TestSweepMetrics_UnpinOnlyIsASweepTeardown(t *testing.T) {
 	}
 
 	assertMetrics(t, f.Metrics, map[string]float64{
-		`doublure_teardowns_total{result="deleted",trigger="sweep"}`: 1,
-	}, "doublure_teardowns_total")
+		`badil_teardowns_total{result="deleted",trigger="sweep"}`: 1,
+	}, "badil_teardowns_total")
 }

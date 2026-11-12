@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/doublurehq/doublure/internal/gitops"
-	"github.com/doublurehq/doublure/internal/preview"
+	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/preview"
 )
 
 // actionUnlabeled is the webhook action of a removed label.

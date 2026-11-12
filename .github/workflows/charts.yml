@@ -42,7 +42,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           docker run --rm -v "$PWD":/w -w /w quay.io/helmpack/chart-testing:v3.15.0 \
-            sh -c 'git config --global --add safe.directory /w && ct lint --config ct.yaml --excluded-charts doublure'
+            sh -c 'git config --global --add safe.directory /w && ct lint --config ct.yaml --excluded-charts badil'
 
       - name: Render app with envFrom and initContainers
         run: |
@@ -65,7 +65,7 @@ jobs:
             exit 1
           fi
 
-      - name: Render preview-env with doublure values
+      - name: Render preview-env with badil values
         run: |
           out=$(helm template preview-x charts/preview-env -f internal/preview/testdata/values.golden.yaml -f - <<'EOF'
           serviceRepos:
@@ -74,7 +74,7 @@ jobs:
             front: https://github.com/acme/front.git
           EOF
           )
-          echo "$out" | grep -q 'preview.doublure.dev/pr-url'
+          echo "$out" | grep -q 'preview.badil.dev/pr-url'
 
       - name: Render preview-env with YAML 1.1 ambiguous metadata
         run: |
@@ -94,7 +94,7 @@ jobs:
                 cicd.pipeline.run.url: https://github.com/acme/backend-1/actions/runs/1
           EOF
           )
-          got=$(echo "$out" | yq -N 'select(.kind == "Application") | .metadata.annotations | (.["preview.doublure.dev/pr-author"], .["preview.doublure.dev/pr-number"], .["preview.doublure.dev/created-at"], .["preview.doublure.dev/vcs.ref.name"])')
+          got=$(echo "$out" | yq -N 'select(.kind == "Application") | .metadata.annotations | (.["preview.badil.dev/pr-author"], .["preview.badil.dev/pr-number"], .["preview.badil.dev/created-at"], .["preview.badil.dev/vcs.ref.name"])')
           want='Y
           0x1F
           2026-05-26
@@ -105,7 +105,7 @@ jobs:
             exit 1
           fi
 
-      - name: Render preview-env with doublure-written hosts
+      - name: Render preview-env with badil-written hosts
         run: |
           out=$(helm template feature-pricing charts/preview-env -f - <<'EOF'
           serviceRepos:
@@ -130,12 +130,12 @@ jobs:
             printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
             exit 1
           fi
-          got=$(echo "$out" | yq -N 'select(.kind == "Application") | .metadata.name + "=" + .metadata.annotations["preview.doublure.dev/host"]')
+          got=$(echo "$out" | yq -N 'select(.kind == "Application") | .metadata.name + "=" + .metadata.annotations["preview.badil.dev/host"]')
           want='feature-pricing-backend-1=backend-1-feature-pricing.127.0.0.1.nip.io
           feature-pricing-backend-2=
           feature-pricing-front=front-feature-pricing.127.0.0.1.nip.io'
           if [ "$got" != "$want" ]; then
-            echo "::error::unexpected preview.doublure.dev/host annotations"
+            echo "::error::unexpected preview.badil.dev/host annotations"
             printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
             exit 1
           fi
@@ -172,14 +172,14 @@ jobs:
             exit 1
           fi
 
-      - name: Render doublure with all components
-        run: helm template t charts/doublure -f charts/doublure/ci/test-values.yaml --set ingress.enabled=true,ingress.host=doublure.example.com,cleanup.enabled=true,metrics.serviceMonitor.enabled=true,dashboard.enabled=true
+      - name: Render badil with all components
+        run: helm template t charts/badil -f charts/badil/ci/test-values.yaml --set ingress.enabled=true,ingress.host=badil.example.com,cleanup.enabled=true,metrics.serviceMonitor.enabled=true,dashboard.enabled=true
 
-      - name: Render doublure cleanup TTL
+      - name: Render badil cleanup TTL
         run: |
           # Prints "CronJob:" then its CLEANUP_TTL as "<tag> <value>"; nothing without a CronJob.
           ttl_env() {
-            helm template t charts/doublure -f charts/doublure/ci/test-values.yaml --set "cleanup.enabled=true$1" \
+            helm template t charts/badil -f charts/badil/ci/test-values.yaml --set "cleanup.enabled=true$1" \
               | yq -N 'select(.kind == "CronJob") | .kind + ":" + ([.spec.jobTemplate.spec.template.spec.containers[0].env[] | select(.name == "CLEANUP_TTL") | .value | tag + " " + .] | join(","))'
           }
           got=$(ttl_env ,cleanup.ttl=168h)
@@ -195,16 +195,16 @@ jobs:
             exit 1
           fi
 
-      - name: Render doublure cleanup interval and ServiceMonitor
+      - name: Render badil cleanup interval and ServiceMonitor
         run: |
-          got=$(helm template t charts/doublure -f charts/doublure/ci/test-values.yaml --set cleanup.interval=1h \
+          got=$(helm template t charts/badil -f charts/badil/ci/test-values.yaml --set cleanup.interval=1h \
             | yq -N 'select(.kind == "Deployment") | .spec.template.spec.containers[0].env[] | select(.name == "CLEANUP_INTERVAL") | .value | tag + " " + .')
           if [ "$got" != '!!str 1h' ]; then
             echo '::error::expected CLEANUP_INTERVAL "1h" on the Deployment when cleanup.interval is set'
             printf 'got: %s\n' "$got"
             exit 1
           fi
-          got=$(helm template t charts/doublure -f charts/doublure/ci/test-values.yaml \
+          got=$(helm template t charts/badil -f charts/badil/ci/test-values.yaml \
             --set metrics.serviceMonitor.enabled=true,metrics.serviceMonitor.labels.release=kps \
             | yq -N 'select(.kind == "ServiceMonitor") | .metadata.labels.release')
           if [ "$got" != 'kps' ]; then
@@ -213,9 +213,9 @@ jobs:
             exit 1
           fi
 
-      - name: Render doublure dashboard ConfigMap
+      - name: Render badil dashboard ConfigMap
         run: |
-          cm=$(helm template t charts/doublure -f charts/doublure/ci/test-values.yaml --set dashboard.enabled=true \
+          cm=$(helm template t charts/badil -f charts/badil/ci/test-values.yaml --set dashboard.enabled=true \
             | yq -N 'select(.kind == "ConfigMap" and .metadata.name == "t-dashboard")')
           got=$(echo "$cm" | yq -N '.metadata.labels.grafana_dashboard')
           if [ "$got" != '1' ]; then
@@ -223,31 +223,31 @@ jobs:
             printf 'got: %s\n' "$got"
             exit 1
           fi
-          got=$(echo "$cm" | yq -N '.data["doublure.json"]' | jq -r '.uid + " " + (.panels | length | tostring)')
-          if [ "$got" != 'doublure 10' ]; then
-            echo '::error::expected doublure.json to parse with uid "doublure" and 10 panels'
+          got=$(echo "$cm" | yq -N '.data["badil.json"]' | jq -r '.uid + " " + (.panels | length | tostring)')
+          if [ "$got" != 'badil 10' ]; then
+            echo '::error::expected badil.json to parse with uid "badil" and 10 panels'
             printf 'got: %s\n' "$got"
             exit 1
           fi
 
-      - name: Render doublure optional Argo CD webhook token
+      - name: Render badil optional Argo CD webhook token
         run: |
-          got=$(helm template t charts/doublure -f charts/doublure/ci/test-values.yaml \
+          got=$(helm template t charts/badil -f charts/badil/ci/test-values.yaml \
             | yq -N 'select(.kind == "Deployment") | .spec.template.spec.containers[0].env[] | select(.name == "ARGOCD_WEBHOOK_TOKEN") | .valueFrom.secretKeyRef | .name + " " + .key + " " + (.optional | to_string)')
-          if [ "$got" != 'doublure argocd-webhook-token true' ]; then
-            echo '::error::expected ARGOCD_WEBHOOK_TOKEN from optional key argocd-webhook-token of Secret doublure on the Deployment'
+          if [ "$got" != 'badil argocd-webhook-token true' ]; then
+            echo '::error::expected ARGOCD_WEBHOOK_TOKEN from optional key argocd-webhook-token of Secret badil on the Deployment'
             printf 'got: %s\n' "$got"
             exit 1
           fi
 
-      - name: Render doublure with numeric github ids
+      - name: Render badil with numeric github ids
         run: |
-          out=$(helm template t charts/doublure -f - <<'EOF'
+          out=$(helm template t charts/badil -f - <<'EOF'
           config:
             githubAppId: 1234567
             githubInstallationId: 87654321
             gitopsRepo: example/gitops
-          existingSecret: doublure
+          existingSecret: badil
           EOF
           )
           echo "$out" | grep -q 'value: "1234567"'
@@ -272,9 +272,9 @@ jobs:
             echo "$out" | grep -q 'serviceCharts.api.'
           done
 
-      - name: Render doublure without required values fails
+      - name: Render badil without required values fails
         run: |
-          if out=$(helm template t charts/doublure 2>&1); then
+          if out=$(helm template t charts/badil 2>&1); then
             echo "::error::expected render to fail without required values"
             exit 1
           fi

@@ -14,7 +14,7 @@ import (
 
 	"github.com/bradleyfalzon/ghinstallation/v2"
 
-	"github.com/doublurehq/doublure/internal/github"
+	"github.com/badilhq/badil/internal/github"
 )
 
 func generateTestKey(t *testing.T) []byte {

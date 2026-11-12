@@ -1,5 +1,5 @@
 packages:
-  github.com/doublurehq/doublure/internal/server:
+  github.com/badilhq/badil/internal/server:
     config:
       dir: "internal/server/mocks"
       pkgname: "mocks"

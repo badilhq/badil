@@ -10,7 +10,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/doublurehq/doublure
+        - github.com/badilhq/badil
     golines:
       max-len: 120
 

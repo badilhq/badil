@@ -78,7 +78,7 @@ before doing anything (skip with --yes).`,
 	cmd.Flags().StringVar(&pemPath, "pem-file", "dev.private-key.pem", "Path to write the App private key")
 	cmd.Flags().StringVar(&owner, "owner", "", "Org login to install the App under (empty = personal account)")
 	cmd.Flags().StringVar(&webhookURL, "webhook-url", "",
-		"Public base URL of doublure; /webhooks/github is appended (default: the ngrok tunnel)")
+		"Public base URL of badil; /webhooks/github is appended (default: the ngrok tunnel)")
 	cmd.Flags().BoolVarP(&assumeYes, "yes", "y", false, "Skip the confirmation prompt")
 	return cmd
 }
@@ -210,7 +210,7 @@ func runBootstrap(ctx context.Context, stdin io.Reader, stdout io.Writer, opts b
 	fmt.Fprintf(stdout, "\nNext: install the App on the gitops repo + service repos:\n  %s\n", installURL)
 	_ = openBrowser(installURL)
 	fmt.Fprintln(stdout, "\nAfter install, paste the installation ID into .env (GITHUB_INSTALLATION_ID),")
-	fmt.Fprintln(stdout, "then run `doublure verify-app` to confirm.")
+	fmt.Fprintln(stdout, "then run `badil verify-app` to confirm.")
 	return nil
 }
 
@@ -219,7 +219,7 @@ func runBootstrap(ctx context.Context, stdin io.Reader, stdout io.Writer, opts b
 // files that will be written, and whether any of them will be overwritten.
 // Reads cleanly in a terminal without color so it's safe in any environment.
 func printPlan(w io.Writer, opts bootstrapOpts, webhookURL string) {
-	fmt.Fprintln(w, "Preflight — `doublure bootstrap-app` will:")
+	fmt.Fprintln(w, "Preflight — `badil bootstrap-app` will:")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  1. Create a new GitHub App")
 	fmt.Fprintf(w, "       name:        %s\n", opts.appName)
@@ -380,13 +380,13 @@ func randomHex(n int) string {
 	return hex.EncodeToString(buf)
 }
 
-// defaultAppName returns "doublure-dev-" plus 6 random lowercase hex chars.
+// defaultAppName returns "badil-dev-" plus 6 random lowercase hex chars.
 // GitHub App names are global, so the suffix avoids collisions without
 // publishing anything about the developer's machine.
 func defaultAppName() string {
 	buf := make([]byte, 3) //nolint:mnd // 3 bytes = 6 hex chars
 	_, _ = rand.Read(buf)  // crypto/rand.Read never returns an error
-	return "doublure-dev-" + hex.EncodeToString(buf)
+	return "badil-dev-" + hex.EncodeToString(buf)
 }
 
 type envValues struct {
@@ -407,7 +407,7 @@ export GITHUB_PRIVATE_KEY_PATH=%s
 export GITHUB_WEBHOOK_SECRET=%s
 export GITHUB_INSTALLATION_ID= # set after installing the App
 export GITOPS_REPO=%s
-export DOUBLURE_DEPLOY_TOKEN=%s
+export BADIL_DEPLOY_TOKEN=%s
 export LISTEN_ADDR=:8080
 `, v.AppID, v.PEMPath, v.WebhookSecret, gitops, v.DeployToken)
 }

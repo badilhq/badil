@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/doublurehq/doublure/internal/gitops"
-	"github.com/doublurehq/doublure/internal/preview"
+	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/preview"
 )
 
 // PRClosedReason is the teardown reason for a closed (or merged) PR.

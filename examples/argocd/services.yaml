@@ -1,7 +1,7 @@
 serviceRepos:
-  backend-1: "https://github.com/doublurehq/demo-backend-1.git"
-  backend-2: "https://github.com/doublurehq/demo-backend-2.git"
-  front:     "https://github.com/doublurehq/demo-front.git"
+  backend-1: "https://github.com/badilhq/demo-backend-1.git"
+  backend-2: "https://github.com/badilhq/demo-backend-2.git"
+  front:     "https://github.com/badilhq/demo-front.git"
 
 # Per-service chart settings (optional, preview-env 0.4.0 or later): every key
 # is optional and defaults to the value shown in its comment.

@@ -12,10 +12,10 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"github.com/doublurehq/doublure/internal/gitops"
-	"github.com/doublurehq/doublure/internal/metrics"
-	"github.com/doublurehq/doublure/internal/preview"
-	"github.com/doublurehq/doublure/internal/server"
+	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/metrics"
+	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/server"
 )
 
 var errUnexpected = errors.New("unexpected call")
@@ -107,7 +107,7 @@ func (f *loopFake) FanOutPRComments(context.Context, preview.PreviewValues, stri
 func assertSweepMetrics(t *testing.T, m *metrics.Metrics, expected string) {
 	t.Helper()
 	if err := testutil.GatherAndCompare(m.Gatherer(), strings.NewReader(expected),
-		"doublure_sweep_runs_total", "doublure_sweep_last_success_timestamp_seconds"); err != nil {
+		"badil_sweep_runs_total", "badil_sweep_last_success_timestamp_seconds"); err != nil {
 		t.Error(err)
 	}
 }
@@ -145,16 +145,16 @@ func TestRunSweepLoop_RecordsRuns(t *testing.T) {
 		stop()
 
 		assertSweepMetrics(t, f.Metrics, `
-# HELP doublure_sweep_runs_total In-server cleanup sweep runs, by result.
-# TYPE doublure_sweep_runs_total counter
-doublure_sweep_runs_total{result="ok"} 2
-# HELP doublure_sweep_last_success_timestamp_seconds Unix time of the last successful in-server cleanup sweep, 0 before the first one.
-# TYPE doublure_sweep_last_success_timestamp_seconds gauge
-doublure_sweep_last_success_timestamp_seconds `+strconv.FormatInt(at.Unix(), 10)+`
+# HELP badil_sweep_runs_total In-server cleanup sweep runs, by result.
+# TYPE badil_sweep_runs_total counter
+badil_sweep_runs_total{result="ok"} 2
+# HELP badil_sweep_last_success_timestamp_seconds Unix time of the last successful in-server cleanup sweep, 0 before the first one.
+# TYPE badil_sweep_last_success_timestamp_seconds gauge
+badil_sweep_last_success_timestamp_seconds `+strconv.FormatInt(at.Unix(), 10)+`
 `)
-		expected := "# HELP doublure_previews Previews in the gitops repo as of the last in-server cleanup sweep, " +
-			"0 before the first one.\n# TYPE doublure_previews gauge\ndoublure_previews 2\n"
-		err := testutil.GatherAndCompare(f.Gatherer(), strings.NewReader(expected), "doublure_previews")
+		expected := "# HELP badil_previews Previews in the gitops repo as of the last in-server cleanup sweep, " +
+			"0 before the first one.\n# TYPE badil_previews gauge\nbadil_previews 2\n"
+		err := testutil.GatherAndCompare(f.Gatherer(), strings.NewReader(expected), "badil_previews")
 		if err != nil {
 			t.Error(err)
 		}
@@ -169,12 +169,12 @@ func TestRunSweepLoop_RecordsFailures(t *testing.T) {
 		stop()
 
 		assertSweepMetrics(t, f.Metrics, `
-# HELP doublure_sweep_runs_total In-server cleanup sweep runs, by result.
-# TYPE doublure_sweep_runs_total counter
-doublure_sweep_runs_total{result="error"} 1
-# HELP doublure_sweep_last_success_timestamp_seconds Unix time of the last successful in-server cleanup sweep, 0 before the first one.
-# TYPE doublure_sweep_last_success_timestamp_seconds gauge
-doublure_sweep_last_success_timestamp_seconds 0
+# HELP badil_sweep_runs_total In-server cleanup sweep runs, by result.
+# TYPE badil_sweep_runs_total counter
+badil_sweep_runs_total{result="error"} 1
+# HELP badil_sweep_last_success_timestamp_seconds Unix time of the last successful in-server cleanup sweep, 0 before the first one.
+# TYPE badil_sweep_last_success_timestamp_seconds gauge
+badil_sweep_last_success_timestamp_seconds 0
 `)
 	})
 }
@@ -230,7 +230,7 @@ func TestRunSweepLoop_CancelStopsAnInFlightSweepUnrecorded(t *testing.T) {
 		}
 		stop()
 
-		if n, err := testutil.GatherAndCount(f.Gatherer(), "doublure_sweep_runs_total"); err != nil || n != 0 {
+		if n, err := testutil.GatherAndCount(f.Gatherer(), "badil_sweep_runs_total"); err != nil || n != 0 {
 			t.Errorf("sweep runs = %d (err %v) recorded for a sweep cancelled by shutdown, want 0", n, err)
 		}
 	})

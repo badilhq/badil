@@ -4,15 +4,15 @@
 # services:
 #   - name: backend-1
 #     commitSha: "abc123"         # optional — pinned to commit SHA (used as targetRevision and the image tag)
-#     host: "backend-1-feature-pricing.example.com"   # optional, written by doublure for exposed services; becomes the host parameter (default app.ingress.host)
+#     host: "backend-1-feature-pricing.example.com"   # optional, written by badil for exposed services; becomes the host parameter (default app.ingress.host)
 #     metadata:                    # optional — only present when service has a PR
 #       pr-author: "octocat"
-#       pr-url: "https://github.com/doublurehq/demo-backend-1/pull/42"
+#       pr-url: "https://github.com/badilhq/demo-backend-1/pull/42"
 #       pr-number: "42"
 #       created-at: "2026-02-18T14:30:00Z"
 #       updated-at: "2026-02-18T16:00:00Z"
 #       vcs.ref.name: "feature/add-pricing"
-#       cicd.pipeline.run.url: "https://github.com/doublurehq/demo-backend-1/actions/runs/12345"
+#       cicd.pipeline.run.url: "https://github.com/badilhq/demo-backend-1/actions/runs/12345"
 #   - name: backend-2              # no commitSha → tracks its branch (default main), no metadata
 #   - name: front
 
@@ -22,7 +22,7 @@ serviceRepos: {}
 
 # serviceCharts: optional per-service chart settings, read from the gitops
 # repo's services.yaml next to serviceRepos. Every key is optional; a service
-# without an entry uses every default. doublure validates the block; this chart
+# without an entry uses every default. badil validates the block; this chart
 # does not.
 #
 # serviceCharts:
@@ -45,16 +45,16 @@ serviceRepos: {}
 # its paths) and ingress.enabled: true must then come from a file in valueFiles.
 serviceCharts: {}
 
-# Ingress hosts come from each service entry's host, written by doublure from
+# Ingress hosts come from each service entry's host, written by badil from
 # the preview block of the gitops repo's services.yaml, and are passed as the
 # Helm parameter app.ingress.host (or the service's serviceCharts hostParam).
 # An entry without host gets no ingress host.
-# The preview block is doublure's input; this chart does not read it:
+# The preview block is badil's input; this chart does not read it:
 #
 # preview:
 #   domain: 127.0.0.1.nip.io      # lowercase bare domain, parent of every preview host
-#   tls: false                    # optional, default true; only picks https/http in doublure's PR-comment links
+#   tls: false                    # optional, default true; only picks https/http in badil's PR-comment links
 #   expose:                       # services that get a host; others get none
 #     front: {}                   # entry value: empty, {} or {path: ...}
 #     backend-1:
-#       path: /docs               # optional, default "/"; only used in doublure's PR-comment links
+#       path: /docs               # optional, default "/"; only used in badil's PR-comment links

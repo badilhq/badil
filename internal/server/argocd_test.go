@@ -10,8 +10,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"github.com/doublurehq/doublure/internal/metrics"
-	"github.com/doublurehq/doublure/internal/server"
+	"github.com/badilhq/badil/internal/metrics"
+	"github.com/badilhq/badil/internal/server"
 )
 
 const testArgoCDToken = "test-argocd-token"
@@ -52,20 +52,20 @@ func eventBody(updatedAt string) string {
 		`"revision":"abc123","updatedAt":"` + updatedAt + `"}`
 }
 
-// assertArgoCDEvents fails t unless doublure_argocd_events_total is exactly
+// assertArgoCDEvents fails t unless badil_argocd_events_total is exactly
 // samples, one "{result=...} n" line each; no samples means no series.
 func assertArgoCDEvents(t *testing.T, m *metrics.Metrics, samples ...string) {
 	t.Helper()
 	var expected strings.Builder
 	if len(samples) > 0 {
-		expected.WriteString("# HELP doublure_argocd_events_total Argo CD notification events, " +
-			"by whether they were recorded as a spin-up.\n# TYPE doublure_argocd_events_total counter\n")
+		expected.WriteString("# HELP badil_argocd_events_total Argo CD notification events, " +
+			"by whether they were recorded as a spin-up.\n# TYPE badil_argocd_events_total counter\n")
 	}
 	for _, s := range samples {
-		expected.WriteString("doublure_argocd_events_total" + s + "\n")
+		expected.WriteString("badil_argocd_events_total" + s + "\n")
 	}
 	if err := testutil.GatherAndCompare(m.Gatherer(), strings.NewReader(expected.String()),
-		"doublure_argocd_events_total"); err != nil {
+		"badil_argocd_events_total"); err != nil {
 		t.Error(err)
 	}
 }
@@ -122,21 +122,21 @@ func TestArgoCDEvent_Recorded(t *testing.T) {
 	}
 
 	if err := testutil.GatherAndCompare(m.Gatherer(), strings.NewReader(`
-# HELP doublure_preview_spinup_seconds Time from doublure's gitops write to the service's Argo CD Application being synced and Healthy.
-# TYPE doublure_preview_spinup_seconds histogram
-doublure_preview_spinup_seconds_bucket{catalog_service="backend-1",le="15"} 0
-doublure_preview_spinup_seconds_bucket{catalog_service="backend-1",le="30"} 0
-doublure_preview_spinup_seconds_bucket{catalog_service="backend-1",le="60"} 0
-doublure_preview_spinup_seconds_bucket{catalog_service="backend-1",le="120"} 1
-doublure_preview_spinup_seconds_bucket{catalog_service="backend-1",le="180"} 1
-doublure_preview_spinup_seconds_bucket{catalog_service="backend-1",le="300"} 1
-doublure_preview_spinup_seconds_bucket{catalog_service="backend-1",le="600"} 1
-doublure_preview_spinup_seconds_bucket{catalog_service="backend-1",le="900"} 1
-doublure_preview_spinup_seconds_bucket{catalog_service="backend-1",le="1800"} 1
-doublure_preview_spinup_seconds_bucket{catalog_service="backend-1",le="+Inf"} 1
-doublure_preview_spinup_seconds_sum{catalog_service="backend-1"} 120
-doublure_preview_spinup_seconds_count{catalog_service="backend-1"} 1
-`), "doublure_preview_spinup_seconds"); err != nil {
+# HELP badil_preview_spinup_seconds Time from badil's gitops write to the service's Argo CD Application being synced and Healthy.
+# TYPE badil_preview_spinup_seconds histogram
+badil_preview_spinup_seconds_bucket{catalog_service="backend-1",le="15"} 0
+badil_preview_spinup_seconds_bucket{catalog_service="backend-1",le="30"} 0
+badil_preview_spinup_seconds_bucket{catalog_service="backend-1",le="60"} 0
+badil_preview_spinup_seconds_bucket{catalog_service="backend-1",le="120"} 1
+badil_preview_spinup_seconds_bucket{catalog_service="backend-1",le="180"} 1
+badil_preview_spinup_seconds_bucket{catalog_service="backend-1",le="300"} 1
+badil_preview_spinup_seconds_bucket{catalog_service="backend-1",le="600"} 1
+badil_preview_spinup_seconds_bucket{catalog_service="backend-1",le="900"} 1
+badil_preview_spinup_seconds_bucket{catalog_service="backend-1",le="1800"} 1
+badil_preview_spinup_seconds_bucket{catalog_service="backend-1",le="+Inf"} 1
+badil_preview_spinup_seconds_sum{catalog_service="backend-1"} 120
+badil_preview_spinup_seconds_count{catalog_service="backend-1"} 1
+`), "badil_preview_spinup_seconds"); err != nil {
 		t.Error(err)
 	}
 	assertArgoCDEvents(t, m, `{result="recorded"} 1`)
@@ -168,7 +168,7 @@ func TestArgoCDEvent_Ignored(t *testing.T) {
 			assertArgoCDEvents(t, m, `{result="ignored"} 1`)
 			if n, err := testutil.GatherAndCount(
 				m.Gatherer(),
-				"doublure_preview_spinup_seconds",
+				"badil_preview_spinup_seconds",
 			); err != nil ||
 				n != 0 {
 				t.Errorf("spin-up series = %d (err %v), want 0", n, err)

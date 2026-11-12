@@ -1,4 +1,4 @@
-// Package metrics holds doublure's Prometheus collectors in their own
+// Package metrics holds badil's Prometheus collectors in their own
 // registry. A nil *Metrics records nothing, so callers that run without
 // metrics pass nil.
 package metrics
@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	namespace = "doublure"
+	namespace = "badil"
 
 	outcomeSkipped = "skipped"
 	triggerSweep   = "sweep"
@@ -26,7 +26,7 @@ const (
 	labelResult = "result"
 )
 
-// Metrics holds every doublure collector and the registry serving them.
+// Metrics holds every badil collector and the registry serving them.
 type Metrics struct {
 	registry *prometheus.Registry
 
@@ -44,7 +44,7 @@ type Metrics struct {
 }
 
 // New builds a registry holding the Go and process collectors and every
-// doublure collector.
+// badil collector.
 func New() *Metrics {
 	m := &Metrics{
 		registry: prometheus.NewRegistry(),
@@ -97,7 +97,7 @@ func New() *Metrics {
 		spinUp: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: namespace,
 			Name:      "preview_spinup_seconds",
-			Help:      "Time from doublure's gitops write to the service's Argo CD Application being synced and Healthy.",
+			Help:      "Time from badil's gitops write to the service's Argo CD Application being synced and Healthy.",
 			Buckets:   []float64{15, 30, 60, 120, 180, 300, 600, 900, 1800},
 		}, []string{"catalog_service"}),
 		argoCDEvents: prometheus.NewCounterVec(prometheus.CounterOpts{

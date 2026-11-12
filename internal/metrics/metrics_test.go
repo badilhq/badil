@@ -9,7 +9,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"github.com/doublurehq/doublure/internal/metrics"
+	"github.com/badilhq/badil/internal/metrics"
 )
 
 // assertGathered fails t unless the metrics of m named names are exactly
@@ -34,31 +34,31 @@ func TestMetrics_Counters(t *testing.T) {
 	m.SweepRun(false, time.Unix(1, 0))
 
 	assertGathered(t, m, `
-# HELP doublure_webhook_deliveries_total GitHub webhook deliveries, by verified event and HTTP status.
-# TYPE doublure_webhook_deliveries_total counter
-doublure_webhook_deliveries_total{event="pull_request",status="200"} 1
-doublure_webhook_deliveries_total{event="unverified",status="401"} 1
-# HELP doublure_reconciles_total Pull request reconciles, by outcome.
-# TYPE doublure_reconciles_total counter
-doublure_reconciles_total{outcome="deployed"} 1
-doublure_reconciles_total{outcome="skipped"} 2
-doublure_reconciles_total{outcome="failed"} 1
-# HELP doublure_reconcile_skips_total Skipped pull request reconciles, by reason.
-# TYPE doublure_reconcile_skips_total counter
-doublure_reconcile_skips_total{reason="fork pr"} 2
-# HELP doublure_teardowns_total Preview teardowns of a pull request, by trigger and result.
-# TYPE doublure_teardowns_total counter
-doublure_teardowns_total{result="unpinned",trigger="webhook"} 1
-doublure_teardowns_total{result="noop",trigger="sweep"} 1
-# HELP doublure_sweep_runs_total In-server cleanup sweep runs, by result.
-# TYPE doublure_sweep_runs_total counter
-doublure_sweep_runs_total{result="error"} 1
+# HELP badil_webhook_deliveries_total GitHub webhook deliveries, by verified event and HTTP status.
+# TYPE badil_webhook_deliveries_total counter
+badil_webhook_deliveries_total{event="pull_request",status="200"} 1
+badil_webhook_deliveries_total{event="unverified",status="401"} 1
+# HELP badil_reconciles_total Pull request reconciles, by outcome.
+# TYPE badil_reconciles_total counter
+badil_reconciles_total{outcome="deployed"} 1
+badil_reconciles_total{outcome="skipped"} 2
+badil_reconciles_total{outcome="failed"} 1
+# HELP badil_reconcile_skips_total Skipped pull request reconciles, by reason.
+# TYPE badil_reconcile_skips_total counter
+badil_reconcile_skips_total{reason="fork pr"} 2
+# HELP badil_teardowns_total Preview teardowns of a pull request, by trigger and result.
+# TYPE badil_teardowns_total counter
+badil_teardowns_total{result="unpinned",trigger="webhook"} 1
+badil_teardowns_total{result="noop",trigger="sweep"} 1
+# HELP badil_sweep_runs_total In-server cleanup sweep runs, by result.
+# TYPE badil_sweep_runs_total counter
+badil_sweep_runs_total{result="error"} 1
 `,
-		"doublure_webhook_deliveries_total",
-		"doublure_reconciles_total",
-		"doublure_reconcile_skips_total",
-		"doublure_teardowns_total",
-		"doublure_sweep_runs_total",
+		"badil_webhook_deliveries_total",
+		"badil_reconciles_total",
+		"badil_reconcile_skips_total",
+		"badil_teardowns_total",
+		"badil_sweep_runs_total",
 	)
 	if got := testutil.ToFloat64(m.SweepLastSuccessGauge()); got != 0 {
 		t.Errorf("sweep last success = %v, want 0", got)
@@ -71,7 +71,7 @@ doublure_sweep_runs_total{result="error"} 1
 func TestMetrics_OnlySkipsCountReasons(t *testing.T) {
 	m := metrics.New()
 	m.Reconcile("deployed", "ignored")
-	if n, err := testutil.GatherAndCount(m.Gatherer(), "doublure_reconcile_skips_total"); err != nil || n != 0 {
+	if n, err := testutil.GatherAndCount(m.Gatherer(), "badil_reconcile_skips_total"); err != nil || n != 0 {
 		t.Errorf("reconcile skips = %d (err %v), want 0", n, err)
 	}
 }
@@ -94,14 +94,14 @@ func TestMetrics_PreviewsGauge(t *testing.T) {
 		t.Errorf("sweep last success = %v, want %v", got, want)
 	}
 	assertGathered(t, m, `
-# HELP doublure_sweep_previews_deleted_total Previews deleted by the cleanup sweep, by rule.
-# TYPE doublure_sweep_previews_deleted_total counter
-doublure_sweep_previews_deleted_total{rule="no_pin"} 1
-doublure_sweep_previews_deleted_total{rule="ttl"} 1
-# HELP doublure_sweep_runs_total In-server cleanup sweep runs, by result.
-# TYPE doublure_sweep_runs_total counter
-doublure_sweep_runs_total{result="ok"} 1
-`, "doublure_sweep_previews_deleted_total", "doublure_sweep_runs_total")
+# HELP badil_sweep_previews_deleted_total Previews deleted by the cleanup sweep, by rule.
+# TYPE badil_sweep_previews_deleted_total counter
+badil_sweep_previews_deleted_total{rule="no_pin"} 1
+badil_sweep_previews_deleted_total{rule="ttl"} 1
+# HELP badil_sweep_runs_total In-server cleanup sweep runs, by result.
+# TYPE badil_sweep_runs_total counter
+badil_sweep_runs_total{result="ok"} 1
+`, "badil_sweep_previews_deleted_total", "badil_sweep_runs_total")
 }
 
 func TestMetrics_GitopsOp(t *testing.T) {
@@ -110,37 +110,37 @@ func TestMetrics_GitopsOp(t *testing.T) {
 	m.GitopsOp("teardown", "error", 2*time.Second)
 
 	assertGathered(t, m, `
-# HELP doublure_gitops_operation_duration_seconds Duration of gitops repo writes and teardowns, retries included.
-# TYPE doublure_gitops_operation_duration_seconds histogram
-doublure_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="0.005"} 0
-doublure_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="0.01"} 0
-doublure_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="0.025"} 0
-doublure_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="0.05"} 0
-doublure_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="0.1"} 0
-doublure_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="0.25"} 0
-doublure_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="0.5"} 0
-doublure_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="1"} 0
-doublure_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="2.5"} 1
-doublure_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="5"} 1
-doublure_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="10"} 1
-doublure_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="+Inf"} 1
-doublure_gitops_operation_duration_seconds_sum{op="teardown",result="error"} 2
-doublure_gitops_operation_duration_seconds_count{op="teardown",result="error"} 1
-doublure_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="0.005"} 0
-doublure_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="0.01"} 0
-doublure_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="0.025"} 0
-doublure_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="0.05"} 1
-doublure_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="0.1"} 1
-doublure_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="0.25"} 1
-doublure_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="0.5"} 1
-doublure_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="1"} 1
-doublure_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="2.5"} 1
-doublure_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="5"} 1
-doublure_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="10"} 1
-doublure_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="+Inf"} 1
-doublure_gitops_operation_duration_seconds_sum{op="write",result="ok"} 0.03
-doublure_gitops_operation_duration_seconds_count{op="write",result="ok"} 1
-`, "doublure_gitops_operation_duration_seconds")
+# HELP badil_gitops_operation_duration_seconds Duration of gitops repo writes and teardowns, retries included.
+# TYPE badil_gitops_operation_duration_seconds histogram
+badil_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="0.005"} 0
+badil_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="0.01"} 0
+badil_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="0.025"} 0
+badil_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="0.05"} 0
+badil_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="0.1"} 0
+badil_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="0.25"} 0
+badil_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="0.5"} 0
+badil_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="1"} 0
+badil_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="2.5"} 1
+badil_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="5"} 1
+badil_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="10"} 1
+badil_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="+Inf"} 1
+badil_gitops_operation_duration_seconds_sum{op="teardown",result="error"} 2
+badil_gitops_operation_duration_seconds_count{op="teardown",result="error"} 1
+badil_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="0.005"} 0
+badil_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="0.01"} 0
+badil_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="0.025"} 0
+badil_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="0.05"} 1
+badil_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="0.1"} 1
+badil_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="0.25"} 1
+badil_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="0.5"} 1
+badil_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="1"} 1
+badil_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="2.5"} 1
+badil_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="5"} 1
+badil_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="10"} 1
+badil_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="+Inf"} 1
+badil_gitops_operation_duration_seconds_sum{op="write",result="ok"} 0.03
+badil_gitops_operation_duration_seconds_count{op="write",result="ok"} 1
+`, "badil_gitops_operation_duration_seconds")
 }
 
 func TestMetrics_SpinUp(t *testing.T) {
@@ -150,25 +150,25 @@ func TestMetrics_SpinUp(t *testing.T) {
 	m.ArgoCDEventIgnored()
 
 	assertGathered(t, m, `
-# HELP doublure_preview_spinup_seconds Time from doublure's gitops write to the service's Argo CD Application being synced and Healthy.
-# TYPE doublure_preview_spinup_seconds histogram
-doublure_preview_spinup_seconds_bucket{catalog_service="backend-1",le="15"} 0
-doublure_preview_spinup_seconds_bucket{catalog_service="backend-1",le="30"} 0
-doublure_preview_spinup_seconds_bucket{catalog_service="backend-1",le="60"} 1
-doublure_preview_spinup_seconds_bucket{catalog_service="backend-1",le="120"} 1
-doublure_preview_spinup_seconds_bucket{catalog_service="backend-1",le="180"} 1
-doublure_preview_spinup_seconds_bucket{catalog_service="backend-1",le="300"} 1
-doublure_preview_spinup_seconds_bucket{catalog_service="backend-1",le="600"} 1
-doublure_preview_spinup_seconds_bucket{catalog_service="backend-1",le="900"} 1
-doublure_preview_spinup_seconds_bucket{catalog_service="backend-1",le="1800"} 1
-doublure_preview_spinup_seconds_bucket{catalog_service="backend-1",le="+Inf"} 1
-doublure_preview_spinup_seconds_sum{catalog_service="backend-1"} 45
-doublure_preview_spinup_seconds_count{catalog_service="backend-1"} 1
-# HELP doublure_argocd_events_total Argo CD notification events, by whether they were recorded as a spin-up.
-# TYPE doublure_argocd_events_total counter
-doublure_argocd_events_total{result="ignored"} 2
-doublure_argocd_events_total{result="recorded"} 1
-`, "doublure_preview_spinup_seconds", "doublure_argocd_events_total")
+# HELP badil_preview_spinup_seconds Time from badil's gitops write to the service's Argo CD Application being synced and Healthy.
+# TYPE badil_preview_spinup_seconds histogram
+badil_preview_spinup_seconds_bucket{catalog_service="backend-1",le="15"} 0
+badil_preview_spinup_seconds_bucket{catalog_service="backend-1",le="30"} 0
+badil_preview_spinup_seconds_bucket{catalog_service="backend-1",le="60"} 1
+badil_preview_spinup_seconds_bucket{catalog_service="backend-1",le="120"} 1
+badil_preview_spinup_seconds_bucket{catalog_service="backend-1",le="180"} 1
+badil_preview_spinup_seconds_bucket{catalog_service="backend-1",le="300"} 1
+badil_preview_spinup_seconds_bucket{catalog_service="backend-1",le="600"} 1
+badil_preview_spinup_seconds_bucket{catalog_service="backend-1",le="900"} 1
+badil_preview_spinup_seconds_bucket{catalog_service="backend-1",le="1800"} 1
+badil_preview_spinup_seconds_bucket{catalog_service="backend-1",le="+Inf"} 1
+badil_preview_spinup_seconds_sum{catalog_service="backend-1"} 45
+badil_preview_spinup_seconds_count{catalog_service="backend-1"} 1
+# HELP badil_argocd_events_total Argo CD notification events, by whether they were recorded as a spin-up.
+# TYPE badil_argocd_events_total counter
+badil_argocd_events_total{result="ignored"} 2
+badil_argocd_events_total{result="recorded"} 1
+`, "badil_preview_spinup_seconds", "badil_argocd_events_total")
 }
 
 func TestMetrics_ProcessAndGoCollectors(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/doublurehq/doublure/internal/preview"
+	"github.com/badilhq/badil/internal/preview"
 )
 
 func TestBuildSummary_PinnedAndMainTracking(t *testing.T) {

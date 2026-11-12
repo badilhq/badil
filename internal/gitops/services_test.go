@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/doublurehq/doublure/internal/gitops"
-	"github.com/doublurehq/doublure/internal/preview"
+	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/preview"
 )
 
 const serviceRepos = `serviceRepos:

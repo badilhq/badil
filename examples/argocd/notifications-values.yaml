@@ -1,34 +1,34 @@
-# Argo CD notifications for doublure's preview spin-up time
-# (doublure_preview_spinup_seconds): values for the argo-helm argo-cd chart.
+# Argo CD notifications for badil's preview spin-up time
+# (badil_preview_spinup_seconds): values for the argo-helm argo-cd chart.
 #
 # When a preview service's Application is synced and Healthy at a new
-# revision, the notifications controller POSTs to doublure's
-# /webhooks/argocd, authenticated by doublure's ARGOCD_WEBHOOK_TOKEN.
+# revision, the notifications controller POSTs to badil's
+# /webhooks/argocd, authenticated by badil's ARGOCD_WEBHOOK_TOKEN.
 #
 # Apply to your Argo CD release, passing the token at install time (this file
 # holds no secret):
 #
 #   helm upgrade argocd argo/argo-cd -n argocd --version <your installed argo-cd chart version> \
 #     --reuse-values -f notifications-values.yaml \
-#     --set-string notifications.secret.items.doublure-webhook-token="$ARGOCD_WEBHOOK_TOKEN"
+#     --set-string notifications.secret.items.badil-webhook-token="$ARGOCD_WEBHOOK_TOKEN"
 #
-# Argo CD installed without Helm: put the same keys (service.webhook.doublure,
-# template.doublure-spinup, trigger.on-preview-healthy and subscriptions) under
-# `data` of the argocd-notifications-cm ConfigMap, and the doublure-webhook-token
+# Argo CD installed without Helm: put the same keys (service.webhook.badil,
+# template.badil-spinup, trigger.on-preview-healthy and subscriptions) under
+# `data` of the argocd-notifications-cm ConfigMap, and the badil-webhook-token
 # key in the argocd-notifications-secret Secret.
 notifications:
   notifiers:
-    # Point the url at wherever doublure's Service is.
-    service.webhook.doublure: |
-      url: http://doublure.doublure.svc:8080
+    # Point the url at wherever badil's Service is.
+    service.webhook.badil: |
+      url: http://badil.badil.svc:8080
       headers:
         - name: Authorization
-          value: Bearer $doublure-webhook-token
+          value: Bearer $badil-webhook-token
 
   templates:
-    template.doublure-spinup: |
+    template.badil-spinup: |
       webhook:
-        doublure:
+        badil:
           method: POST
           path: /webhooks/argocd
           body: |
@@ -37,7 +37,7 @@ notifications:
               "service": "{{ index .app.metadata.labels "app.kubernetes.io/name" }}",
               "preview": "{{ index .app.metadata.labels "app.kubernetes.io/instance" }}",
               "revision": "{{ .app.status.operationState.syncResult.revision }}",
-              "updatedAt": "{{ index .app.metadata.annotations "preview.doublure.dev/updated-at" }}"
+              "updatedAt": "{{ index .app.metadata.annotations "preview.badil.dev/updated-at" }}"
             }
 
   triggers:
@@ -45,13 +45,13 @@ notifications:
     trigger.on-preview-healthy: |
       - when: app.status?.operationState?.phase in ['Succeeded'] and app.status?.health?.status == 'Healthy'
         oncePer: app.status?.operationState?.syncResult?.revision
-        send: [doublure-spinup]
+        send: [badil-spinup]
 
   # Service Applications of every preview; the selector excludes the
   # per-preview parent Applications, which carry only part-of.
   subscriptions:
     - recipients:
-        - doublure
+        - badil
       triggers:
         - on-preview-healthy
       selector: app.kubernetes.io/part-of=preview-environments,app.kubernetes.io/managed-by=argocd
