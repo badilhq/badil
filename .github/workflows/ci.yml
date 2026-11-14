@@ -37,4 +37,12 @@ jobs:
 
       - run: go build ./...
 
+      - name: values.schema.json up to date
+        run: |
+          go generate ./cmd/schemagen
+          if ! git diff --exit-code charts/preview-env/values.schema.json; then
+            echo '::error::values.schema.json is out of date: run make schema'
+            exit 1
+          fi
+
       - run: go test -race -count=1 ./...
