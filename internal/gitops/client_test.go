@@ -324,10 +324,12 @@ func TestWritePreviewWithRetry_ConflictThenSuccess(t *testing.T) {
 	in := sampleInputs()
 	in.CommitSha = "newsha"
 	in.Timestamp = "2026-05-26T10:00:00Z"
+	catalog := testCatalog("backend-1", "backend-2")
+	catalog.Branches = map[string]string{"backend-2": "develop"}
 
 	result, err := c.WritePreviewWithRetry(
 		context.Background(), "slug",
-		testCatalog("backend-1", "backend-2"),
+		catalog,
 		"backend-1", "newsha", in,
 		"chore(preview): create slug preview",
 		"chore(preview): update backend-1 in slug",
@@ -356,6 +358,18 @@ func TestWritePreviewWithRetry_ConflictThenSuccess(t *testing.T) {
 	}
 	if result.Values.Services[1].CommitSha != "" {
 		t.Errorf("backend-2 commitSha = %q, want empty (main-tracking)", result.Values.Services[1].CommitSha)
+	}
+	// The re-fetched file has no apiVersion, repoURL or branch: the retry
+	// write must carry the catalog's facts.
+	written, _ := capturedBody.Load().(string)
+	for _, expect := range []string{
+		"apiVersion: badil.dev/v1\nservices:\n",
+		"  - name: backend-1\n    repoURL: https://github.com/acme/backend-1.git\n    branch: main\n",
+		"  - name: backend-2\n    repoURL: https://github.com/acme/backend-2.git\n    branch: develop\n",
+	} {
+		if !strings.Contains(written, expect) {
+			t.Errorf("retry body missing %q:\n%s", expect, written)
+		}
 	}
 	assertWrittenHosts(t, result.Values, &capturedBody, "slug")
 }
