@@ -1,7 +1,7 @@
 BINARY := badil
 CMD := ./cmd/badil
 
-.PHONY: build test lint docker-build dev-bootstrap dev-verify dev-serve dev-cleanup
+.PHONY: build test lint schema docker-build dev-bootstrap dev-verify dev-serve dev-cleanup
 
 build:
 	CGO_ENABLED=0 go build -o $(BINARY) $(CMD)
@@ -11,6 +11,10 @@ test:
 
 lint:
 	golangci-lint run ./...
+
+# Regenerates charts/preview-env/values.schema.json from internal/chartvalues.
+schema:
+	go generate ./cmd/schemagen
 
 docker-build:
 	docker build -t $(BINARY):latest .
