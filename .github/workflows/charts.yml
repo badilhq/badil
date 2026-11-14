@@ -201,6 +201,11 @@ jobs:
             exit 1
           fi
           echo "$out" | grep -q 'argocdNamespace must be a non-empty string'
+          if out=$(helm template preview-x charts/preview-env -f charts/preview-env/ci/test-values.yaml --set-string argocdNamespace=0123 2>&1); then
+            echo '::error::expected render to fail with an argocdNamespace YAML reads as a number'
+            exit 1
+          fi
+          echo "$out" | grep -q 'argocdNamespace must not read as a YAML number, boolean or null'
 
       - name: Render badil with all components
         run: helm template t charts/badil -f charts/badil/ci/test-values.yaml --set ingress.enabled=true,ingress.host=badil.example.com,cleanup.enabled=true,metrics.serviceMonitor.enabled=true,dashboard.enabled=true
