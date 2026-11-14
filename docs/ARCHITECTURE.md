@@ -326,7 +326,7 @@ Limitations:
 9. `oncePer` is per pinned SHA: a service that was Healthy (`success`), then Degraded (`failure`), then Healthy again at the same SHA keeps `failure`, because `on-preview-deployed` already fired for that revision. A push (new SHA) resets it.
 10. A rollout that never completes (image never pushed, crash loop) shows as `failure` only after the Deployment's `progressDeadlineSeconds` (600 s by default).
 11. A transient `Unknown` sync status (for example a repo-server error) posts `error` once for that SHA; a later Healthy sync at a SHA where `on-preview-deployed` had not fired yet posts `success` on the same deployment.
-12. With a short `commit_sha` sent to `/v1/deploy`, `on-preview-degraded` and `on-preview-sync-error` never fire, because their guards compare `app.spec.source.targetRevision` with the resolved full SHA; nothing logs it. The label flow always pins the full SHA.
+12. With a short `commit_sha` sent to `/v1/deploy`, `on-preview-degraded` and `on-preview-sync-error` never fire, because their guards compare `app.spec.source.targetRevision` with the resolved full SHA; nothing logs it. `on-preview-deleted` then looks up the deployment by the short SHA and misses the full-SHA `success` deployment: it leaves that deployment open and creates an extra `inactive` deployment for the short ref. The label flow always pins the full SHA.
 
 ### Dashboard
 
