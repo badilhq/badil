@@ -49,6 +49,18 @@ serviceRepos: {}
 # its paths) and ingress.enabled: true must then come from a file in valueFiles.
 serviceCharts: {}
 
+# previewNamespace: optional extra metadata for the preview Namespace, read
+# from the gitops repo's services.yaml. Values must be strings: quote YAML 1.1
+# booleans such as yes, no, on, off. Quote such keys too: Helm reads an
+# unquoted key y or n as true or false. A key the chart already sets
+# (app.kubernetes.io/name, app.kubernetes.io/instance,
+# app.kubernetes.io/part-of, app.kubernetes.io/managed-by,
+# argocd.argoproj.io/sync-wave) fails rendering.
+#
+# previewNamespace:
+#   labels: {}        # extra Namespace labels, string values
+#   annotations: {}   # extra Namespace annotations, string values
+
 # Ingress hosts come from each service entry's host, written by badil from
 # the preview block of the gitops repo's services.yaml, and are passed as the
 # Helm parameter app.ingress.host (or the service's serviceCharts hostParam).

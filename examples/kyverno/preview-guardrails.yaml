@@ -1,0 +1,116 @@
+# Per-preview limits with Kyverno: a ResourceQuota, a LimitRange and an
+# ingress NetworkPolicy, all named preview-guardrails, generated in every
+# preview namespace (label app.kubernetes.io/part-of: preview-environments,
+# set by the preview-env chart). Existing previews get them when the policy is
+# applied; teardown deletes them with the preview namespace.
+#
+# - Requires Kyverno v1.19.0 or later.
+# - The values are examples to adapt: the quota numbers, the defaults, and the
+#   namespace of your ingress controller (ingress-nginx here).
+# - A quota on requests.cpu, requests.memory or limits.memory refuses pods that
+#   do not set them; the LimitRange gives every container defaults. Keep both.
+# - Kyverno's background controller creates the objects. Its Helm chart's
+#   default RBAC (backgroundController.rbac.coreClusterRole.extraResources)
+#   already covers resourcequotas, limitranges and networkpolicies; other
+#   installs grant them with a ClusterRole labelled
+#   rbac.kyverno.io/aggregate-to-background-controller: "true".
+# - The NetworkPolicy needs a CNI that enforces NetworkPolicies.
+#
+# Apply: kubectl apply -f preview-guardrails.yaml
+apiVersion: policies.kyverno.io/v1
+kind: GeneratingPolicy
+metadata:
+  name: badil-preview-guardrails
+spec:
+  evaluation:
+    synchronize:
+      enabled: true
+    generateExisting:
+      enabled: true
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["namespaces"]
+  matchConditions:
+    - name: preview-namespace
+      expression: object.metadata.?labels["app.kubernetes.io/part-of"].orValue("") == "preview-environments"
+  variables:
+    - name: nsName
+      expression: object.metadata.name
+  generate:
+    - expression: >-
+        generator.Apply(variables.nsName, [
+          {
+            "kind": dyn("ResourceQuota"),
+            "apiVersion": dyn("v1"),
+            "metadata": dyn({
+              "name": "preview-guardrails",
+              "namespace": string(variables.nsName)
+            }),
+            "spec": dyn({
+              "hard": dyn({
+                "requests.cpu": "2",
+                "requests.memory": "4Gi",
+                "limits.memory": "8Gi",
+                "pods": "30"
+              })
+            })
+          },
+          {
+            "kind": dyn("LimitRange"),
+            "apiVersion": dyn("v1"),
+            "metadata": dyn({
+              "name": "preview-guardrails",
+              "namespace": string(variables.nsName)
+            }),
+            "spec": dyn({
+              "limits": dyn([
+                {
+                  "type": dyn("Container"),
+                  "defaultRequest": dyn({
+                    "cpu": "100m",
+                    "memory": "128Mi"
+                  }),
+                  "default": dyn({
+                    "cpu": "500m",
+                    "memory": "512Mi"
+                  })
+                }
+              ])
+            })
+          },
+          {
+            "kind": dyn("NetworkPolicy"),
+            "apiVersion": dyn("networking.k8s.io/v1"),
+            "metadata": dyn({
+              "name": "preview-guardrails",
+              "namespace": string(variables.nsName)
+            }),
+            "spec": dyn({
+              "podSelector": dyn({}),
+              "policyTypes": dyn(["Ingress"]),
+              "ingress": dyn([
+                {
+                  "from": dyn([
+                    {
+                      "podSelector": dyn({})
+                    },
+                    {
+                      "namespaceSelector": dyn({
+                        "matchExpressions": dyn([
+                          {
+                            "key": dyn("kubernetes.io/metadata.name"),
+                            "operator": dyn("In"),
+                            "values": dyn(["ingress-nginx"])
+                          }
+                        ])
+                      })
+                    }
+                  ])
+                }
+              ])
+            })
+          }
+        ])

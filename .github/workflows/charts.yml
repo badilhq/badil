@@ -207,6 +207,79 @@ jobs:
           fi
           echo "$out" | grep -q 'argocdNamespace must not read as a YAML number, boolean or null'
 
+      - name: Render preview-env Namespace metadata
+        run: |
+          meta() {
+            helm template preview-x charts/preview-env -f charts/preview-env/ci/test-values.yaml -f - \
+              | yq -N 'select(.kind == "Namespace") | .metadata | ([.labels | to_entries[] | "label " + .key + "=" + .value] + [.annotations | to_entries[] | "annotation " + .key + "=" + .value]) | .[]'
+          }
+          got=$(meta < /dev/null)
+          want='label app.kubernetes.io/name=preview-x
+          label app.kubernetes.io/instance=preview-x
+          label app.kubernetes.io/part-of=preview-environments
+          label app.kubernetes.io/managed-by=argocd
+          annotation argocd.argoproj.io/sync-wave=-2'
+          if [ "$got" != "$want" ]; then
+            echo '::error::expected only the chart labels and sync-wave annotation on the Namespace without previewNamespace'
+            printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
+            exit 1
+          fi
+          got=$(meta <<'EOF'
+          previewNamespace:
+            labels:
+              pod-security.kubernetes.io/enforce: baseline
+              team: payments
+            annotations:
+              owner: platform
+          EOF
+          )
+          want='label app.kubernetes.io/name=preview-x
+          label app.kubernetes.io/instance=preview-x
+          label app.kubernetes.io/part-of=preview-environments
+          label app.kubernetes.io/managed-by=argocd
+          label pod-security.kubernetes.io/enforce=baseline
+          label team=payments
+          annotation argocd.argoproj.io/sync-wave=-2
+          annotation owner=platform'
+          if [ "$got" != "$want" ]; then
+            echo '::error::expected the previewNamespace labels and annotations after the chart ones'
+            printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
+            exit 1
+          fi
+
+      - name: Render preview-env with invalid previewNamespace fails
+        run: |
+          while IFS='|' read -r bad msg; do
+            if out=$(helm template preview-x charts/preview-env -f charts/preview-env/ci/test-values.yaml -f - 2>&1 <<EOF
+          previewNamespace:
+            $bad
+          EOF
+            ); then
+              echo "::error::expected render to fail with previewNamespace $bad"
+              exit 1
+            fi
+            if ! echo "$out" | grep -qF "$msg"; then
+              echo "::error::expected \"$msg\" with previewNamespace $bad"
+              printf 'got: %s\n' "$out"
+              exit 1
+            fi
+          done <<'CASES'
+          labels: {app.kubernetes.io/part-of: x}|previewNamespace.labels.app.kubernetes.io/part-of is set by the chart
+          annotations: {argocd.argoproj.io/sync-wave: "0"}|previewNamespace.annotations.argocd.argoproj.io/sync-wave is set by the chart
+          labels: {enabled: yes}|previewNamespace.labels.enabled must be a string
+          annotations: {owner: [a]}|previewNamespace.annotations.owner must be a string
+          labels: [a]|previewNamespace.labels must be a map
+          CASES
+
+      - name: Kyverno preview guardrails example
+        run: |
+          got=$(yq -N '[.apiVersion, .kind] | join(" ")' examples/kyverno/preview-guardrails.yaml)
+          if [ "$got" != 'policies.kyverno.io/v1 GeneratingPolicy' ]; then
+            echo '::error::expected examples/kyverno/preview-guardrails.yaml to be one policies.kyverno.io/v1 GeneratingPolicy'
+            printf 'got:\n%s\n' "$got"
+            exit 1
+          fi
+
       - name: Render badil with all components
         run: helm template t charts/badil -f charts/badil/ci/test-values.yaml --set ingress.enabled=true,ingress.host=badil.example.com,cleanup.enabled=true,metrics.serviceMonitor.enabled=true,dashboard.enabled=true
 
