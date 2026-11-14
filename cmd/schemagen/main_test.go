@@ -43,7 +43,7 @@ func TestGenerate_KeyConstraints(t *testing.T) {
 	}{
 		{"no $id", s["$id"], nil},
 		{"draft", s["$schema"], "https://json-schema.org/draft/2020-12/schema"},
-		{"root required", s["required"], []any{"apiVersion", "services"}},
+		{"root required", s["required"], []any{"apiVersion", "services", "argocdNamespace"}},
 		{"root open", s["additionalProperties"], true},
 		{"apiVersion const", at(t, s, "properties", "apiVersion", "const"), "badil.dev/v1"},
 		{

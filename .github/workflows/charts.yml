@@ -236,6 +236,16 @@ jobs:
             printf 'got: %s\n' "$out"
             exit 1
           fi
+          if out=$(printf 'argocdNamespace: null\n' | helm template preview-x charts/preview-env -f charts/preview-env/ci/test-values.yaml -f - 2>&1); then
+            echo '::error::expected render to fail with a null argocdNamespace'
+            exit 1
+          fi
+          want="at '': missing property 'argocdNamespace'"
+          if ! echo "$out" | grep -qF "$want"; then
+            echo "::error::expected \"$want\" with a null argocdNamespace"
+            printf 'got: %s\n' "$out"
+            exit 1
+          fi
           got=$(helm template preview-x charts/preview-env -f charts/preview-env/ci/test-values.yaml --set-string argocdNamespace=0123 \
             | grep -E '^kind: |^  namespace: ')
           want='kind: Namespace

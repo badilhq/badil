@@ -22,11 +22,13 @@ type Values struct {
 	ArgocdNamespace  string                  `yaml:"argocdNamespace"`
 }
 
-// JSONSchemaExtend requires apiVersion and services, allows other root keys,
+// JSONSchemaExtend requires apiVersion, services and argocdNamespace (a null
+// argocdNamespace in a values file removes the chart default before
+// validation, so it must fail as missing), allows other root keys,
 // fixes apiVersion to preview.APIVersion and argocdNamespace to a namespace
 // name.
 func (Values) JSONSchemaExtend(s *jsonschema.Schema) {
-	s.Required = []string{"apiVersion", "services"}
+	s.Required = []string{"apiVersion", "services", "argocdNamespace"}
 	s.AdditionalProperties = jsonschema.TrueSchema
 	if p, ok := s.Properties.Get("apiVersion"); ok {
 		p.Const = preview.APIVersion

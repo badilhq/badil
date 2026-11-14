@@ -1,8 +1,10 @@
 # Input contract: values.schema.json validates the merged values on every
 # render. apiVersion and services come from the preview file badil writes at
 # previews/<slug>/values.yaml; serviceCharts and previewNamespace from the
-# gitops repo's services.yaml. A null value is rejected wherever the schema
-# expects an object, a list or a string.
+# gitops repo's services.yaml. A null serviceCharts entry or field, a null
+# previewNamespace, labels or annotations, and a null field of a services
+# entry are rejected. A null serviceCharts falls back to its default ({}); a
+# null argocdNamespace is rejected as missing.
 
 # argocdNamespace: the namespace Argo CD runs in. The AppProject and every
 # service Application are created there. Must be a Kubernetes namespace name.

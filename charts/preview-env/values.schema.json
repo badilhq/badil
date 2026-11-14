@@ -146,6 +146,7 @@
   "type": "object",
   "required": [
     "apiVersion",
-    "services"
+    "services",
+    "argocdNamespace"
   ]
 }
