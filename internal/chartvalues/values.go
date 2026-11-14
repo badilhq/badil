@@ -66,11 +66,13 @@ type PreviewNamespace struct {
 }
 
 // JSONSchemaExtend makes both fields optional and rejects, in each, the keys
-// the chart sets on the Namespace.
+// the chart sets on the Namespace. A reserved key maps to the false schema
+// rather than to a propertyNames rule, whose failure Helm reports at a random
+// location.
 func (PreviewNamespace) JSONSchemaExtend(s *jsonschema.Schema) {
 	s.Required = nil
 	if p, ok := s.Properties.Get("labels"); ok {
-		p.PropertyNames = notOneOf(
+		reserve(p,
 			"app.kubernetes.io/name",
 			"app.kubernetes.io/instance",
 			"app.kubernetes.io/part-of",
@@ -78,17 +80,17 @@ func (PreviewNamespace) JSONSchemaExtend(s *jsonschema.Schema) {
 		)
 	}
 	if p, ok := s.Properties.Get("annotations"); ok {
-		p.PropertyNames = notOneOf("argocd.argoproj.io/sync-wave")
+		reserve(p, "argocd.argoproj.io/sync-wave")
 	}
 }
 
-// notOneOf is a schema that rejects each of keys.
-func notOneOf(keys ...string) *jsonschema.Schema {
-	enum := make([]any, len(keys))
-	for i, k := range keys {
-		enum[i] = k
+// reserve maps each of keys to the false schema in the properties of s, so
+// an object with any of them is rejected.
+func reserve(s *jsonschema.Schema, keys ...string) {
+	s.Properties = jsonschema.NewProperties()
+	for _, k := range keys {
+		s.Properties.Set(k, jsonschema.FalseSchema)
 	}
-	return &jsonschema.Schema{Not: &jsonschema.Schema{Enum: enum}}
 }
 
 // nonEmpty is a minLength of 1.

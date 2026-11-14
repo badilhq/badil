@@ -113,31 +113,23 @@
     "previewNamespace": {
       "properties": {
         "labels": {
+          "properties": {
+            "app.kubernetes.io/name": false,
+            "app.kubernetes.io/instance": false,
+            "app.kubernetes.io/part-of": false,
+            "app.kubernetes.io/managed-by": false
+          },
           "additionalProperties": {
             "type": "string"
-          },
-          "propertyNames": {
-            "not": {
-              "enum": [
-                "app.kubernetes.io/name",
-                "app.kubernetes.io/instance",
-                "app.kubernetes.io/part-of",
-                "app.kubernetes.io/managed-by"
-              ]
-            }
           },
           "type": "object"
         },
         "annotations": {
+          "properties": {
+            "argocd.argoproj.io/sync-wave": false
+          },
           "additionalProperties": {
             "type": "string"
-          },
-          "propertyNames": {
-            "not": {
-              "enum": [
-                "argocd.argoproj.io/sync-wave"
-              ]
-            }
           },
           "type": "object"
         }

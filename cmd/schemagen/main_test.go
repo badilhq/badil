@@ -82,17 +82,19 @@ func TestGenerate_KeyConstraints(t *testing.T) {
 		},
 		{
 			"labels reserved",
-			at(t, ns, "properties", "labels", "propertyNames", "not", "enum"),
-			[]any{
-				"app.kubernetes.io/name", "app.kubernetes.io/instance", "app.kubernetes.io/part-of",
-				"app.kubernetes.io/managed-by",
+			at(t, ns, "properties", "labels", "properties"),
+			map[string]any{
+				"app.kubernetes.io/name": false, "app.kubernetes.io/instance": false,
+				"app.kubernetes.io/part-of": false, "app.kubernetes.io/managed-by": false,
 			},
 		},
+		{"labels no propertyNames", at(t, ns, "properties", "labels", "propertyNames"), nil},
 		{
 			"annotations reserved",
-			at(t, ns, "properties", "annotations", "propertyNames", "not", "enum"),
-			[]any{"argocd.argoproj.io/sync-wave"},
+			at(t, ns, "properties", "annotations", "properties"),
+			map[string]any{"argocd.argoproj.io/sync-wave": false},
 		},
+		{"annotations no propertyNames", at(t, ns, "properties", "annotations", "propertyNames"), nil},
 	}
 	for _, tt := range tests {
 		if !reflect.DeepEqual(tt.got, tt.want) {
