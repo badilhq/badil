@@ -87,7 +87,7 @@ The ApplicationSet passes `preview-env.yaml`, then the preview file, as value fi
 ```yaml
 # previews/feature-pricing/values.yaml
 apiVersion: badil.dev/v1        # required, always badil.dev/v1
-services:                       # required: one entry per catalog service, in catalog order
+services:                       # required: at most one entry per catalog service (see CONTRACT.md for order)
   - name: backend-1             # required
     repoURL: https://github.com/acme/backend-1.git   # required: services.<service>.repo of badil.yaml, as written
     branch: master              # required: services.<service>.branch of badil.yaml, else main

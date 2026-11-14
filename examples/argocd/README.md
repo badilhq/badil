@@ -32,7 +32,7 @@ Preview Namespace labels and annotations go in `previewNamespace` of `preview-en
 ## Adapt to your org
 
 - Replace `https://github.com/badilhq/demo-gitops.git` with your gitops repo URL, in both the AppProject and the ApplicationSet.
-- Replace `oci://ghcr.io/badilhq/charts/preview-env` if you host the chart elsewhere.
+- Replace `oci://ghcr.io/badilhq/charts/preview-env` if you host the chart elsewhere, in the ApplicationSet, and its `oci://ghcr.io/badilhq/charts/*` entry in the AppProject's `sourceRepos`.
 - Replace the `services` entries in `badil.yaml` with your services.
 - If Argo CD runs in a namespace other than `argocd`, set it in: the ApplicationSet's `metadata.namespace`, its `destination.namespace`, and its `argocdNamespace` Helm parameter; the AppProject's `metadata.namespace`, and its destination namespace when it is `argocd`.
 
