@@ -338,6 +338,8 @@ jobs:
             'current-context: c' > "$tmp/kubeconfig"
           mkdir "$tmp/apps"
           cp examples/argocd/testdata/notifications/*.yaml "$tmp/apps/"
+          # The image runs as user argocd: let it read the runner's mktemp dir.
+          chmod -R a+rX "$tmp"
           triggers='on-preview-degraded on-preview-sync-error'
           want=$(for f in "$tmp"/apps/*.yaml; do
             for t in $triggers; do
@@ -347,7 +349,10 @@ jobs:
           # shellcheck disable=SC2016
           got=$(docker run --rm -e KUBECONFIG=/w/kubeconfig -e TRIGGERS="$triggers" -v "$tmp":/w -w /w \
             quay.io/argoproj/argocd:v3.6.1 bash -c '
-              for f in apps/*.yaml; do
+              shopt -s nullglob
+              files=(apps/*.yaml)
+              [ "${#files[@]}" -gt 0 ] || { echo "no fixture readable in apps/" >&2; exit 1; }
+              for f in "${files[@]}"; do
                 for t in $TRIGGERS; do
                   r=$(argocd admin notifications trigger run "$t" "./$f" --config-map ./cm.yaml --secret :empty 2>/dev/null | awk "NR > 1 { print \$NF }" | tail -n 1)
                   echo "$(basename "$f" .yaml) $t $r"
