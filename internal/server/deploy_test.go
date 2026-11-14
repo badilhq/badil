@@ -318,3 +318,116 @@ func TestDeploy_MalformedPreviewFails(t *testing.T) {
 		t.Error("a malformed preview block must fail before any write or comment")
 	}
 }
+
+// servicesWithCap is a catalog capped at two previews.
+const servicesWithCap = `serviceRepos:
+  backend-1: https://github.com/acme/backend-1.git
+preview:
+  maxPreviews: 2
+`
+
+func TestDeploy_PreviewLimitRefusesNewSlug(t *testing.T) {
+	fg := &fakeGitops{
+		servicesYAML: servicesWithCap,
+		writeResult:  previewWriteResult(),
+		listed:       []string{"checkout", "search"},
+	}
+	rec := postDeploy(t, newTestServer(t, fg), previewBody(), "test-token")
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if got, want := rec.Body.String(), `{"error":"preview limit (2) reached"}`+"\n"; got != want {
+		t.Errorf("body = %q, want %q", got, want)
+	}
+	if fg.capturedSlug != "" || fg.fanOutBodyCalled {
+		t.Error("a refused deploy must not write nor comment")
+	}
+}
+
+func TestDeploy_PreviewLimitDeploys(t *testing.T) {
+	cases := []struct {
+		name      string
+		yaml      string
+		previews  map[string]*preview.PreviewValues
+		listCalls int
+	}{
+		{
+			name:     "existing slug at the cap",
+			yaml:     servicesWithCap,
+			previews: map[string]*preview.PreviewValues{"feature-pricing": {}},
+		},
+		{
+			name:      "new slug below the cap",
+			yaml:      strings.Replace(servicesWithCap, "maxPreviews: 2", "maxPreviews: 3", 1),
+			listCalls: 1,
+		},
+		{
+			name: "cap unset",
+			yaml: strings.Replace(servicesWithCap, "preview:\n  maxPreviews: 2\n", "", 1),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fg := &fakeGitops{
+				servicesYAML: tc.yaml,
+				writeResult:  previewWriteResult(),
+				previews:     tc.previews,
+				listed:       []string{"checkout", "feature-pricing"},
+			}
+			if tc.previews == nil {
+				fg.listed = []string{"checkout", "search"}
+			}
+			rec := postDeploy(t, newTestServer(t, fg), previewBody(), "test-token")
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+			}
+			if fg.capturedSlug != "feature-pricing" {
+				t.Errorf("capturedSlug = %q, want feature-pricing", fg.capturedSlug)
+			}
+			if fg.listCalls != tc.listCalls {
+				t.Errorf("listCalls = %d, want %d", fg.listCalls, tc.listCalls)
+			}
+		})
+	}
+}
+
+func TestDeploy_PreviewLimitReadErrors(t *testing.T) {
+	cases := []struct {
+		name   string
+		fg     *fakeGitops
+		status int
+		op     string
+	}{
+		{
+			name:   "read preview",
+			fg:     &fakeGitops{previewErr: errors.New("read boom")},
+			status: http.StatusInternalServerError,
+			op:     "read preview: read boom",
+		},
+		{
+			name:   "list previews",
+			fg:     &fakeGitops{listErr: errors.Join(gitops.ErrUnauthorized, errors.New("list boom"))},
+			status: http.StatusBadGateway,
+			op:     "list previews: ",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.fg.servicesYAML = servicesWithCap
+			tc.fg.writeResult = previewWriteResult()
+			rec := postDeploy(t, newTestServer(t, tc.fg), previewBody(), "test-token")
+
+			if rec.Code != tc.status {
+				t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.status, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), tc.op) {
+				t.Errorf("body = %s, want it to contain %q", rec.Body.String(), tc.op)
+			}
+			if tc.fg.capturedSlug != "" || tc.fg.fanOutBodyCalled {
+				t.Error("a failed check must not write nor comment")
+			}
+		})
+	}
+}

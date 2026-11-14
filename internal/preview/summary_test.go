@@ -352,3 +352,13 @@ func TestBuildServiceHeldSummary(t *testing.T) {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+func TestBuildPreviewLimitSummary(t *testing.T) {
+	got := preview.BuildPreviewLimitSummary("pricing", 3)
+	want := "## ⚠️ Preview: `pricing`\n\n" +
+		"The preview limit (3) is reached. " +
+		"Once a preview is torn down, push to this pull request or re-add its label."
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}

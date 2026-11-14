@@ -21,6 +21,10 @@ const actionUnlabeled = "unlabeled"
 // was already deployed as it would be written.
 const alreadyDeployedReason = "already deployed"
 
+// previewLimitReason is the skip reason of a reconcile refused because
+// creating its preview would exceed preview.maxPreviews.
+const previewLimitReason = "preview limit reached"
+
 // Reconcile outcomes, the outcome label of Recorder.Reconcile.
 const (
 	outcomeDeployed = "deployed"
@@ -35,6 +39,7 @@ type ReconcileAPI interface {
 	TeardownAPI
 	GetPullRequest(ctx context.Context, owner, repo string, number int) (*gitops.PullRequest, error)
 	GetPreview(ctx context.Context, slug string) (*preview.PreviewValues, string, error)
+	ListPreviews(ctx context.Context) ([]string, error)
 }
 
 // Event is a pull_request webhook delivery to reconcile. Its Target's Slug is
@@ -59,9 +64,10 @@ type Event struct {
 // preview (preview.ResolveTarget). The PR is first torn down from every other
 // preview it may still be pinned in. Then, when it is open and has a target,
 // every catalog service of its repo is deployed there at its head SHA, unless
-// another PR already pins one of them. An open PR with conflicting named labels
-// is told so. Fork PRs and repos outside the catalog are skipped. Every outcome
-// is logged.
+// another PR already pins one of them, or the preview does not exist and
+// preview.maxPreviews previews already do. An open PR with conflicting named
+// labels is told so. Fork PRs and repos outside the catalog are skipped. Every
+// outcome is logged.
 //
 // A closed event is not guarded by its payload nor skipped for a repo outside
 // the catalog, and a closed fork PR is still torn down. When the catalog or
@@ -74,10 +80,11 @@ type Event struct {
 // skipped as already deployed.
 //
 // Each call records exactly one outcome through the Recorder: failed when the
-// catalog, the PR or the target preview can't be read on a non-closed event,
-// or when no service write succeeded and at least one failed; otherwise
-// skipped (with its reason) when the reconcile was skipped; otherwise deployed
-// when a service write succeeded; otherwise torn_down.
+// catalog, the PR or the target preview can't be read, or the previews can't
+// be listed, on a non-closed event, or when no service write succeeded and at
+// least one failed; otherwise skipped (with its reason) when the reconcile was
+// skipped; otherwise deployed when a service write succeeded; otherwise
+// torn_down.
 func ReconcilePR(ctx context.Context, api ReconcileAPI, ev Event) {
 	o, r := reconcile(ctx, api, ev)
 	api.Reconcile(o, r)
@@ -123,7 +130,7 @@ func reconcile(ctx context.Context, api ReconcileAPI, ev Event) (string, string)
 		return reconcileSkipped(ctx, ev, "repo not in catalog")
 	}
 	removed := cleanup(ctx, api, ev, pr, t, catalog.Label)
-	if o, r := refusedByHolder(ctx, api, ev, pr, t, services, catalog.Label); o != "" {
+	if o, r := refused(ctx, api, catalog, ev, pr, t, services); o != "" {
 		return o, r
 	}
 	outcome, reason := outcomeTornDown, ""
@@ -222,11 +229,32 @@ func movedReason(slug string) string {
 	return fmt.Sprintf("moved to preview `%s`", slug)
 }
 
+// refused reports whether the PR must not be deployed to t.Slug, as the
+// reconcile's outcome and reason: refusedByHolder's, then, when the preview
+// does not exist, refusedByLimit's. It returns "" when it is not refused.
+func refused(
+	ctx context.Context,
+	api ReconcileAPI,
+	catalog *gitops.ServiceCatalog,
+	ev Event,
+	pr *gitops.PullRequest,
+	t preview.Resolution,
+	services []string,
+) (string, string) {
+	o, r, exists := refusedByHolder(ctx, api, ev, pr, t, services, catalog.Label)
+	if o != "" || exists {
+		return o, r
+	}
+	return refusedByLimit(ctx, api, ev, pr, t, catalog.MaxPreviews)
+}
+
 // refusedByHolder reports whether the PR must not be deployed to t.Slug, as
 // the reconcile's outcome and reason: skipped when one of its services is
 // already pinned there by another PR (it is then told so), failed when the
 // preview can't be read, and "" when it is not refused. It reads nothing
-// unless the PR is open and has a target.
+// unless the PR is open and has a target. Its third result, exists, is true
+// when it read the preview t.Slug, false when the preview does not exist or
+// nothing was read.
 func refusedByHolder(
 	ctx context.Context,
 	api ReconcileAPI,
@@ -235,26 +263,59 @@ func refusedByHolder(
 	t preview.Resolution,
 	services []string,
 	label string,
-) (string, string) {
+) (string, string, bool) {
 	if !pr.Open || t.Slug == "" {
-		return "", ""
+		return "", "", false
 	}
 	vals, _, err := api.GetPreview(ctx, t.Slug)
 	if errors.Is(err, gitops.ErrNotFound) {
-		return "", ""
+		return "", "", false
 	}
 	if err != nil {
-		return reconcileFailed(ctx, ev, err)
+		o, r := reconcileFailed(ctx, ev, err)
+		return o, r, false
 	}
 	service, holder, held := heldBy(vals, services, ev.Target)
 	if !held {
-		return "", ""
+		return "", "", true
 	}
 	body := preview.BuildServiceHeldSummary(t.Slug, service, holder, label)
 	if upsertErr := api.UpsertPRComment(ctx, ev.Owner, ev.Repo, ev.Number, body); upsertErr != nil {
 		conflictCommentFailed(ctx, ev, upsertErr)
 	}
-	return reconcileSkipped(ctx, ev, "service held by another pr", slog.String("holder", holder))
+	o, r := reconcileSkipped(ctx, ev, "service held by another pr", slog.String("holder", holder))
+	return o, r, true
+}
+
+// refusedByLimit reports whether the PR must not create the preview t.Slug,
+// which does not exist, because maxPreviews previews already exist, as the
+// reconcile's outcome and reason: skipped when the cap is reached (the PR is
+// then told so), failed when the previews can't be listed, and "" when it is
+// not refused. It reads nothing unless the PR is open, has a target and
+// maxPreviews is set.
+func refusedByLimit(
+	ctx context.Context,
+	api ReconcileAPI,
+	ev Event,
+	pr *gitops.PullRequest,
+	t preview.Resolution,
+	maxPreviews int,
+) (string, string) {
+	if !pr.Open || t.Slug == "" || maxPreviews <= 0 {
+		return "", ""
+	}
+	slugs, err := api.ListPreviews(ctx)
+	if err != nil {
+		return reconcileFailed(ctx, ev, err)
+	}
+	if len(slugs) < maxPreviews {
+		return "", ""
+	}
+	body := preview.BuildPreviewLimitSummary(t.Slug, maxPreviews)
+	if upsertErr := api.UpsertPRComment(ctx, ev.Owner, ev.Repo, ev.Number, body); upsertErr != nil {
+		conflictCommentFailed(ctx, ev, upsertErr)
+	}
+	return reconcileSkipped(ctx, ev, previewLimitReason, slog.Int("max_previews", maxPreviews))
 }
 
 // heldBy returns the first entry of vals, in file order, that pins one of
