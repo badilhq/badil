@@ -314,3 +314,35 @@ jobs:
             exit 1
           fi
           echo "$out" | grep -q 'existingSecret is required'
+
+      - name: Argo CD GitHub deployments example
+        run: |
+          f=examples/argocd/github-deployments-values.yaml
+          got=$(yq -N '.notifications.templates | to_entries[] | .key + " " + (.value | from_yaml | .github.deployment.state + " " + .github.revisionPath)' "$f")
+          want='template.badil-preview-deployed success {{.app.status.operationState.syncResult.revision}}
+          template.badil-preview-failed failure {{.app.spec.source.targetRevision}}
+          template.badil-preview-errored error {{.app.spec.source.targetRevision}}
+          template.badil-preview-deleted inactive {{.app.spec.source.targetRevision}}'
+          if [ "$got" != "$want" ]; then
+            echo "::error::unexpected deployment states or revisionPath in $f templates"
+            printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
+            exit 1
+          fi
+          got=$(yq -N '.notifications.triggers | to_entries[] | .key + " " + (.value | from_yaml | (length | to_string) + " " + .[0].oncePer + " " + (.[0].send | join(",")))' "$f")
+          want='trigger.on-preview-deployed 1 app.status?.operationState?.syncResult?.revision badil-preview-deployed
+          trigger.on-preview-degraded 1 app.spec.source.targetRevision badil-preview-failed
+          trigger.on-preview-sync-error 1 app.spec.source.targetRevision badil-preview-errored
+          trigger.on-preview-deleted 1 app.metadata.name badil-preview-deleted'
+          if [ "$got" != "$want" ]; then
+            echo "::error::unexpected triggers in $f: each needs exactly one condition"
+            printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
+            exit 1
+          fi
+          got=$(yq -N '.notifications.subscriptions[] | (.recipients | join(",")) + ": " + (.triggers | join(","))' "$f")
+          want='badil: on-preview-healthy
+          github: on-preview-deployed,on-preview-deleted,on-preview-degraded,on-preview-sync-error'
+          if [ "$got" != "$want" ]; then
+            echo "::error::unexpected subscriptions in $f"
+            printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
+            exit 1
+          fi
