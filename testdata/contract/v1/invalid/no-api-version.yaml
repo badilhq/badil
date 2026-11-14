@@ -1,0 +1,5 @@
+# want: at '': missing property 'apiVersion'
+services:
+  - name: api
+    repoURL: https://github.com/acme/platform.git
+    branch: main

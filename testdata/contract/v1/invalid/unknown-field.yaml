@@ -1,0 +1,7 @@
+# want: at '/services/0': additional properties 'image' not allowed
+apiVersion: badil.dev/v1
+services:
+  - name: api
+    repoURL: https://github.com/acme/platform.git
+    branch: main
+    image: x

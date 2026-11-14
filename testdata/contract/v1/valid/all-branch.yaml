@@ -1,0 +1,9 @@
+# Every service tracks its branch: no commitSha, no host, no metadata.
+apiVersion: badil.dev/v1
+services:
+  - name: api
+    repoURL: https://github.com/acme/platform.git
+    branch: main
+  - name: front
+    repoURL: https://github.com/acme/front.git
+    branch: main

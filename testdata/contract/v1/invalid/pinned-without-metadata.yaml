@@ -1,0 +1,7 @@
+# want: at '/services/0': properties 'metadata' required, if 'commitSha' exists
+apiVersion: badil.dev/v1
+services:
+  - name: api
+    repoURL: https://github.com/acme/platform.git
+    branch: main
+    commitSha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
