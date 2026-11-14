@@ -1,0 +1,23 @@
+# Expected results of the triggers in ../../github-deployments-values.yaml.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: feature-x-api
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/instance: feature-x
+  annotations:
+    preview.badil.dev/vcs.ref.revision: "2222222222222222222222222222222222222222"
+    test.badil.dev/on-preview-degraded: "false"
+    test.badil.dev/on-preview-sync-error: "true"
+spec:
+  project: feature-x
+  source:
+    repoURL: https://github.com/acme/api.git
+    targetRevision: "2222222222222222222222222222222222222222"
+    path: k8s/
+status:
+  health: {status: Healthy}
+  sync: {status: Unknown, comparedTo: {source: {targetRevision: "2222222222222222222222222222222222222222"}}}
+  operationState: {phase: Succeeded, syncResult: {revision: "1111111111111111111111111111111111111111"}}
