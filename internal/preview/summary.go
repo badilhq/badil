@@ -123,3 +123,13 @@ func BuildServiceHeldSummary(slug, service, holderURL, base string) string {
 		"it is released within the next cleanup run.",
 		slug, service, holderURL, base)
 }
+
+// BuildPreviewLimitSummary renders the comment badil leaves on a PR it
+// refused to deploy because creating its preview slug would exceed the
+// preview cap of limit previews.
+func BuildPreviewLimitSummary(slug string, limit int) string {
+	return fmt.Sprintf("## ⚠️ Preview: `%s`\n\n"+
+		"The preview limit (%d) is reached. "+
+		"Once a preview is torn down, push to this pull request or re-add its label.",
+		slug, limit)
+}

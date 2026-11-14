@@ -43,6 +43,7 @@ type gitopsAPI interface {
 	) (*gitops.TeardownResult, error)
 	UpsertPRComment(ctx context.Context, owner, repo string, prNumber int, body string) error
 	GetPreview(ctx context.Context, slug string) (*preview.PreviewValues, string, error)
+	ListPreviews(ctx context.Context) ([]string, error)
 	GetPullRequest(ctx context.Context, owner, repo string, number int) (*gitops.PullRequest, error)
 }
 
@@ -126,6 +127,9 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("service %q not in catalog", req.Service))
 		return
 	}
+	if s.refuseOverLimit(ctx, logger, w, services.MaxPreviews, slug) {
+		return
+	}
 
 	inputs := preview.DeployInputs{
 		GitopsRepo:     "", // not used downstream; carry-over from earlier shape
@@ -155,6 +159,43 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 
 	logger.InfoContext(ctx, "deploy succeeded", slog.String("gitops_commit_url", result.CommitURL))
 	writeJSON(ctx, w, http.StatusOK, resp)
+}
+
+// refuseOverLimit answers the deploy and reports true when it must not go on:
+// 409 when the preview slug does not exist and maxPreviews previews already
+// do, or the upstream error when the preview can't be read or the previews
+// can't be listed. It reads nothing when maxPreviews is 0 (no cap). The check
+// and the later write are not atomic, so the cap is soft.
+func (s *Server) refuseOverLimit(
+	ctx context.Context,
+	logger *slog.Logger,
+	w http.ResponseWriter,
+	maxPreviews int,
+	slug string,
+) bool {
+	if maxPreviews <= 0 {
+		return false
+	}
+	_, _, err := s.gitops.GetPreview(ctx, slug)
+	if err == nil {
+		return false
+	}
+	if !errors.Is(err, gitops.ErrNotFound) {
+		writeUpstreamError(ctx, logger, w, "read preview", err)
+		return true
+	}
+	slugs, err := s.gitops.ListPreviews(ctx)
+	if err != nil {
+		writeUpstreamError(ctx, logger, w, "list previews", err)
+		return true
+	}
+	if len(slugs) < maxPreviews {
+		return false
+	}
+	msg := fmt.Sprintf("preview limit (%d) reached", maxPreviews)
+	logger.WarnContext(ctx, "deploy failed", slog.String("op", "preview limit"), slog.String("err", msg))
+	writeJSONError(ctx, w, http.StatusConflict, msg)
+	return true
 }
 
 // splitJoinedErr renders an errors.Join-style multi-error as one string per

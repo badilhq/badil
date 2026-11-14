@@ -29,6 +29,9 @@ type ServiceCatalog struct {
 	// Branches maps each service whose serviceCharts entry sets branch to that
 	// branch. It is nil when no entry sets one.
 	Branches map[string]string
+	// MaxPreviews is preview.maxPreviews, the most previews that may exist
+	// before a deploy that would create a new one is refused. 0 means no cap.
+	MaxPreviews int
 }
 
 // DefaultLabel is the preview label when preview.label is absent.
@@ -99,10 +102,11 @@ type serviceChart struct {
 }
 
 type previewBlock struct {
-	Domain domainName              `yaml:"domain"`
-	TLS    *tlsFlag                `yaml:"tls"`
-	Expose map[string]*exposeEntry `yaml:"expose"`
-	Label  *labelName              `yaml:"label"`
+	Domain      domainName              `yaml:"domain"`
+	TLS         *tlsFlag                `yaml:"tls"`
+	Expose      map[string]*exposeEntry `yaml:"expose"`
+	Label       *labelName              `yaml:"label"`
+	MaxPreviews *maxPreviews            `yaml:"maxPreviews"`
 }
 
 type exposeEntry struct {
@@ -134,6 +138,20 @@ func (l *labelName) UnmarshalYAML(n *yaml.Node) error {
 		return malformed("preview.label", "must be a non-empty string")
 	}
 	*l = labelName(n.Value)
+	return nil
+}
+
+// maxPreviews is preview.maxPreviews. It only accepts a YAML integer of at
+// least 1, not a string, a float or a non-positive integer; a YAML null leaves
+// the field unset.
+type maxPreviews int
+
+func (m *maxPreviews) UnmarshalYAML(n *yaml.Node) error {
+	var v int
+	if n.Tag != "!!int" || n.Decode(&v) != nil || v < 1 {
+		return malformed("preview.maxPreviews", "must be a positive integer")
+	}
+	*m = maxPreviews(v)
 	return nil
 }
 
@@ -191,11 +209,18 @@ func ParseServices(raw []byte) (*ServiceCatalog, error) {
 	if doc.Preview != nil && doc.Preview.Label != nil {
 		label = string(*doc.Preview.Label)
 	}
+	maxPrev := 0
+	if doc.Preview != nil && doc.Preview.MaxPreviews != nil {
+		maxPrev = int(*doc.Preview.MaxPreviews)
+	}
 	branches, err := parseServiceCharts(doc.ServiceCharts, repos)
 	if err != nil {
 		return nil, fmt.Errorf("services.yaml: %w", err)
 	}
-	return &ServiceCatalog{Services: services, URLs: urls, Label: label, Repos: repos, Branches: branches}, nil
+	return &ServiceCatalog{
+		Services: services, URLs: urls, Label: label, Repos: repos, Branches: branches,
+		MaxPreviews: maxPrev,
+	}, nil
 }
 
 // parseServiceCharts validates the decoded serviceCharts block, in sorted

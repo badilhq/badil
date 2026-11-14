@@ -32,8 +32,14 @@ type fakeGitops struct {
 	prErr   error
 	prCalls int
 
-	// previews is what GetPreview reads; an unknown slug is ErrNotFound.
-	previews map[string]*preview.PreviewValues
+	// previews is what GetPreview reads, unless previewErr is set; an unknown
+	// slug is ErrNotFound.
+	previews   map[string]*preview.PreviewValues
+	previewErr error
+	// listed is what ListPreviews returns, unless listErr is set.
+	listed    []string
+	listErr   error
+	listCalls int
 
 	started chan string
 
@@ -143,9 +149,20 @@ func (f *fakeGitops) GetPullRequest(_ context.Context, _, _ string, _ int) (*git
 }
 
 func (f *fakeGitops) GetPreview(_ context.Context, slug string) (*preview.PreviewValues, string, error) {
+	if f.previewErr != nil {
+		return nil, "", f.previewErr
+	}
 	vals, ok := f.previews[slug]
 	if !ok {
 		return nil, "", gitops.ErrNotFound
 	}
 	return vals, "blob-" + slug, nil
+}
+
+func (f *fakeGitops) ListPreviews(context.Context) ([]string, error) {
+	f.listCalls++
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return f.listed, nil
 }

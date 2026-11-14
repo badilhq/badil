@@ -294,6 +294,51 @@ func TestParseServices_MalformedLabel(t *testing.T) {
 	}
 }
 
+func TestParseServices_MaxPreviews(t *testing.T) {
+	tests := []struct {
+		name    string
+		preview string
+		want    int
+	}{
+		{name: "absent block", want: 0},
+		{name: "absent key", preview: "preview:\n  tls: false\n", want: 0},
+		{name: "empty value", preview: "preview:\n  maxPreviews:\n", want: 0},
+		{name: "null", preview: "preview:\n  maxPreviews: ~\n", want: 0},
+		{name: "set", preview: "preview:\n  maxPreviews: 3\n", want: 3},
+		{name: "set without a domain", preview: "preview:\n  label: deploy\n  maxPreviews: 1\n", want: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := gitops.ParseServices([]byte(serviceRepos + tt.preview))
+			if err != nil {
+				t.Fatalf("ParseServices: %v", err)
+			}
+			if got.MaxPreviews != tt.want {
+				t.Errorf("MaxPreviews = %d, want %d", got.MaxPreviews, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseServices_MalformedMaxPreviews(t *testing.T) {
+	const want = "services.yaml: malformed preview block: preview.maxPreviews: must be a positive integer"
+	for name, preview := range map[string]string{
+		"string":   "preview:\n  maxPreviews: \"3\"\n",
+		"zero":     "preview:\n  maxPreviews: 0\n",
+		"negative": "preview:\n  maxPreviews: -1\n",
+		"float":    "preview:\n  maxPreviews: 1.5\n",
+		"boolean":  "preview:\n  maxPreviews: true\n",
+		"sequence": "preview:\n  maxPreviews: [3]\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := gitops.ParseServices([]byte(serviceRepos + preview))
+			if err == nil || err.Error() != want {
+				t.Fatalf("err = %v, want %q", err, want)
+			}
+		})
+	}
+}
+
 func TestParseServices_Repos(t *testing.T) {
 	got, err := gitops.ParseServices([]byte(serviceRepos))
 	if err != nil {

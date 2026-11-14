@@ -32,9 +32,10 @@ type deployCall struct {
 // reconcileServices unless catalogErr is set. teardownBySlug, when it has the
 // slug, overrides teardown, and teardownErr fails every teardown. previews is
 // what GetPreview reads, unless previewErr is set; an unknown slug is
-// ErrNotFound. A write of a service in unchanged with skipUnchanged set
+// ErrNotFound. maxPreviews, when set, is the catalog's MaxPreviews. listed is
+// what ListPreviews returns, unless listErr is set. A write of a service in unchanged with skipUnchanged set
 // returns an Unchanged result and is logged in skipped, not in writes. calls
-// logs, in order, "teardown:<slug>", "get:<slug>", "write:<slug>",
+// logs, in order, "teardown:<slug>", "get:<slug>", "list", "write:<slug>",
 // "unchanged:<slug>", "upsert" and "fanout". Metrics records the outcomes;
 // nil records nothing.
 type reconcileFake struct {
@@ -52,6 +53,9 @@ type reconcileFake struct {
 	previewErr     error
 	teardownErr    error
 	unchanged      map[string]bool
+	maxPreviews    int
+	listed         []string
+	listErr        error
 
 	prReads   int
 	skipped   []deployCall
@@ -74,11 +78,24 @@ func (f *reconcileFake) GetPreview(_ context.Context, slug string) (*preview.Pre
 	return vals, "blob-" + slug, nil
 }
 
+func (f *reconcileFake) ListPreviews(context.Context) ([]string, error) {
+	f.calls = append(f.calls, "list")
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return f.listed, nil
+}
+
 func (f *reconcileFake) FetchServiceCatalog(context.Context) (*gitops.ServiceCatalog, error) {
 	if f.catalogErr != nil {
 		return nil, f.catalogErr
 	}
-	return gitops.ParseServices([]byte(reconcileServices))
+	catalog, err := gitops.ParseServices([]byte(reconcileServices))
+	if err != nil {
+		return nil, err
+	}
+	catalog.MaxPreviews = f.maxPreviews
+	return catalog, nil
 }
 
 func (f *reconcileFake) GetPullRequest(context.Context, string, string, int) (*gitops.PullRequest, error) {
