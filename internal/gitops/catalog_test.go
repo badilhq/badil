@@ -349,6 +349,10 @@ func TestParseCatalog_Branch(t *testing.T) {
 		{name: "yes is the string yes", entry: "{repo: r, branch: yes}", want: map[string]string{"front": "yes"}},
 		{name: "on is the string on", entry: "{repo: r, branch: on}", want: map[string]string{"front": "on"}},
 		{name: "quoted", entry: `{repo: r, branch: "no"}`, want: map[string]string{"front": "no"}},
+		{
+			name: "date-like is the string", entry: "{repo: r, branch: 2024-01-01}",
+			want: map[string]string{"front": "2024-01-01"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -473,6 +477,16 @@ func TestParseCatalog_MalformedServices(t *testing.T) {
 			"first invalid entry in file order",
 			"services:\n  front:\n    repo: 1\n  backend-1:\n    image: x\n",
 			"badil.yaml: services.front.repo must be a non-empty string",
+		},
+		{
+			"duplicate repo in an entry",
+			"services:\n  front:\n    repo: a\n    repo: b\n",
+			"badil.yaml: services.front.repo is defined more than once",
+		},
+		{
+			"duplicate branch in an entry",
+			"services:\n  front: {repo: r, branch: a, branch: b}\n",
+			"badil.yaml: services.front.branch is defined more than once",
 		},
 		{
 			"duplicate service",

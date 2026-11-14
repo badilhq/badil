@@ -226,15 +226,21 @@ func parseServiceEntries(n *yaml.Node) ([]string, map[string]string, map[string]
 
 // serviceEntry validates one services entry and returns its repo and its
 // branch ("" when absent). Each key is checked on the node: repo is required,
-// branch optional, any other key an error.
+// branch optional, any other key or a repeated key an error (decoding into a
+// yaml.Node does not detect duplicate keys).
 func serviceEntry(name string, n *yaml.Node) (string, string, error) {
 	if n.Kind != yaml.MappingNode {
 		return "", "", fmt.Errorf("services.%s must be a mapping", name)
 	}
 	var repo, branch string
 	var hasRepo bool
+	seen := make(map[string]bool, len(n.Content)/pairStride)
 	for i := 0; i+1 < len(n.Content); i += pairStride {
 		key, val := n.Content[i].Value, resolveAlias(n.Content[i+1])
+		if seen[key] {
+			return "", "", fmt.Errorf("services.%s.%s is defined more than once", name, key)
+		}
+		seen[key] = true
 		switch key {
 		case "repo":
 			if !nonEmptyString(val) {
@@ -256,11 +262,19 @@ func serviceEntry(name string, n *yaml.Node) (string, string, error) {
 	return repo, branch, nil
 }
 
-// nonEmptyString reports whether n is a non-empty YAML string scalar. Any
-// string scalar counts (yaml.v3 tags `yes` or `on` !!str); a node tagged
-// otherwise (!!int, !!float, !!bool, !!null), a mapping or a sequence does not.
+// nonEmptyString reports whether n is a non-empty scalar usable as a string.
+// Any scalar counts (yaml.v3 tags `yes` or `on` !!str, `2024-01-01`
+// !!timestamp) except one tagged !!int, !!float, !!bool or !!null; a mapping
+// or a sequence does not.
 func nonEmptyString(n *yaml.Node) bool {
-	return n.Kind == yaml.ScalarNode && n.Tag == strTag && n.Value != ""
+	if n.Kind != yaml.ScalarNode || n.Value == "" {
+		return false
+	}
+	switch n.Tag {
+	case "!!int", "!!float", "!!bool", "!!null":
+		return false
+	}
+	return true
 }
 
 // resolveAlias returns the node an alias points to, or n itself.
