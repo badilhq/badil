@@ -1,0 +1,122 @@
+---
+# Source: preview-env/templates/namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: all-branch
+  labels:
+    app.kubernetes.io/name: all-branch
+    app.kubernetes.io/instance: all-branch
+    app.kubernetes.io/part-of: preview-environments
+    app.kubernetes.io/managed-by: argocd
+    "team": "platform"
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+
+---
+# Source: preview-env/templates/appproject.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: all-branch
+  namespace: "argocd"
+  labels:
+    app.kubernetes.io/name: all-branch
+    app.kubernetes.io/instance: all-branch
+    app.kubernetes.io/part-of: preview-environments
+    app.kubernetes.io/managed-by: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: "Preview environment: all-branch"
+  sourceRepos:
+    - "https://github.com/acme/platform.git"
+    - "https://github.com/acme/front.git"
+  destinations:
+    - namespace: all-branch
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+
+---
+# Source: preview-env/templates/application.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: all-branch-api
+  namespace: "argocd"
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/instance: all-branch
+    app.kubernetes.io/part-of: preview-environments
+    app.kubernetes.io/managed-by: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    preview.badil.dev/vcs.ref.revision: ""
+    preview.badil.dev/host: ""
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: all-branch
+  source:
+    repoURL: "https://github.com/acme/platform.git"
+    targetRevision: "main"
+    path: "deploy/chart"
+    helm:
+      releaseName: api
+      valueFiles:
+        - "values-preview.yaml"
+      parameters:
+        - name: "app.image.tag"
+          value: "$ARGOCD_APP_REVISION"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: all-branch
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+
+---
+# Source: preview-env/templates/application.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: all-branch-front
+  namespace: "argocd"
+  labels:
+    app.kubernetes.io/name: front
+    app.kubernetes.io/instance: all-branch
+    app.kubernetes.io/part-of: preview-environments
+    app.kubernetes.io/managed-by: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    preview.badil.dev/vcs.ref.revision: ""
+    preview.badil.dev/host: ""
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: all-branch
+  source:
+    repoURL: "https://github.com/acme/front.git"
+    targetRevision: "main"
+    path: "k8s/"
+    helm:
+      releaseName: front
+      parameters:
+        - name: "app.image.tag"
+          value: "$ARGOCD_APP_REVISION"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: all-branch
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false

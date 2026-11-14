@@ -7,6 +7,8 @@ on:
       - "charts/**"
       - "examples/**"
       - "internal/preview/testdata/**"
+      - "testdata/contract/**"
+      - "schema/**"
       - "ct.yaml"
       - ".github/workflows/charts.yml"
   pull_request:
@@ -496,6 +498,40 @@ jobs:
               branch: main
               commitSha: abc123
           EOF
+
+      - name: Render the valid contract fixtures to their goldens
+        run: |
+          for f in testdata/contract/v1/valid/*.yaml; do
+            n=$(basename "$f" .yaml)
+            golden="testdata/contract/v1/preview-env/$n.golden.yaml"
+            if ! out=$(helm template "$n" charts/preview-env -f testdata/contract/v1/preview-env.yaml -f "$f"); then
+              echo "::error::preview-env failed to render $f"
+              exit 1
+            fi
+            if ! echo "$out" | diff -u "$golden" -; then
+              echo "::error::preview-env output differs from $golden: regenerate with make contract-golden"
+              exit 1
+            fi
+          done
+
+      - name: Render the invalid contract fixtures fails
+        run: |
+          for f in testdata/contract/v1/invalid/*.yaml; do
+            want=$(sed -n 's/^# want: //p' "$f")
+            if [ -z "$want" ]; then
+              echo "::error::$f has no '# want: ' line"
+              exit 1
+            fi
+            if out=$(helm template "$(basename "$f" .yaml)" charts/preview-env -f testdata/contract/v1/preview-env.yaml -f "$f" 2>&1); then
+              echo "::error::expected render of $f to fail"
+              exit 1
+            fi
+            if ! echo "$out" | grep -qF "$want"; then
+              echo "::error::expected \"$want\" rendering $f"
+              printf 'got: %s\n' "$out"
+              exit 1
+            fi
+          done
 
       - name: Render badil without required values fails
         run: |
