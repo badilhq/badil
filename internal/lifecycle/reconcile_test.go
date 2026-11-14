@@ -13,10 +13,13 @@ import (
 	"github.com/badilhq/badil/internal/preview"
 )
 
-const reconcileServices = `serviceRepos:
-  api: https://github.com/acme/monorepo.git
-  worker: https://github.com/acme/monorepo
-  front: https://github.com/acme/front.git
+const reconcileServices = `services:
+  api:
+    repo: https://github.com/acme/monorepo.git
+  worker:
+    repo: https://github.com/acme/monorepo
+  front:
+    repo: https://github.com/acme/front.git
 `
 
 const fetchedSHA = "fe7c4ed0000000000000000000000000000000ff"
@@ -90,7 +93,7 @@ func (f *reconcileFake) FetchServiceCatalog(context.Context) (*gitops.ServiceCat
 	if f.catalogErr != nil {
 		return nil, f.catalogErr
 	}
-	catalog, err := gitops.ParseServices([]byte(reconcileServices))
+	catalog, err := gitops.ParseCatalog([]byte(reconcileServices))
 	if err != nil {
 		return nil, err
 	}

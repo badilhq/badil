@@ -237,10 +237,13 @@ func TestDeploy_UnknownField(t *testing.T) {
 	}
 }
 
-const servicesWithPreview = `serviceRepos:
-  backend-1: https://github.com/acme/backend-1.git
-  backend-2: https://github.com/acme/backend-2.git
-  front: https://github.com/acme/front.git
+const servicesWithPreview = `services:
+  backend-1:
+    repo: https://github.com/acme/backend-1.git
+  backend-2:
+    repo: https://github.com/acme/backend-2.git
+  front:
+    repo: https://github.com/acme/front.git
 preview:
   domain: 127.0.0.1.nip.io
   tls: false
@@ -267,7 +270,7 @@ func previewBody() string {
 }
 
 func TestDeploy_PreviewURLsInSummary(t *testing.T) {
-	fg := &fakeGitops{servicesYAML: servicesWithPreview, writeResult: previewWriteResult()}
+	fg := &fakeGitops{badilYAML: servicesWithPreview, writeResult: previewWriteResult()}
 	rec := postDeploy(t, newTestServer(t, fg), previewBody(), "test-token")
 
 	if rec.Code != http.StatusOK {
@@ -292,7 +295,7 @@ func TestDeploy_PreviewURLsInSummary(t *testing.T) {
 
 func TestDeploy_PreviewURLsDefaultToHTTPS(t *testing.T) {
 	yml := strings.Replace(servicesWithPreview, "  tls: false\n", "", 1)
-	fg := &fakeGitops{servicesYAML: yml, writeResult: previewWriteResult()}
+	fg := &fakeGitops{badilYAML: yml, writeResult: previewWriteResult()}
 	rec := postDeploy(t, newTestServer(t, fg), previewBody(), "test-token")
 
 	if rec.Code != http.StatusOK {
@@ -305,7 +308,7 @@ func TestDeploy_PreviewURLsDefaultToHTTPS(t *testing.T) {
 
 func TestDeploy_MalformedPreviewFails(t *testing.T) {
 	yml := strings.Replace(servicesWithPreview, "path: /docs", "path: docs", 1)
-	fg := &fakeGitops{servicesYAML: yml, writeResult: previewWriteResult()}
+	fg := &fakeGitops{badilYAML: yml, writeResult: previewWriteResult()}
 	rec := postDeploy(t, newTestServer(t, fg), previewBody(), "test-token")
 
 	if rec.Code < http.StatusBadRequest {
@@ -320,17 +323,18 @@ func TestDeploy_MalformedPreviewFails(t *testing.T) {
 }
 
 // servicesWithCap is a catalog capped at two previews.
-const servicesWithCap = `serviceRepos:
-  backend-1: https://github.com/acme/backend-1.git
+const servicesWithCap = `services:
+  backend-1:
+    repo: https://github.com/acme/backend-1.git
 preview:
   maxPreviews: 2
 `
 
 func TestDeploy_PreviewLimitRefusesNewSlug(t *testing.T) {
 	fg := &fakeGitops{
-		servicesYAML: servicesWithCap,
-		writeResult:  previewWriteResult(),
-		listed:       []string{"checkout", "search"},
+		badilYAML:   servicesWithCap,
+		writeResult: previewWriteResult(),
+		listed:      []string{"checkout", "search"},
 	}
 	rec := postDeploy(t, newTestServer(t, fg), previewBody(), "test-token")
 
@@ -370,10 +374,10 @@ func TestDeploy_PreviewLimitDeploys(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			fg := &fakeGitops{
-				servicesYAML: tc.yaml,
-				writeResult:  previewWriteResult(),
-				previews:     tc.previews,
-				listed:       []string{"checkout", "feature-pricing"},
+				badilYAML:   tc.yaml,
+				writeResult: previewWriteResult(),
+				previews:    tc.previews,
+				listed:      []string{"checkout", "feature-pricing"},
 			}
 			if tc.previews == nil {
 				fg.listed = []string{"checkout", "search"}
@@ -415,7 +419,7 @@ func TestDeploy_PreviewLimitReadErrors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			tc.fg.servicesYAML = servicesWithCap
+			tc.fg.badilYAML = servicesWithCap
 			tc.fg.writeResult = previewWriteResult()
 			rec := postDeploy(t, newTestServer(t, tc.fg), previewBody(), "test-token")
 

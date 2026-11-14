@@ -306,7 +306,7 @@ func TestTeardown_PanicRecovered(t *testing.T) {
 func TestTeardown_ClosedEmptyBranchSlugWithNamedLabel(t *testing.T) {
 	pr := fetchedPR(false, "preview:pricing")
 	pr.HeadRef = "---"
-	fg := &fakeGitops{servicesYAML: servicesWithPreview, pr: pr}
+	fg := &fakeGitops{badilYAML: servicesWithPreview, pr: pr}
 	s, _ := newTeardownServer(t, fg)
 	ev := prEvent("closed", true)
 	ev.PullRequest.Head.Ref = gh.Ptr("---")

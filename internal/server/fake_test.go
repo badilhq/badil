@@ -8,17 +8,17 @@ import (
 )
 
 // fakeGitops captures calls and returns canned responses. Each field controls
-// one of the methods on gitopsAPI. When servicesYAML is set, the catalog is
+// one of the methods on gitopsAPI. When badilYAML is set, the catalog is
 // parsed from it instead of being taken from catalog. When started is non-nil,
 // FetchServiceCatalog sends "catalog" and TeardownPreviewWithRetry sends
 // "teardown" on entry; the test buffers the channel.
 type fakeGitops struct {
-	catalog      []string
-	servicesYAML string
-	catalogErr   error
-	writeResult  *gitops.WriteResult
-	writeErr     error
-	fanOutErr    error
+	catalog     []string
+	badilYAML   string
+	catalogErr  error
+	writeResult *gitops.WriteResult
+	writeErr    error
+	fanOutErr   error
 
 	// teardownResult nil means TeardownPreviewWithRetry returns an empty
 	// result. A non-nil teardownGate blocks the call until it is closed.
@@ -71,8 +71,8 @@ func (f *fakeGitops) FetchServiceCatalog(_ context.Context) (*gitops.ServiceCata
 	if f.catalogErr != nil {
 		return nil, f.catalogErr
 	}
-	if f.servicesYAML != "" {
-		return gitops.ParseServices([]byte(f.servicesYAML))
+	if f.badilYAML != "" {
+		return gitops.ParseCatalog([]byte(f.badilYAML))
 	}
 	return &gitops.ServiceCatalog{Services: f.catalog}, nil
 }

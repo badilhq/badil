@@ -17,7 +17,7 @@ import (
 //	go test -run TestGoldenYAML -update ./internal/preview
 var updateGolden = flag.Bool("update", false, "rewrite golden fixture from current output")
 
-// goldenRepos is the catalog's serviceRepos for the golden fixture.
+// goldenRepos is the catalog's service repos for the golden fixture.
 func goldenRepos() map[string]string {
 	return map[string]string{
 		"backend-1": "https://github.com/acme/backend-1.git",

@@ -549,7 +549,7 @@ func TestApplyHosts_YAML(t *testing.T) {
 	}
 }
 
-// catalogRepos is a catalog's serviceRepos for backend-1, backend-2 and front.
+// catalogRepos is a catalog's service repos for backend-1, backend-2 and front.
 func catalogRepos() map[string]string {
 	return map[string]string{
 		"backend-1": "https://github.com/acme/backend-1.git",

@@ -2,7 +2,7 @@ package preview
 
 import "strings"
 
-// URLConfig is the parsed `preview` block of the gitops repo's services.yaml.
+// URLConfig is the parsed `preview` block of the gitops repo's badil.yaml.
 // The zero value writes no hosts; links follow the hosts already written in
 // the preview file.
 type URLConfig struct {

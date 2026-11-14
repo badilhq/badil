@@ -89,22 +89,23 @@ func classifyHTTPError(resp *gh.Response, err error) error {
 	return err
 }
 
-// FetchServiceCatalog reads services.yaml from the gitops repo and returns
-// the keys of its serviceRepos mapping (the canonical service catalog) and its
-// validated `preview` block. A malformed `preview` block is an error.
+// FetchServiceCatalog reads badil.yaml from the gitops repo and returns its
+// validated service catalog (the keys of its services mapping, with each
+// service's repo and branch) and `preview` block. A malformed file is an
+// error.
 func (c *Client) FetchServiceCatalog(ctx context.Context) (*ServiceCatalog, error) {
-	content, _, resp, err := c.gh.Repositories.GetContents(ctx, c.owner, c.repo, "services.yaml", nil)
+	content, _, resp, err := c.gh.Repositories.GetContents(ctx, c.owner, c.repo, configFile, nil)
 	if err != nil {
 		return nil, classifyHTTPError(resp, err)
 	}
 	if content == nil {
-		return nil, fmt.Errorf("services.yaml: not a file")
+		return nil, fmt.Errorf("%s: not a file", configFile)
 	}
 	raw, err := content.GetContent()
 	if err != nil {
-		return nil, fmt.Errorf("decode services.yaml: %w", err)
+		return nil, fmt.Errorf("decode %s: %w", configFile, err)
 	}
-	return ParseServices([]byte(raw))
+	return ParseCatalog([]byte(raw))
 }
 
 // previewsDir is the gitops repo directory holding one subdirectory per preview.

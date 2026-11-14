@@ -65,16 +65,19 @@ func sampleInputs() preview.DeployInputs {
 }
 
 func TestFetchServiceCatalog(t *testing.T) {
-	const servicesYAML = `serviceRepos:
-  backend-1: https://github.com/acme/backend-1.git
-  backend-2: https://github.com/acme/backend-2.git
-  front: https://github.com/acme/front.git
+	const badilYAML = `services:
+  backend-1:
+    repo: https://github.com/acme/backend-1.git
+  backend-2:
+    repo: https://github.com/acme/backend-2.git
+  front:
+    repo: https://github.com/acme/front.git
 `
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/repos/acme/gitops/contents/services.yaml" {
+		if r.URL.Path != "/repos/acme/gitops/contents/badil.yaml" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
-		_, _ = io.WriteString(w, encodeContent("services.yaml", "sha-svc", servicesYAML))
+		_, _ = io.WriteString(w, encodeContent("badil.yaml", "sha-svc", badilYAML))
 	}))
 	defer srv.Close()
 
