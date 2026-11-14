@@ -1,15 +1,27 @@
+# Input contract: values.schema.json validates the merged values on every
+# render. apiVersion and services come from the preview file badil writes at
+# previews/<slug>/values.yaml; serviceCharts and previewNamespace from the
+# gitops repo's services.yaml. A null value is rejected wherever the schema
+# expects an object, a list or a string.
+
 # argocdNamespace: the namespace Argo CD runs in. The AppProject and every
-# service Application are created there. Must be a non-empty string.
+# service Application are created there. Must be a Kubernetes namespace name.
 argocdNamespace: argocd
 
-# services: list of services to deploy in the preview environment
-# Each service can optionally have commitSha (pinned) and metadata (PR info).
+# apiVersion: required, badil.dev/v1. There is no default: a preview file
+# without it (written by an older badil) fails rendering.
 #
+# services: one entry per service of the preview, in catalog order. Unknown
+# fields are rejected.
+#
+# apiVersion: badil.dev/v1
 # services:
-#   - name: backend-1
-#     commitSha: "abc123"         # optional — pinned to commit SHA (used as targetRevision and the image tag)
+#   - name: backend-1                                    # required
+#     repoURL: https://github.com/acme/backend-1.git     # required: the service's git URL, the Application source and an AppProject sourceRepo
+#     branch: main                                       # required: targetRevision when not pinned
+#     commitSha: "abc123"         # optional — pinned to commit SHA (used as targetRevision and the image tag); requires metadata
 #     host: "backend-1-feature-pricing.example.com"   # optional, written by badil for exposed services; becomes the host parameter (default app.ingress.host)
-#     metadata:                    # optional — only present when service has a PR
+#     metadata:                    # optional — present exactly when commitSha is; every key required
 #       pr-author: "octocat"
 #       pr-url: "https://github.com/badilhq/demo-backend-1/pull/42"
 #       pr-number: "42"
@@ -17,21 +29,21 @@ argocdNamespace: argocd
 #       updated-at: "2026-02-18T16:00:00Z"
 #       vcs.ref.name: "feature/add-pricing"
 #       cicd.pipeline.run.url: "https://github.com/badilhq/demo-backend-1/actions/runs/12345"
-#   - name: backend-2              # no commitSha → tracks its branch (default main), no metadata
-#   - name: front
+#   - name: backend-2              # no commitSha → tracks its branch at $ARGOCD_APP_REVISION, no metadata
+#     repoURL: https://github.com/acme/backend-2.git
+#     branch: main
 
 services: []
 
-serviceRepos: {}
-
 # serviceCharts: optional per-service chart settings, read from the gitops
-# repo's services.yaml next to serviceRepos. Every key is optional; a service
-# without an entry uses every default. badil validates the block; this chart
-# does not.
+# repo's services.yaml. Every key is optional; a service without an entry uses
+# every default. A null entry or a null field is rejected; omit the entry or
+# the field to use the defaults. String values must be non-empty strings:
+# quote YAML 1.1 booleans such as yes, no, on, off.
 #
 # serviceCharts:
 #   backend-1:
-#     branch: master              # default "main": targetRevision of unpinned services
+#     branch: master              # read by badil, which writes it as the entry's branch; this chart does not read it
 #     path: deploy/helm           # default "k8s/": chart path in the service repo
 #     imageTagParam: image.tag    # default "app.image.tag": Helm parameter set to the image tag
 #     hostParam: ingress.hostname # default "app.ingress.host": Helm parameter set to the preview host
@@ -50,12 +62,13 @@ serviceRepos: {}
 serviceCharts: {}
 
 # previewNamespace: optional extra metadata for the preview Namespace, read
-# from the gitops repo's services.yaml. Values must be strings: quote YAML 1.1
-# booleans such as yes, no, on, off. Quote such keys too: Helm reads an
-# unquoted key y or n as true or false. A key the chart already sets
+# from the gitops repo's services.yaml. A null previewNamespace, labels or
+# annotations is rejected; omit it instead. Values must be strings: quote
+# YAML 1.1 booleans such as yes, no, on, off. Quote such keys too: Helm reads
+# an unquoted key y or n as true or false. A label the chart already sets
 # (app.kubernetes.io/name, app.kubernetes.io/instance,
-# app.kubernetes.io/part-of, app.kubernetes.io/managed-by,
-# argocd.argoproj.io/sync-wave) fails rendering.
+# app.kubernetes.io/part-of, app.kubernetes.io/managed-by) or the annotation
+# argocd.argoproj.io/sync-wave fails rendering.
 #
 # previewNamespace:
 #   labels: {}        # extra Namespace labels, string values
