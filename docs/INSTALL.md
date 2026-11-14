@@ -259,7 +259,8 @@ Set `preview.domain` in `services.yaml`, create a wildcard DNS record `*.<domain
    helm get values badil -n badil -o yaml > badil-values.yaml
    helm upgrade badil oci://ghcr.io/badilhq/charts/badil -n badil --version X.Y.Z -f badil-values.yaml
    ```
-2. Then set the ApplicationSet's `preview-env` `targetRevision` to the one in the new tag's [`examples/argocd/applicationset-previews.yaml`](../examples/argocd/applicationset-previews.yaml), and re-apply it.
+2. When upgrading to `preview-env` 0.9.0 from an earlier version: rewrite every live preview before the next step, by pushing to its PR or removing and re-adding its label. `preview-env` 0.9.0 refuses preview files without `apiVersion: badil.dev/v1`, which only the new badil writes; the cleanup sweep deletes previews no PR pins any more. See ARCHITECTURE [Gitops repo contract](ARCHITECTURE.md#gitops-repo-contract).
+3. Then set the ApplicationSet's `preview-env` `targetRevision` to the one in the new tag's [`examples/argocd/applicationset-previews.yaml`](../examples/argocd/applicationset-previews.yaml), and re-apply it.
 
 ## 11. Troubleshooting
 
