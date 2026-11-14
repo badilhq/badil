@@ -11,11 +11,13 @@ import (
 	"github.com/badilhq/badil/internal/preview"
 )
 
-// singleQuotedValues is a values file as written before metadata moved to
-// yaml.v3's own quoting. Existing gitops files keep this form until badil
-// next writes them, so it must still decode.
-const singleQuotedValues = `services:
+// singleQuotedValues is a values file whose metadata is single-quoted, as a
+// hand edit or another YAML writer may leave it, so it must still decode.
+const singleQuotedValues = `apiVersion: badil.dev/v1
+services:
   - name: backend-1
+    repoURL: https://github.com/acme/backend-1.git
+    branch: main
     commitSha: abc1234567890
     metadata:
       pr-author: octocat
@@ -26,7 +28,11 @@ const singleQuotedValues = `services:
       vcs.ref.name: feature/add-pricing
       cicd.pipeline.run.url: https://github.com/acme/backend-1/actions/runs/1
   - name: backend-2
+    repoURL: https://github.com/acme/backend-2.git
+    branch: develop
   - name: front
+    repoURL: https://github.com/acme/front
+    branch: main
 `
 
 func encodeValues(t *testing.T, v any) []byte {
@@ -60,39 +66,11 @@ func TestMetadata_DecodesSingleQuotedValues(t *testing.T) {
 	}
 }
 
-func TestMetadata_UnknownKeysRoundTrip(t *testing.T) {
-	const in = `pr-author: octocat
-pr-url: https://github.com/acme/backend-1/pull/42
-pr-number: "42"
-created-at: "2026-05-26T10:00:00Z"
-updated-at: "2026-05-26T10:00:00Z"
-vcs.ref.name: feature/add-pricing
-cicd.pipeline.run.url: https://github.com/acme/backend-1/actions/runs/1
-z-extra: last
-a-extra: first
-`
-	var md preview.Metadata
-	if err := yaml.Unmarshal([]byte(in), &md); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if md.Extra["a-extra"] != "first" || md.Extra["z-extra"] != "last" {
-		t.Fatalf("Extra = %v, want a-extra and z-extra preserved", md.Extra)
-	}
-	got := string(encodeValues(t, md))
-	if !strings.HasSuffix(got, "a-extra: first\nz-extra: last\n") {
-		t.Errorf("unknown keys not written sorted after known keys:\n%s", got)
-	}
-}
-
 func TestMetadata_NonStringValueIsError(t *testing.T) {
 	const in = "pr-author:\n  name: octocat\n"
 	var md preview.Metadata
 	if err := yaml.Unmarshal([]byte(in), &md); err == nil {
 		t.Fatalf("decode succeeded with %+v, want error for mapping value", md)
-	}
-	const extra = "a-extra: [one, two]\n"
-	if err := yaml.Unmarshal([]byte(extra), &md); err == nil {
-		t.Fatalf("decode succeeded with %+v, want error for sequence value", md)
 	}
 }
 

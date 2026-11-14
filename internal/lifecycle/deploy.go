@@ -13,8 +13,7 @@ type DeployAPI interface {
 	WritePreviewWithRetry(
 		ctx context.Context,
 		slug string,
-		catalog []string,
-		urls preview.URLConfig,
+		catalog *gitops.ServiceCatalog,
 		serviceName, commitSha string,
 		inputs preview.DeployInputs,
 		createMessage, updateMessage string,
@@ -42,7 +41,7 @@ func DeployPR(
 	updateMsg := fmt.Sprintf("chore(preview): update %s in %s", inputs.ServiceName, slug)
 
 	result, err := api.WritePreviewWithRetry(
-		ctx, slug, catalog.Services, catalog.URLs, inputs.ServiceName, inputs.CommitSha, inputs, createMsg, updateMsg,
+		ctx, slug, catalog, inputs.ServiceName, inputs.CommitSha, inputs, createMsg, updateMsg,
 		skipUnchanged,
 	)
 	if err != nil {

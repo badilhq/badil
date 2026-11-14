@@ -80,8 +80,7 @@ func (f *fakeGitops) FetchServiceCatalog(_ context.Context) (*gitops.ServiceCata
 func (f *fakeGitops) WritePreviewWithRetry(
 	_ context.Context,
 	slug string,
-	catalog []string,
-	urls preview.URLConfig,
+	catalog *gitops.ServiceCatalog,
 	serviceName, _ string,
 	inputs preview.DeployInputs,
 	_, _ string,
@@ -89,15 +88,15 @@ func (f *fakeGitops) WritePreviewWithRetry(
 ) (*gitops.WriteResult, error) {
 	f.capturedSkipUnchanged = append(f.capturedSkipUnchanged, skipUnchanged)
 	f.capturedSlug = slug
-	f.capturedCatalog = catalog
-	f.capturedURLs = urls
+	f.capturedCatalog = catalog.Services
+	f.capturedURLs = catalog.URLs
 	f.capturedService = serviceName
 	f.capturedInputs = inputs
 	if f.writeResult == nil {
 		return nil, f.writeErr
 	}
 	result := *f.writeResult
-	result.Values = preview.ApplyHosts(f.writeResult.Values, slug, urls)
+	result.Values = preview.ApplyHosts(f.writeResult.Values, slug, catalog.URLs)
 	return &result, f.writeErr
 }
 

@@ -109,8 +109,7 @@ func (f *reconcileFake) GetPullRequest(context.Context, string, string, int) (*g
 func (f *reconcileFake) WritePreviewWithRetry(
 	_ context.Context,
 	slug string,
-	catalog []string,
-	_ preview.URLConfig,
+	catalog *gitops.ServiceCatalog,
 	serviceName, commitSha string,
 	inputs preview.DeployInputs,
 	_, _ string,
@@ -120,7 +119,7 @@ func (f *reconcileFake) WritePreviewWithRetry(
 		return nil, err
 	}
 	call := deployCall{
-		slug: slug, service: serviceName, commitSha: commitSha, catalog: catalog, inputs: inputs,
+		slug: slug, service: serviceName, commitSha: commitSha, catalog: catalog.Services, inputs: inputs,
 		skipUnchanged: skipUnchanged,
 	}
 	if skipUnchanged && f.unchanged[serviceName] {

@@ -1,5 +1,8 @@
+apiVersion: badil.dev/v1
 services:
   - name: backend-1
+    repoURL: https://github.com/acme/backend-1.git
+    branch: main
     commitSha: abc1234567890
     metadata:
       pr-author: octocat
@@ -10,4 +13,8 @@ services:
       vcs.ref.name: feature/add-pricing
       cicd.pipeline.run.url: https://github.com/acme/backend-1/actions/runs/1
   - name: backend-2
+    repoURL: https://github.com/acme/backend-2.git
+    branch: develop
   - name: front
+    repoURL: https://github.com/acme/front
+    branch: main

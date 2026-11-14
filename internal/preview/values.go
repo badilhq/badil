@@ -1,7 +1,6 @@
 package preview
 
 import (
-	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -10,7 +9,8 @@ import (
 // BuildPreviewValues constructs a fresh PreviewValues for a slug given the
 // service catalog. The triggering service (serviceName) is pinned to
 // commitSha and carries metadata; every other catalog service renders as a
-// bare entry tracking its branch.
+// bare entry tracking its branch. The result has apiVersion APIVersion;
+// ApplyCatalog sets each entry's repoURL and branch.
 //
 // The order of services in the result matches the order of the catalog slice.
 func BuildPreviewValues(serviceName, commitSha string, catalog []string, inputs DeployInputs) PreviewValues {
@@ -23,7 +23,7 @@ func BuildPreviewValues(serviceName, commitSha string, catalog []string, inputs 
 		}
 		services = append(services, entry)
 	}
-	return PreviewValues{Services: services}
+	return PreviewValues{APIVersion: APIVersion, Services: services}
 }
 
 // UpdatePreviewValues returns a copy of existing with a deploy event merged in:
@@ -31,8 +31,8 @@ func BuildPreviewValues(serviceName, commitSha string, catalog []string, inputs 
 //     but preserve the original created-at;
 //   - if the service is absent, append a new pinned entry.
 //
-// Other services are left untouched (branch-tracking entries keep their
-// state). existing is never mutated.
+// Other services and the root fields are left untouched (branch-tracking
+// entries keep their state). existing is never mutated.
 func UpdatePreviewValues(existing PreviewValues, serviceName, commitSha string, inputs DeployInputs) PreviewValues {
 	services := make([]ServiceEntry, len(existing.Services), len(existing.Services)+1)
 	copy(services, existing.Services)
@@ -47,22 +47,54 @@ func UpdatePreviewValues(existing PreviewValues, serviceName, commitSha string, 
 		}
 		services[i].CommitSha = commitSha
 		services[i].Metadata = md
-		return PreviewValues{Services: services}
+		out := existing
+		out.Services = services
+		return out
 	}
 	services = append(services, ServiceEntry{
 		Name:      serviceName,
 		CommitSha: commitSha,
 		Metadata:  BuildServiceMetadata(inputs),
 	})
-	return PreviewValues{Services: services}
+	out := existing
+	out.Services = services
+	return out
 }
 
-// EqualExceptUpdatedAt reports whether a and b hold the same entries, in the
-// same order, ignoring only the updated-at of serviceName's entry. Metadata is
-// compared by value; a nil and an empty Extra are equal.
+// ApplyCatalog returns a copy of vals with apiVersion APIVersion, every entry
+// whose service is not a key of repos dropped (pinned or not; the rest keep
+// their order), and each remaining entry's repoURL set from repos and its
+// branch from branches (DefaultBranch when absent). vals is never mutated.
+func ApplyCatalog(vals PreviewValues, repos, branches map[string]string) PreviewValues {
+	services := make([]ServiceEntry, 0, len(vals.Services))
+	for _, svc := range vals.Services {
+		url, ok := repos[svc.Name]
+		if !ok {
+			continue
+		}
+		svc.RepoURL = url
+		svc.Branch = branches[svc.Name]
+		if svc.Branch == "" {
+			svc.Branch = DefaultBranch
+		}
+		services = append(services, svc)
+	}
+	out := vals
+	out.APIVersion = APIVersion
+	out.Services = services
+	return out
+}
+
+// EqualExceptUpdatedAt reports whether a and b have the same apiVersion and
+// hold the same entries, in the same order, ignoring only the updated-at of
+// serviceName's entry. Metadata is compared by value.
 func EqualExceptUpdatedAt(a, b PreviewValues, serviceName string) bool {
+	if a.APIVersion != b.APIVersion {
+		return false
+	}
 	return slices.EqualFunc(a.Services, b.Services, func(x, y ServiceEntry) bool {
-		if x.Name != y.Name || x.CommitSha != y.CommitSha || x.Host != y.Host {
+		if x.Name != y.Name || x.RepoURL != y.RepoURL || x.Branch != y.Branch ||
+			x.CommitSha != y.CommitSha || x.Host != y.Host {
 			return false
 		}
 		if x.Metadata == nil || y.Metadata == nil {
@@ -72,9 +104,7 @@ func EqualExceptUpdatedAt(a, b PreviewValues, serviceName string) bool {
 		if x.Name == serviceName {
 			mx.UpdatedAt, my.UpdatedAt = "", ""
 		}
-		return mx.PRAuthor == my.PRAuthor && mx.PRURL == my.PRURL && mx.PRNumber == my.PRNumber &&
-			mx.CreatedAt == my.CreatedAt && mx.UpdatedAt == my.UpdatedAt && mx.VCSRefName == my.VCSRefName &&
-			mx.PipelineRunURL == my.PipelineRunURL && maps.Equal(mx.Extra, my.Extra)
+		return mx == my
 	})
 }
 
@@ -82,7 +112,8 @@ func EqualExceptUpdatedAt(a, b PreviewValues, serviceName string) bool {
 // owner/repo#number (matched on its metadata pr-url; owner and repo compare
 // case-insensitively) is reset to a bare branch-tracking entry. It also returns
 // the names of the unpinned services in file order, and whether any entry is
-// still pinned to a commit. vals is never mutated.
+// still pinned to a commit. The root fields and every entry's repoURL and
+// branch are kept as written. vals is never mutated.
 func UnpinPR(vals PreviewValues, owner, repo string, number int) (PreviewValues, []string, bool) {
 	services := make([]ServiceEntry, len(vals.Services))
 	copy(services, vals.Services)
@@ -100,13 +131,15 @@ func UnpinPR(vals PreviewValues, owner, repo string, number int) (PreviewValues,
 			pinned = true
 		}
 	}
-	return PreviewValues{Services: services}, removed, pinned
+	out := vals
+	out.Services = services
+	return out, removed, pinned
 }
 
 // ApplyHosts returns a copy of vals where every entry exposed by urls carries
 // its preview host (URLConfig.Host for slug) and every other entry has an
-// empty Host. When urls is not enabled, every Host is empty. vals is never
-// mutated.
+// empty Host. When urls is not enabled, every Host is empty. The root fields
+// are kept. vals is never mutated.
 func ApplyHosts(vals PreviewValues, slug string, urls URLConfig) PreviewValues {
 	services := make([]ServiceEntry, len(vals.Services))
 	copy(services, vals.Services)
@@ -120,7 +153,9 @@ func ApplyHosts(vals PreviewValues, slug string, urls URLConfig) PreviewValues {
 			services[i].Host = urls.Host(services[i].Name, slug)
 		}
 	}
-	return PreviewValues{Services: services}
+	out := vals
+	out.Services = services
+	return out
 }
 
 // belongsToPR reports whether entry was deployed by owner/repo#number.
