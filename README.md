@@ -104,6 +104,7 @@ Install: [docs/INSTALL.md](docs/INSTALL.md); ArgoCD wiring: [examples/argocd](ex
 
 - [Install](docs/INSTALL.md): from an empty cluster to a first preview
 - [Architecture](docs/ARCHITECTURE.md): components, gitops and service repo contracts, API
+- [Preview contract](docs/CONTRACT.md): the `badil.dev/v1` preview file, its schema and conformance fixtures, and what a renderer must do
 
 ## License
 

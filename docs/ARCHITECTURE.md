@@ -37,7 +37,7 @@ preview-env.yaml                 # read by preview-env only (an ApplicationSet v
 previews/<slug>/values.yaml      # written by badil, read by preview-env: apiVersion badil.dev/v1, self-contained per service
 ```
 
-Each file has one reader: badil never parses chart settings, and the chart never sees badil's settings. Both live at the repo root, at fixed paths.
+Each file has one reader: badil never parses chart settings, and the chart never sees badil's settings. Both live at the repo root, at fixed paths. [CONTRACT](CONTRACT.md) publishes `previews/<slug>/values.yaml` for any renderer: its schema, lifecycle, conformance fixtures and a renderer's obligations.
 
 ```yaml
 # badil.yaml
