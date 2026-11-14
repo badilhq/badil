@@ -1,3 +1,7 @@
+# argocdNamespace: the namespace Argo CD runs in. The AppProject and every
+# service Application are created there. Must be a non-empty string.
+argocdNamespace: argocd
+
 # services: list of services to deploy in the preview environment
 # Each service can optionally have commitSha (pinned) and metadata (PR info).
 #

@@ -1,8 +1,12 @@
+{{- $ns := .Values.argocdNamespace }}
+{{- if not (and (kindIs "string" $ns) $ns) }}
+{{- fail (printf "argocdNamespace must be a non-empty string, got %v" $ns) }}
+{{- end }}
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
   name: {{ .Release.Name }}
-  namespace: argocd
+  namespace: {{ $ns }}
   labels:
     app.kubernetes.io/name: {{ .Release.Name }}
     app.kubernetes.io/instance: {{ .Release.Name }}

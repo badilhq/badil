@@ -172,6 +172,36 @@ jobs:
             exit 1
           fi
 
+      - name: Render preview-env Argo CD namespace
+        run: |
+          ns() {
+            helm template preview-x charts/preview-env -f charts/preview-env/ci/test-values.yaml "$@" \
+              | yq -N '.kind + " " + (.metadata.namespace // "-") + " " + ((.spec.destination.namespace // .spec.destinations[0].namespace) // "-")'
+          }
+          got=$(ns)
+          want='Namespace - -
+          AppProject argocd preview-x
+          Application argocd preview-x'
+          if [ "$got" != "$want" ]; then
+            echo '::error::expected the AppProject and Applications in namespace argocd by default'
+            printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
+            exit 1
+          fi
+          got=$(ns --set argocdNamespace=gitops)
+          want='Namespace - -
+          AppProject gitops preview-x
+          Application gitops preview-x'
+          if [ "$got" != "$want" ]; then
+            echo '::error::expected the AppProject and Applications in namespace gitops with argocdNamespace=gitops'
+            printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
+            exit 1
+          fi
+          if out=$(helm template preview-x charts/preview-env -f charts/preview-env/ci/test-values.yaml --set argocdNamespace= 2>&1); then
+            echo '::error::expected render to fail with an empty argocdNamespace'
+            exit 1
+          fi
+          echo "$out" | grep -q 'argocdNamespace must be a non-empty string'
+
       - name: Render badil with all components
         run: helm template t charts/badil -f charts/badil/ci/test-values.yaml --set ingress.enabled=true,ingress.host=badil.example.com,cleanup.enabled=true,metrics.serviceMonitor.enabled=true,dashboard.enabled=true
 
