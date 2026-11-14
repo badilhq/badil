@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -96,6 +97,47 @@ func TestGenerate_KeyConstraints(t *testing.T) {
 			map[string]any{"argocd.argoproj.io/sync-wave": false},
 		},
 		{"annotations no propertyNames", at(t, ns, "properties", "annotations", "propertyNames"), nil},
+	}
+	for _, tt := range tests {
+		if !reflect.DeepEqual(tt.got, tt.want) {
+			t.Errorf("%s = %#v, want %#v", tt.name, tt.got, tt.want)
+		}
+	}
+}
+
+func TestGenerateContract_RootConstraints(t *testing.T) {
+	b, err := generateContract()
+	if err != nil {
+		t.Fatalf("generateContract: %v", err)
+	}
+	if b[len(b)-1] != '\n' {
+		t.Error("schema does not end with a newline")
+	}
+	var s map[string]any
+	if err = json.Unmarshal(b, &s); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	props, ok := at(t, s, "properties").(map[string]any)
+	if !ok {
+		t.Fatal("properties is not an object")
+	}
+	keys := make([]string, 0, len(props))
+	for k := range props {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	tests := []struct {
+		name string
+		got  any
+		want any
+	}{
+		{"no $id", s["$id"], nil},
+		{"draft", s["$schema"], "https://json-schema.org/draft/2020-12/schema"},
+		{"root properties", keys, []string{"apiVersion", "services"}},
+		{"root required", s["required"], []any{"apiVersion", "services"}},
+		{"root closed", s["additionalProperties"], false},
+		{"apiVersion const", at(t, s, "properties", "apiVersion", "const"), "badil.dev/v1"},
+		{"service entry closed", at(t, s, "properties", "services", "items", "additionalProperties"), false},
 	}
 	for _, tt := range tests {
 		if !reflect.DeepEqual(tt.got, tt.want) {

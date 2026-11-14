@@ -12,7 +12,8 @@ test:
 lint:
 	golangci-lint run ./...
 
-# Regenerates charts/preview-env/values.schema.json from internal/chartvalues.
+# Regenerates charts/preview-env/values.schema.json from internal/chartvalues
+# and schema/preview.v1.schema.json from internal/preview.
 schema:
 	go generate ./cmd/schemagen
 

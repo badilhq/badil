@@ -19,3 +19,14 @@ func (Metadata) JSONSchemaExtend(s *jsonschema.Schema) {
 		"pr-author", "pr-url", "pr-number", "created-at", "updated-at", "vcs.ref.name", "cicd.pipeline.run.url",
 	}
 }
+
+// JSONSchemaExtend requires apiVersion and services, rejects other root keys
+// and fixes apiVersion to APIVersion: the published contract of a preview
+// values file.
+func (PreviewValues) JSONSchemaExtend(s *jsonschema.Schema) {
+	s.Required = []string{"apiVersion", "services"}
+	s.AdditionalProperties = jsonschema.FalseSchema
+	if p, ok := s.Properties.Get("apiVersion"); ok {
+		p.Const = APIVersion
+	}
+}
