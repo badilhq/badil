@@ -12,7 +12,8 @@ From an empty cluster to a first preview. Contract details live in [ARCHITECTURE
 
 ## 2. Gitops repo
 
-- Commit a `services.yaml` at the root, starting from [`examples/argocd/services.yaml`](../examples/argocd/services.yaml). `serviceRepos` is required; `preview` and `serviceCharts` are optional.
+- Commit a `services.yaml` at the root, starting from [`examples/argocd/services.yaml`](../examples/argocd/services.yaml). `serviceRepos` is required; `preview`, `serviceCharts` and `previewNamespace` are optional.
+- `previewNamespace` (optional, `preview-env` 0.8.0 or later) adds labels and annotations to every preview Namespace, for example a Pod Security level (`pod-security.kubernetes.io/enforce: baseline`) or cost-allocation labels. Values must be strings; a key the chart already sets fails the render.
 - `serviceRepos` URLs must be `https://github.com/<owner>/<repo>` (with or without `.git`), or the label flow never matches them.
 - Contract: ARCHITECTURE [Gitops repo contract](ARCHITECTURE.md#gitops-repo-contract).
 - badil creates `previews/` itself; a missing directory reads as no previews.
@@ -225,6 +226,10 @@ With the Prometheus Operator (e.g. kube-prometheus-stack), add to the `helm inst
 - Without the sidecar, import [`charts/badil/dashboards/badil.json`](../charts/badil/dashboards/badil.json) as a Grafana dashboard and pick your Prometheus data source.
 
 Last successful sweep needs `cleanup.interval`; the spin-up panels need [Spin-up time](#spin-up-time-optional). Details: ARCHITECTURE [Dashboard](ARCHITECTURE.md#dashboard).
+
+### Preview limits (optional)
+
+badil sets no quota or network policy on previews. To cap each preview's resources and isolate its ingress, apply the Kyverno policy in [`examples/kyverno/`](../examples/kyverno/README.md) (Kyverno v1.19.0 or later): it creates a ResourceQuota, a LimitRange and an ingress NetworkPolicy in every preview namespace. Adapt its quota numbers and its ingress controller namespace first. Details: ARCHITECTURE [Preview limits](ARCHITECTURE.md#preview-limits).
 
 ## 7. Service repos
 

@@ -32,7 +32,7 @@ Self-hosted, single-tenant. Everything runs in the user's cluster; badil talks t
 ## Gitops repo contract
 
 ```
-services.yaml                    # serviceRepos: { <service>: <git url> }, optional preview block, optional serviceCharts block
+services.yaml                    # serviceRepos: { <service>: <git url> }, optional preview, serviceCharts and previewNamespace blocks
 previews/<slug>/values.yaml      # written by badil
 ```
 
@@ -49,6 +49,10 @@ serviceCharts:                  # optional: per-service chart settings, every ke
     hostParam: ingress.hostname # default "app.ingress.host": Helm parameter set to the preview host
     valueFiles:                 # default none: extra values files, applied in order
       - values-preview.yaml
+previewNamespace:               # optional: extra metadata of every preview Namespace, read by preview-env only
+  labels:                       # string values; a label the chart sets is refused
+    pod-security.kubernetes.io/enforce: baseline
+  annotations: {}               # string values; argocd.argoproj.io/sync-wave is refused
 preview:                        # optional: preview label, preview cap and per-preview URLs (URLs off without domain)
   label: preview                # optional, default "preview": the PR label that creates the preview
   maxPreviews: 10               # optional, default no cap: deploys that would create a preview past it are refused
@@ -65,6 +69,7 @@ preview:                        # optional: preview label, preview cap and per-p
 - `preview.label` must be a non-empty string; it is matched case-insensitively, like GitHub label names. `<label>:<name>` labels name the preview (see the label flow below).
 - `preview.maxPreviews` must be a YAML integer of at least 1; a string (`"3"`), `0`, a negative number or a float is rejected, and a null or empty value means unset. It does not need `preview.domain`. See Preview cap in the [HTTP API](#http-api) section. It needs a badil release that includes it: an older badil rejects the unknown key, so every `/v1/deploy` and every reconcile fails. Upgrade badil before setting it.
 - Every `serviceRepos` value must be a string. A PR's repo maps to the services whose URL is `https://github.com/<owner>/<repo>`, compared case-insensitively, with or without a trailing `/` or `.git`. Other URL forms (SSH, GitHub Enterprise) never match, so the label flow never deploys those services.
+- `previewNamespace.labels` and `previewNamespace.annotations` are added to every preview Namespace, after the chart's own (`app.kubernetes.io/name`, `app.kubernetes.io/instance`, `app.kubernetes.io/part-of`, `app.kubernetes.io/managed-by`, and the annotation `argocd.argoproj.io/sync-wave`). badil does not interpret the block. The chart refuses to render (Argo CD shows a sync error) when either is not a map, a value is not a string (quote YAML 1.1 booleans such as `yes`, `no`, `on`, `off`), or a key is one the chart sets. The block needs `preview-env` 0.8.0 or later; an older chart ignores it.
 - Every `serviceCharts` key must be a service of `serviceRepos`, and unknown fields are rejected. A null entry, or a null field, uses the defaults. `branch`, `path`, `imageTagParam` and `hostParam` must be non-empty strings, and `valueFiles` a list of non-empty strings; unquoted YAML 1.1 booleans (`yes`, `no`, `on`, `off`, `y`, `n`) must be quoted. Since `preview-env` 0.4.1 the chart also refuses to render a non-string value (Argo CD shows a sync error), because badil's check only blocks its own writes while Argo CD re-renders existing previews from the same `services.yaml`. badil only uses `branch` (for the PR-comment badge); the chart reads every field. The block needs `preview-env` 0.4.0 or later and badil 0.11.0 or later: an older chart ignores it and applies the defaults, and an older badil neither validates it nor shows the branch.
 
 ```yaml
@@ -91,6 +96,12 @@ Each exposed service of a preview gets the host `<service>-<slug>.<domain>` (the
 Length caps: a slug longer than 53 characters (Helm's release-name limit, which Argo CD hits through the ApplicationSet's `releaseName`) and a `<service>-<slug>` host label longer than 63 characters (the DNS label limit) are cut, and a hash of the full value (6 hex characters) is appended. For example, the branch `feature/very-long-branch-name-that-keeps-going-and-going-past-the-helm-limit` gets the slug `feature-very-long-branch-name-that-keeps-going-5bec34`, and the service `front-office-web` in it gets the host `front-office-web-feature-very-long-branch-name-that-keep-395ff3.<domain>`.
 
 Upgrade order: upgrade badil (0.10.0 or later) first, then `preview-env` (0.3.0 or later). `preview-env` 0.3.0 reads only `host`, so an entry without it gets no ingress host. Preview files written by an older badil carry no `host` until their next deploy write.
+
+## Preview limits
+
+badil and the `preview-env` chart create no quota or policy objects: per-preview limits belong to the cluster's policy layer, which selects preview namespaces by the label `app.kubernetes.io/part-of: preview-environments` or by labels set in `previewNamespace`. [`examples/kyverno/preview-guardrails.yaml`](../examples/kyverno/preview-guardrails.yaml) is one Kyverno `GeneratingPolicy` (Kyverno v1.19.0 or later) that creates a ResourceQuota, a LimitRange and an ingress NetworkPolicy in every preview namespace, and keeps them in sync with the policy. Kyverno creates them, not Argo CD, so the `previews` AppProject is unchanged; teardown deletes them with the namespace.
+
+A quota on compute resources (`requests.cpu`, `requests.memory`, `limits.memory`) refuses pods that do not set them, and `charts/app` ships `resources: {}`: ship a LimitRange with default requests and limits next to such a quota, as the example does.
 
 ## Pinned and branch-tracking services
 

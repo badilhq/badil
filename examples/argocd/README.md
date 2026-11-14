@@ -22,6 +22,8 @@ To give each preview its own URL, uncomment the `preview` block in `services.yam
 
 Per-service chart settings (`serviceCharts` in `services.yaml`) need `preview-env` 0.4.0 or later and badil 0.11.0 or later; with an older chart the block is ignored and the defaults apply.
 
+Preview Namespace labels and annotations (`previewNamespace` in `services.yaml`) need `preview-env` 0.8.0 or later; with an older chart the block is ignored. For per-preview limits on top of them, see the Kyverno example in [`../kyverno/`](../kyverno/README.md).
+
 ## Spin-up time
 
 [`notifications-values.yaml`](notifications-values.yaml): Argo CD notifications that report each preview service's spin-up time to badil (`/webhooks/argocd`); see [INSTALL](../../docs/INSTALL.md#spin-up-time-optional).
