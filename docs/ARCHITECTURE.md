@@ -58,7 +58,7 @@ preview:                        # optional: preview label, preview cap and per-p
       path: /docs               # optional, default "/": PR-comment link only
 ```
 
-badil reads `badil.yaml` on every deploy and reconcile. An unknown key at any level is rejected, as is a `services` entry that is not a mapping. A malformed file fails `/v1/deploy` and makes every reconcile log `preview reconcile failed`, with an error prefixed `badil.yaml:` naming the offending key; a missing file fails the same way (`gitops: not found`). An `expose` entry for a service missing from `services` is ignored.
+badil reads `badil.yaml` on every deploy and reconcile. An unknown or repeated key at any level is rejected, as is a `services` entry that is not a mapping. A malformed file fails `/v1/deploy` and makes every reconcile log `preview reconcile failed`, with an error prefixed `badil.yaml:` naming the offending key; a missing file fails the same way (`gitops: not found`). An `expose` entry for a service missing from `services` is ignored.
 
 - `services.<name>.repo` and `services.<name>.branch` accept any YAML string (`branch: yes` is the branch `yes`: `badil.yaml` never reaches Helm) and reject a number, a boolean, a null, a mapping or a sequence. A PR's repo maps to the services whose `repo` is `https://github.com/<owner>/<repo>`, compared case-insensitively, with or without a trailing `/` or `.git`. Other URL forms (SSH, GitHub Enterprise) never match, so the label flow never deploys those services.
 - `preview.label` must be a non-empty string; it is matched case-insensitively, like GitHub label names. `<label>:<name>` labels name the preview (see the label flow below).
@@ -114,10 +114,11 @@ The file is self-contained: a renderer needs only it to know each service's repo
 
 Upgrade (badil and `preview-env` 0.9.0), from a gitops repo with `services.yaml`; a new badil fails every deploy and reconcile without `badil.yaml`, and `preview-env` 0.9.0 rejects `serviceRepos`, `preview` and `serviceCharts.<service>.branch` in its values:
 
-1. Commit `badil.yaml` and `preview-env.yaml` at the root of the gitops repo, and delete `services.yaml`: each `serviceRepos.<service>` URL becomes `services.<service>.repo`, each `serviceCharts.<service>.branch` becomes `services.<service>.branch`, and the `preview` block moves as is to `badil.yaml`; `serviceCharts` (without `branch`) and `previewNamespace` move to `preview-env.yaml` (`{}` when neither is set).
+1. Commit `badil.yaml` and `preview-env.yaml` at the root of the gitops repo, and keep `services.yaml`, which the running badil and the deployed ApplicationSet still read: each `serviceRepos.<service>` URL becomes `services.<service>.repo`, each `serviceCharts.<service>.branch` becomes `services.<service>.branch`, and the `preview` block moves as is to `badil.yaml`; `serviceCharts` (without `branch`) and `previewNamespace` move to `preview-env.yaml` (`{}` when neither is set).
 2. Upgrade badil.
 3. Rewrite every live preview (push to its PR, or remove and re-add the label; the cleanup sweep deletes previews no PR pins any more): a preview file written by an older badil has no `apiVersion`, so `preview-env` 0.9.0 refuses to render it, and shows `missing property 'apiVersion'` in Argo CD until it is rewritten.
 4. Bump the chart: set the ApplicationSet's `targetRevision` to 0.9.0 and its first value file to `$values/preview-env.yaml`, as in [`examples/argocd/applicationset-previews.yaml`](../examples/argocd/applicationset-previews.yaml), and re-apply it (`kubectl apply -f applicationset-previews.yaml`): Argo CD does not manage the ApplicationSet.
+5. Delete `services.yaml` from the gitops repo: nothing reads it any more.
 
 ## Per-preview URLs
 

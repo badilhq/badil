@@ -253,7 +253,7 @@ Set `preview.domain` in `badil.yaml`, create a wildcard DNS record `*.<domain>` 
 
 ## 10. Upgrade
 
-1. When the gitops repo still has `services.yaml`: commit `badil.yaml` and `preview-env.yaml` at its root and delete `services.yaml`, before upgrading badil (which fails every deploy and reconcile without `badil.yaml`). Each `serviceRepos.<name>` URL becomes `services.<name>.repo`, each `serviceCharts.<name>.branch` becomes `services.<name>.branch`, and the `preview` block moves as is to `badil.yaml`; `serviceCharts` (without `branch`) and `previewNamespace` go to `preview-env.yaml`, `{}` when neither is set. See ARCHITECTURE [Gitops repo contract](ARCHITECTURE.md#gitops-repo-contract).
+1. When the gitops repo still has `services.yaml`: commit `badil.yaml` and `preview-env.yaml` at its root before upgrading badil (which fails every deploy and reconcile without `badil.yaml`), and keep `services.yaml` until step 5: the running badil and the deployed ApplicationSet still read it. Each `serviceRepos.<name>` URL becomes `services.<name>.repo`, each `serviceCharts.<name>.branch` becomes `services.<name>.branch`, and the `preview` block moves as is to `badil.yaml`; `serviceCharts` (without `branch`) and `previewNamespace` go to `preview-env.yaml`, `{}` when neither is set. See ARCHITECTURE [Gitops repo contract](ARCHITECTURE.md#gitops-repo-contract).
 2. Upgrade badil, with the values of the installed release:
 
    ```bash
@@ -262,6 +262,7 @@ Set `preview.domain` in `badil.yaml`, create a wildcard DNS record `*.<domain>` 
    ```
 3. When upgrading to `preview-env` 0.9.0 from an earlier version: rewrite every live preview before the next step, by pushing to its PR or removing and re-adding its label. `preview-env` 0.9.0 refuses preview files without `apiVersion: badil.dev/v1`, which only the new badil writes; the cleanup sweep deletes previews no PR pins any more.
 4. Bump the chart: set the ApplicationSet's `preview-env` `targetRevision` and its `valueFiles` (`$values/preview-env.yaml`, then the preview file) to the ones in the new tag's [`examples/argocd/applicationset-previews.yaml`](../examples/argocd/applicationset-previews.yaml), and re-apply it.
+5. When step 1 applied: delete `services.yaml` from the gitops repo once the ApplicationSet is re-applied.
 
 ## 11. Troubleshooting
 
