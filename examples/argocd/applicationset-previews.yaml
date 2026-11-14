@@ -24,13 +24,18 @@ spec:
           targetRevision: HEAD
           ref: values
         - repoURL: oci://ghcr.io/badilhq/charts/preview-env
-          targetRevision: 0.6.0
+          targetRevision: 0.7.0
           path: "."
           helm:
             releaseName: "{{ .path.basename }}"
             valueFiles:
               - "$values/services.yaml"
               - "$values/{{ .path.path }}/values.yaml"
+            parameters:
+              # Must match the namespace Argo CD runs in: the AppProject and
+              # the service Applications of each preview are created there.
+              - name: argocdNamespace
+                value: argocd
       destination:
         server: https://kubernetes.default.svc
         namespace: argocd

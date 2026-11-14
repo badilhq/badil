@@ -24,7 +24,7 @@ Self-hosted, single-tenant. Everything runs in the user's cluster; badil talks t
 | `badil serve` | this repo | chi HTTP server: `/healthz`, `/v1/deploy`, `/webhooks/github`, `/webhooks/argocd` (optional) |
 | `badil cleanup` | this repo | One-shot, CronJob (hourly). Per preview, the first matching rule: no pinned service → delete; `CLEANUP_TTL` set and no deploy within it → delete; otherwise unpin closed PRs, and open PRs whose label moved, conflicts or is gone (see [Cleanup sweep](#cleanup-sweep)) |
 | `badil bootstrap-app` / `verify-app` | this repo | Create a GitHub App via the manifest flow / check credentials |
-| `preview-env` chart | this repo, [`charts/preview-env`](../charts/preview-env) | Renders AppProject, Namespace, one ArgoCD Application per service; Application annotations `preview.badil.dev/*` carry the PR metadata |
+| `preview-env` chart | this repo, [`charts/preview-env`](../charts/preview-env) | Renders AppProject, Namespace, one ArgoCD Application per service; the AppProject and Applications in the namespace set by `argocdNamespace` (default `argocd`); Application annotations `preview.badil.dev/*` carry the PR metadata |
 | ApplicationSet | this repo, [`examples/argocd`](../examples/argocd) | Git directory generator on `previews/*` |
 | Service chart | each service repo, at `k8s/` unless `serviceCharts` sets `path` (uses the `app` chart, [`charts/app`](../charts/app)) | Image tag = `commitSha` or `$ARGOCD_APP_REVISION` |
 | `badil` chart | this repo, [`charts/badil`](../charts/badil) | Installs `badil serve` (Deployment, Service, optional Ingress) and the cleanup CronJob (off by default) |

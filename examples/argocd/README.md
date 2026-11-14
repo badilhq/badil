@@ -31,6 +31,7 @@ Per-service chart settings (`serviceCharts` in `services.yaml`) need `preview-en
 - Replace `https://github.com/badilhq/demo-gitops.git` with your gitops repo URL, in both the AppProject and the ApplicationSet.
 - Replace `oci://ghcr.io/badilhq/charts/preview-env` if you host the chart elsewhere.
 - Replace the `serviceRepos` entries in `services.yaml` with your services.
+- If Argo CD runs in a namespace other than `argocd`, set it in: the ApplicationSet's `metadata.namespace`, its `destination.namespace`, and its `argocdNamespace` Helm parameter; the AppProject's `metadata.namespace`, and its destination namespace when it is `argocd`.
 
 Charts are published to `oci://ghcr.io/badilhq/charts/*`.
 
