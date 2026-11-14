@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/badilhq/badil/compare/v0.16.0...v0.17.0) (2026-11-14)
+
+
+### Features
+
+* **preview-env:** make the argo cd namespace configurable ([#64](https://github.com/badilhq/badil/issues/64)) ([5dadc90](https://github.com/badilhq/badil/commit/5dadc90cb0af782a32c3111610279eeac2c5278f))
+
 ## [0.16.0](https://github.com/badilhq/badil/compare/v0.15.1...v0.16.0) (2026-11-12)
 
 
