@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.17.0](https://github.com/badilhq/badil/compare/v0.16.0...v0.17.0) (2026-11-14)
+
+
+### Features
+
+* **examples:** post github deployment failure and error for failed previews ([#66](https://github.com/badilhq/badil/issues/66)) ([6c66fee](https://github.com/badilhq/badil/commit/6c66feeaa3042ab820daa225059f6ca59836101d))
+* **preview-env:** add preview namespace labels and annotations and a kyverno limits example ([#68](https://github.com/badilhq/badil/issues/68)) ([fa4e64f](https://github.com/badilhq/badil/commit/fa4e64f0090331337fb56009e30e935200254b70))
+* **preview-env:** make the argo cd namespace configurable ([#64](https://github.com/badilhq/badil/issues/64)) ([5dadc90](https://github.com/badilhq/badil/commit/5dadc90cb0af782a32c3111610279eeac2c5278f))
+* refuse deploys that would create a preview past preview.maxPreviews ([#67](https://github.com/badilhq/badil/issues/67)) ([3cb8a89](https://github.com/badilhq/badil/commit/3cb8a897a9e5b0f288c7e7f19a760c3c16d70b71))
+
 ## [0.16.0](https://github.com/badilhq/badil/compare/v0.15.1...v0.16.0) (2026-11-12)
 
 
