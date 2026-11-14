@@ -154,7 +154,7 @@ Without Helm, see the file's comments. To remove the setup later, revert the Arg
 
 ### Preview deployments on GitHub (optional)
 
-To show each pinned preview service on its PR as a GitHub deployment (with a "View deployment" button, and a `deployment_status` event for anything that waits on it), Argo CD's notifications controller posts GitHub Deployments when the service's Application is synced and Healthy. Argo CD decides health, not badil. It requires [Spin-up time](#spin-up-time-optional) and `preview-env` 0.6.0 or later.
+To show each pinned preview service on its PR as a GitHub deployment (with a "View deployment" button, and a `deployment_status` event for anything that waits on it), Argo CD's notifications controller posts GitHub Deployments when the service's Application is synced and Healthy, Degraded, or fails to sync. Argo CD decides health, not badil. It requires [Spin-up time](#spin-up-time-optional) and `preview-env` 0.6.0 or later.
 
 Create a second GitHub App, for Argo CD:
 
@@ -172,18 +172,22 @@ helm upgrade argocd argo/argo-cd -n argocd --version <your installed argo-cd cha
   --set-file notifications.secret.items.github-privateKey=<path to the App's .pem>
 ```
 
-On the PR, each pinned service that goes Healthy at the PR head SHA appears as a deployment to the environment `preview-<slug>-<service>`, state `success`, with `environment_url` set to `https://<service host>/`. When the service's Application is deleted, the deployment is marked `inactive`. The file uses `https://`; change both `environmentURL` lines to `http://` if your previews run with `preview.tls: false`.
+On the PR, each pinned service that goes Healthy at the PR head SHA appears as a deployment to the environment `preview-<slug>-<service>`, state `success`, with `environment_url` set to `https://<service host>/`. A service that turns Degraded at the PR head SHA (image never pushed, crash loop) shows on the same deployment as state `failure`, after its Deployment's `progressDeadlineSeconds`; one whose sync fails or whose chart fails to render at that SHA shows as state `error`. When the service's Application is deleted, the deployment of the SHA badil last pinned is marked `inactive`. The file uses `https://`; change every `environmentURL` line to `http://` if your previews run with `preview.tls: false`.
 
 Limitations:
 
-1. `inactive` on delete is best effort. It can also create an extra `inactive` deployment for a SHA that never went Healthy, while the earlier `success` stays.
+1. `inactive` on delete is best effort. It closes the `success`, `failure` or `error` deployment of the SHA badil last pinned; only when that SHA never got a status (still Progressing at teardown) does it create an extra `inactive` deployment. An earlier SHA's `success` stays.
 2. A PR that leaves a surviving preview keeps its last `success`, because its Application is updated, not deleted.
 3. Failed notifications are not retried.
-4. Applying the config posts `success` for every already-Healthy pinned Application.
+4. Applying the config posts `success` for every already-Healthy pinned Application, `failure` for every pinned Application already Degraded at its SHA, and `error` for every one whose sync already failed or is `Unknown` at its SHA.
 5. Environments accumulate on the service repos; delete them by hand.
 6. The URL is the host root; the expose path is not applied.
 7. One App installation covers all service repos.
 8. For a pinned service with no host (not in `expose`, e.g. `postgres`), `environment_url` is sent as `""`. Whether GitHub accepts that is not verified; the notifications controller log shows the result.
+9. `oncePer` is per pinned SHA: a service that was Healthy (`success`), then Degraded (`failure`), then Healthy again at the same SHA keeps `failure`, because `on-preview-deployed` already fired for that revision. A push (new SHA) resets it.
+10. A rollout that never completes (image never pushed, crash loop) shows as `failure` only after the Deployment's `progressDeadlineSeconds` (600 s by default).
+11. A transient `Unknown` sync status (for example a repo-server error) posts `error` once for that SHA; a later Healthy sync at a SHA where `on-preview-deployed` had not fired yet posts `success` on the same deployment.
+12. With a short `commit_sha` sent to `/v1/deploy`, `on-preview-degraded` and `on-preview-sync-error` never fire, because their guards compare `app.spec.source.targetRevision` with the resolved full SHA; nothing logs it. The label flow always pins the full SHA.
 
 Check: the PR shows the deployment, and `kubectl -n argocd logs deploy/argocd-notifications-controller` has no `github` errors. Without Helm, see the file's comments. Details: ARCHITECTURE [Preview deployments on GitHub](ARCHITECTURE.md#preview-deployments-on-github).
 

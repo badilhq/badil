@@ -302,23 +302,31 @@ badil never reads the cluster, so Argo CD's notifications controller tells it wh
 
 ### Preview deployments on GitHub
 
-Argo CD, not badil, signals on GitHub that a PR's code is running in its preview: health is Argo CD's call. Its notifications controller posts GitHub Deployments through its own GitHub App (Deployments R/W, Metadata R); badil makes no Deployments calls. Configuration: [`examples/argocd/github-deployments-values.yaml`](../examples/argocd/github-deployments-values.yaml), applied after `notifications-values.yaml` (setup: INSTALL [Preview deployments on GitHub](INSTALL.md#preview-deployments-on-github-optional)).
+Argo CD, not badil, signals on GitHub that a PR's code is running in its preview, or failed to: health is Argo CD's call. Its notifications controller posts GitHub Deployments through its own GitHub App (Deployments R/W, Metadata R); badil makes no Deployments calls. Configuration: [`examples/argocd/github-deployments-values.yaml`](../examples/argocd/github-deployments-values.yaml), applied after `notifications-values.yaml` (setup: INSTALL [Preview deployments on GitHub](INSTALL.md#preview-deployments-on-github-optional)).
 
-- Both triggers apply only to pinned preview service Applications: those whose `preview.badil.dev/vcs.ref.revision` annotation is not empty.
+- All four triggers apply only to pinned preview service Applications: those whose `preview.badil.dev/vcs.ref.revision` annotation is not empty.
 - `on-preview-deployed` fires when the Application is synced and Healthy, once per `syncResult.revision` (the PR head SHA, since a pinned service's `targetRevision` is its commit SHA). It posts status `success` on the service repo (`spec.source.repoURL`) at that revision, with `environment_url` built from the `preview.badil.dev/host` annotation, which `preview-env` 0.6.0 sets from the service's `host`. The deployment is created with `auto_merge: false` and `required_contexts: []`, so an older ref or a red commit still gets one.
-- `on-preview-deleted` fires when the Application has a `deletionTimestamp` and posts `inactive` on the deployment for its current `syncResult.revision`.
+- `on-preview-degraded` fires when the Application's health is `Degraded` while it is `Synced` at `spec.source.targetRevision` (the SHA badil last pinned), once per `targetRevision`. It posts status `failure`. A Deployment turns Degraded only after its `progressDeadlineSeconds`; until then it is Progressing.
+- `on-preview-sync-error` fires, once per `targetRevision`, when the sync operation at `targetRevision` ended in `Error` or `Failed` (`operationState.syncResult.revision` is that SHA), or the sync status is `Unknown` for a comparison against that SHA (`sync.comparedTo.source.targetRevision`), as when the chart fails to render. It posts status `error`. Its two tests are one condition, so it posts at most one `error` per SHA.
+- The guards on `targetRevision` keep the previous SHA's Degraded health or failed sync, still shown right after badil pins a new SHA, from posting on the new SHA's deployment.
+- `failure` and `error` use `spec.source.targetRevision` as the deployment's ref. For a synced pinned service it is the same SHA as the `syncResult.revision` that `success` uses, so all three land on the same deployment as successive statuses: the notifications controller reuses the first deployment it finds for that ref and environment, and creates one only when none exists.
+- `on-preview-deleted` fires when the Application has a `deletionTimestamp` and posts `inactive` on the deployment for `app.spec.source.targetRevision` (the SHA badil last pinned).
 - The environment is `preview-<slug>-<service>`, one per preview service. A new `success` on it marks the prior `success` deployments `inactive` (GitHub's `auto_inactive`).
 
 Limitations:
 
-1. `inactive` on delete is best effort: the controller only sees the deletion if it processes the update before the Application's finalizer completes. It looks up the deployment by the current revision, so if that SHA never went Healthy it creates an extra `inactive` deployment for it, and the earlier SHA's `success` stays.
+1. `inactive` on delete is best effort: the controller only sees the deletion if it processes the update before the Application's finalizer completes. It looks up the deployment by the SHA badil last pinned, so it closes that SHA's `success`, `failure` or `error` deployment; only when that SHA never got a status (still Progressing at teardown) does it create an extra `inactive` deployment for it. An earlier SHA's `success` stays.
 2. A PR that leaves a surviving preview keeps its last `success`, because its Application is updated, not deleted.
 3. Failed notifications are not retried.
-4. Applying the config posts `success` for every already-Healthy pinned Application, as `oncePer` has no prior state.
+4. Applying the config posts `success` for every already-Healthy pinned Application, `failure` for every pinned Application already Degraded at its SHA, and `error` for every one whose sync already failed or is `Unknown` at its SHA, as `oncePer` has no prior state.
 5. Environments accumulate on the service repos and can be deleted by hand.
 6. The URL is the host root; the expose path is not applied.
 7. One App installation covers all service repos (`service.github` takes one `installationID`).
 8. For a pinned service with no host (for example `postgres`, not in `expose`), `environment_url` is sent as `""`. Whether GitHub accepts that is not verified; the notifications controller log shows the result.
+9. `oncePer` is per pinned SHA: a service that was Healthy (`success`), then Degraded (`failure`), then Healthy again at the same SHA keeps `failure`, because `on-preview-deployed` already fired for that revision. A push (new SHA) resets it.
+10. A rollout that never completes (image never pushed, crash loop) shows as `failure` only after the Deployment's `progressDeadlineSeconds` (600 s by default).
+11. A transient `Unknown` sync status (for example a repo-server error) posts `error` once for that SHA; a later Healthy sync at a SHA where `on-preview-deployed` had not fired yet posts `success` on the same deployment.
+12. With a short `commit_sha` sent to `/v1/deploy`, `on-preview-degraded` and `on-preview-sync-error` never fire, because their guards compare `app.spec.source.targetRevision` with the resolved full SHA; nothing logs it. The label flow always pins the full SHA.
 
 ### Dashboard
 

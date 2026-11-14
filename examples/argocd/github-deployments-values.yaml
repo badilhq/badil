@@ -4,8 +4,12 @@
 # When a pinned preview service's Application is synced and Healthy at a
 # revision (the PR head SHA), the notifications controller posts a deployment
 # status `success` on the service repo at that revision, with environment_url
-# set to the service's preview host. When the Application is deleted, it posts
-# `inactive` (best effort). Argo CD authenticates with its own GitHub App.
+# set to the service's preview host. When the Application is Degraded at the
+# pinned SHA, it posts `failure`; when its sync fails or its sync status is
+# Unknown at that SHA (for example a chart that fails to render), it posts
+# `error`. Both land on the deployment a `success` at that SHA would use. When
+# the Application is deleted, it posts `inactive` on the deployment of the SHA
+# badil last pinned (best effort). Argo CD authenticates with its own GitHub App.
 #
 # Requires notifications-values.yaml (spin-up time) and must come after it on
 # the command line. It repeats the spin-up subscription, because Helm replaces
@@ -21,8 +25,10 @@
 #     --set-file notifications.secret.items.github-privateKey=<path to the App's .pem>
 #
 # Argo CD installed without Helm: put the keys service.github,
-# template.badil-preview-deployed, template.badil-preview-deleted,
-# trigger.on-preview-deployed, trigger.on-preview-deleted and subscriptions
+# template.badil-preview-deployed, template.badil-preview-failed,
+# template.badil-preview-errored, template.badil-preview-deleted,
+# trigger.on-preview-deployed, trigger.on-preview-degraded,
+# trigger.on-preview-sync-error, trigger.on-preview-deleted and subscriptions
 # (with both entries below) under `data` of the argocd-notifications-cm
 # ConfigMap, and the github-appID, github-installationID and github-privateKey
 # items in the argocd-notifications-secret Secret.
@@ -47,11 +53,37 @@ notifications:
           requiredContexts: []
           autoMerge: false
           transientEnvironment: false
+    template.badil-preview-failed: |
+      message: "{{ index .app.metadata.labels \"app.kubernetes.io/name\" }} degraded in preview {{ index .app.metadata.labels \"app.kubernetes.io/instance\" }}"
+      github:
+        repoURLPath: "{{.app.spec.source.repoURL}}"
+        revisionPath: "{{.app.spec.source.targetRevision}}"
+        deployment:
+          state: failure
+          environment: "preview-{{ index .app.metadata.labels \"app.kubernetes.io/instance\" }}-{{ index .app.metadata.labels \"app.kubernetes.io/name\" }}"
+          # Use http:// when preview.tls: false.
+          environmentURL: "{{ with index .app.metadata.annotations \"preview.badil.dev/host\" }}https://{{ . }}/{{ end }}"
+          requiredContexts: []
+          autoMerge: false
+          transientEnvironment: false
+    template.badil-preview-errored: |
+      message: "{{ index .app.metadata.labels \"app.kubernetes.io/name\" }} failed to sync in preview {{ index .app.metadata.labels \"app.kubernetes.io/instance\" }}"
+      github:
+        repoURLPath: "{{.app.spec.source.repoURL}}"
+        revisionPath: "{{.app.spec.source.targetRevision}}"
+        deployment:
+          state: error
+          environment: "preview-{{ index .app.metadata.labels \"app.kubernetes.io/instance\" }}-{{ index .app.metadata.labels \"app.kubernetes.io/name\" }}"
+          # Use http:// when preview.tls: false.
+          environmentURL: "{{ with index .app.metadata.annotations \"preview.badil.dev/host\" }}https://{{ . }}/{{ end }}"
+          requiredContexts: []
+          autoMerge: false
+          transientEnvironment: false
     template.badil-preview-deleted: |
       message: "preview {{ index .app.metadata.labels \"app.kubernetes.io/instance\" }} removed"
       github:
         repoURLPath: "{{.app.spec.source.repoURL}}"
-        revisionPath: "{{.app.status.operationState.syncResult.revision}}"
+        revisionPath: "{{.app.spec.source.targetRevision}}"
         deployment:
           state: inactive
           environment: "preview-{{ index .app.metadata.labels \"app.kubernetes.io/instance\" }}-{{ index .app.metadata.labels \"app.kubernetes.io/name\" }}"
@@ -67,6 +99,20 @@ notifications:
       - when: app.status?.operationState?.phase in ['Succeeded'] and app.status?.health?.status == 'Healthy' and app.metadata.annotations['preview.badil.dev/vcs.ref.revision'] != ''
         oncePer: app.status?.operationState?.syncResult?.revision
         send: [badil-preview-deployed]
+    # Fires once per pinned SHA when the Application is Degraded at that SHA
+    # (for a Deployment, after its progressDeadlineSeconds). The sync guard
+    # keeps the previous SHA's health from posting on the new SHA's deployment.
+    trigger.on-preview-degraded: |
+      - when: app.status?.health?.status == 'Degraded' and app.status?.sync?.status == 'Synced' and app.status?.sync?.revision == app.spec.source.targetRevision and app.metadata.annotations['preview.badil.dev/vcs.ref.revision'] != ''
+        oncePer: app.spec.source.targetRevision
+        send: [badil-preview-failed]
+    # Fires once per pinned SHA when the sync at that SHA ends in Error or
+    # Failed, or the comparison at that SHA is Unknown (the chart fails to
+    # render). One condition, so oncePer sends at most one `error` per SHA.
+    trigger.on-preview-sync-error: |
+      - when: ((app.status?.operationState?.phase in ['Error', 'Failed'] and app.status?.operationState?.syncResult?.revision == app.spec.source.targetRevision) or (app.status?.sync?.status == 'Unknown' and app.status?.sync?.comparedTo?.source?.targetRevision == app.spec.source.targetRevision)) and app.metadata.annotations['preview.badil.dev/vcs.ref.revision'] != ''
+        oncePer: app.spec.source.targetRevision
+        send: [badil-preview-errored]
     # Best effort: fires only if the controller sees the deletion before the
     # Application's finalizer completes.
     trigger.on-preview-deleted: |
@@ -86,4 +132,6 @@ notifications:
       triggers:
         - on-preview-deployed
         - on-preview-deleted
+        - on-preview-degraded
+        - on-preview-sync-error
       selector: app.kubernetes.io/part-of=preview-environments,app.kubernetes.io/managed-by=argocd
