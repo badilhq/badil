@@ -1,0 +1,23 @@
+# The preview-env chart's settings, at the root of the gitops repo. The
+# ApplicationSet passes this file to every preview; badil does not read it.
+# Every key is optional, so the file may be just {}. Any other root key
+# (such as serviceRepos or preview, which belong in badil.yaml) fails
+# rendering.
+{}
+
+# Per-service chart settings: every key is optional and defaults to the value
+# shown in its comment. Replace the {} above with the blocks you use.
+# serviceCharts:
+#   backend-1:
+#     path: deploy/helm           # default "k8s/": chart path in the service repo
+#     imageTagParam: image.tag    # default "app.image.tag": Helm parameter set to the image tag
+#     hostParam: ingress.hostname # default "app.ingress.host": Helm parameter set to the preview host
+#     valueFiles:                 # default none: extra values files; relative to path, "/" from the repo root, URLs fetched remotely
+#       - values-preview.yaml
+
+# Extra preview Namespace labels and annotations: string values; a key the
+# chart already sets fails rendering.
+# previewNamespace:
+#   labels:
+#     pod-security.kubernetes.io/enforce: baseline
+#   annotations: {}

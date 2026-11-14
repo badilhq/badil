@@ -70,6 +70,22 @@ jobs:
           out=$(helm template preview-x charts/preview-env -f internal/preview/testdata/values.golden.yaml)
           echo "$out" | grep -q 'preview.badil.dev/pr-url'
 
+      - name: Render preview-env with the example preview-env.yaml
+        run: |
+          out=$(helm template preview-x charts/preview-env -f examples/argocd/preview-env.yaml -f internal/preview/testdata/values.golden.yaml)
+          echo "$out" | grep -q 'preview.badil.dev/pr-url'
+          if out=$(printf 'serviceRepos:\n  backend-1: https://github.com/acme/backend-1.git\n' \
+            | helm template preview-x charts/preview-env -f examples/argocd/preview-env.yaml -f - -f internal/preview/testdata/values.golden.yaml 2>&1); then
+            echo '::error::expected render to fail with serviceRepos at the root'
+            exit 1
+          fi
+          want="at '': additional properties 'serviceRepos' not allowed"
+          if ! echo "$out" | grep -qF "$want"; then
+            echo "::error::expected \"$want\" with serviceRepos at the root"
+            printf 'got: %s\n' "$out"
+            exit 1
+          fi
+
       - name: Render preview-env with YAML 1.1 ambiguous metadata
         run: |
           out=$(helm template preview-x charts/preview-env -f - <<'EOF'

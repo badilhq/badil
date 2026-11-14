@@ -29,7 +29,7 @@ spec:
           helm:
             releaseName: "{{ .path.basename }}"
             valueFiles:
-              - "$values/services.yaml"
+              - "$values/preview-env.yaml"
               - "$values/{{ .path.path }}/values.yaml"
             parameters:
               # Must match the namespace Argo CD runs in: the AppProject and
