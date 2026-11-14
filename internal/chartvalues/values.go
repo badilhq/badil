@@ -12,8 +12,9 @@ import (
 const NamespacePattern = `^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`
 
 // Values is the merged input of the preview-env chart: a preview values file
-// (apiVersion, services) and the chart settings of the gitops repo's
-// services.yaml. Other root keys are allowed.
+// (apiVersion, services), the chart settings of the gitops repo's
+// preview-env.yaml (serviceCharts, previewNamespace) and the ApplicationSet's
+// argocdNamespace. No other root key is allowed.
 type Values struct {
 	APIVersion       string                  `yaml:"apiVersion"`
 	Services         []preview.ServiceEntry  `yaml:"services"`
@@ -24,12 +25,12 @@ type Values struct {
 
 // JSONSchemaExtend requires apiVersion, services and argocdNamespace (a null
 // argocdNamespace in a values file removes the chart default before
-// validation, so it must fail as missing), allows other root keys,
+// validation, so it must fail as missing), rejects other root keys,
 // fixes apiVersion to preview.APIVersion and argocdNamespace to a namespace
 // name.
 func (Values) JSONSchemaExtend(s *jsonschema.Schema) {
 	s.Required = []string{"apiVersion", "services", "argocdNamespace"}
-	s.AdditionalProperties = jsonschema.TrueSchema
+	s.AdditionalProperties = jsonschema.FalseSchema
 	if p, ok := s.Properties.Get("apiVersion"); ok {
 		p.Const = preview.APIVersion
 	}
@@ -41,7 +42,6 @@ func (Values) JSONSchemaExtend(s *jsonschema.Schema) {
 // ServiceChart is a serviceCharts entry: how a service's chart is rendered.
 // Every field is optional.
 type ServiceChart struct {
-	Branch        string   `yaml:"branch,omitempty"`
 	Path          string   `yaml:"path,omitempty"`
 	ImageTagParam string   `yaml:"imageTagParam,omitempty"`
 	HostParam     string   `yaml:"hostParam,omitempty"`
@@ -51,7 +51,7 @@ type ServiceChart struct {
 // JSONSchemaExtend makes every field optional and every string non-empty.
 func (ServiceChart) JSONSchemaExtend(s *jsonschema.Schema) {
 	s.Required = nil
-	for _, name := range []string{"branch", "path", "imageTagParam", "hostParam"} {
+	for _, name := range []string{"path", "imageTagParam", "hostParam"} {
 		if p, ok := s.Properties.Get(name); ok {
 			p.MinLength = nonEmpty()
 		}

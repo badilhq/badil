@@ -1,7 +1,9 @@
 # Input contract: values.schema.json validates the merged values on every
 # render. apiVersion and services come from the preview file badil writes at
 # previews/<slug>/values.yaml; serviceCharts and previewNamespace from the
-# gitops repo's services.yaml. A null serviceCharts entry or field, a null
+# gitops repo's preview-env.yaml. Any other root key (such as serviceRepos or
+# preview, which badil reads from badil.yaml) fails rendering, as does
+# serviceCharts.<name>.branch. A null serviceCharts entry or field, a null
 # previewNamespace, labels or annotations, and a null field of a services
 # entry are rejected. A null serviceCharts falls back to its default ({}); a
 # null argocdNamespace is rejected as missing.
@@ -38,14 +40,13 @@ argocdNamespace: argocd
 services: []
 
 # serviceCharts: optional per-service chart settings, read from the gitops
-# repo's services.yaml. Every key is optional; a service without an entry uses
+# repo's preview-env.yaml. Every key is optional; a service without an entry uses
 # every default. A null entry or a null field is rejected; omit the entry or
 # the field to use the defaults. String values must be non-empty strings:
 # quote YAML 1.1 booleans such as yes, no, on, off.
 #
 # serviceCharts:
 #   backend-1:
-#     branch: master              # read by badil, which writes it as the entry's branch; this chart does not read it
 #     path: deploy/helm           # default "k8s/": chart path in the service repo
 #     imageTagParam: image.tag    # default "app.image.tag": Helm parameter set to the image tag
 #     hostParam: ingress.hostname # default "app.ingress.host": Helm parameter set to the preview host
@@ -64,7 +65,7 @@ services: []
 serviceCharts: {}
 
 # previewNamespace: optional extra metadata for the preview Namespace, read
-# from the gitops repo's services.yaml. A null previewNamespace, labels or
+# from the gitops repo's preview-env.yaml. A null previewNamespace, labels or
 # annotations is rejected; omit it instead. Values must be strings: quote
 # YAML 1.1 booleans such as yes, no, on, off. Quote such keys too: Helm reads
 # an unquoted key y or n as true or false. A label the chart already sets
@@ -77,10 +78,11 @@ serviceCharts: {}
 #   annotations: {}   # extra Namespace annotations, string values
 
 # Ingress hosts come from each service entry's host, written by badil from
-# the preview block of the gitops repo's services.yaml, and are passed as the
+# the preview block of the gitops repo's badil.yaml, and are passed as the
 # Helm parameter app.ingress.host (or the service's serviceCharts hostParam).
 # An entry without host gets no ingress host.
-# The preview block is badil's input; this chart does not read it:
+# The preview block is badil's input, in badil.yaml; this chart does not read
+# it and rejects it in its values:
 #
 # preview:
 #   domain: 127.0.0.1.nip.io      # lowercase bare domain, parent of every preview host

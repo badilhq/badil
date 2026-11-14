@@ -44,7 +44,7 @@ func TestGenerate_KeyConstraints(t *testing.T) {
 		{"no $id", s["$id"], nil},
 		{"draft", s["$schema"], "https://json-schema.org/draft/2020-12/schema"},
 		{"root required", s["required"], []any{"apiVersion", "services", "argocdNamespace"}},
-		{"root open", s["additionalProperties"], true},
+		{"root closed", s["additionalProperties"], false},
 		{"apiVersion const", at(t, s, "properties", "apiVersion", "const"), "badil.dev/v1"},
 		{
 			"argocdNamespace pattern",
@@ -71,6 +71,7 @@ func TestGenerate_KeyConstraints(t *testing.T) {
 		{"service chart closed", at(t, chart, "additionalProperties"), false},
 		{"service chart type", at(t, chart, "type"), "object"},
 		{"service chart optional", at(t, chart, "required"), nil},
+		{"service chart without branch", at(t, chart, "properties", "branch"), nil},
 		{"service chart path non-empty", at(t, chart, "properties", "path", "minLength"), 1.0},
 		{"valueFiles items non-empty", at(t, chart, "properties", "valueFiles", "items", "minLength"), 1.0},
 		{"previewNamespace closed", at(t, ns, "additionalProperties"), false},

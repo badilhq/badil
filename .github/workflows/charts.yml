@@ -146,8 +146,7 @@ jobs:
             exit 1
           fi
 
-      # The revision comes from each entry (commitSha, else branch), never
-      # from serviceCharts.branch.
+      # The revision comes from each entry (commitSha, else branch).
       - name: Render preview-env with serviceCharts overrides
         run: |
           out=$(helm template preview-x charts/preview-env -f - <<'EOF'
@@ -174,13 +173,10 @@ jobs:
               branch: main
           serviceCharts:
             api:
-              branch: ignored
               path: deploy/helm
               imageTagParam: image.tag
               hostParam: ingress.hostname
               valueFiles: [values-preview.yaml]
-            front:
-              branch: ignored
           EOF
           )
           got=$(echo "$out" | yq -N 'select(.kind == "Application") | .metadata.name + " " + .spec.source.repoURL + " " + .spec.source.targetRevision + " " + .spec.source.path + " " + (.spec.source.helm.valueFiles // "absent" | to_json(0)) + " " + ([.spec.source.helm.parameters[] | .name + "=" + .value] | join(","))')
@@ -432,7 +428,7 @@ jobs:
           done <<'CASES'
           backend-1: null|at '/serviceCharts/backend-1': got null, want object
           x: {path: 1}|at '/serviceCharts/x/path': got number, want string
-          x: {branch: no}|at '/serviceCharts/x/branch': got boolean, want string
+          x: {branch: main}|at '/serviceCharts/x': additional properties 'branch' not allowed
           x: {imageTagParam: ""}|at '/serviceCharts/x/imageTagParam': minLength: got 0, want 1
           x: {valueFiles: [off]}|at '/serviceCharts/x/valueFiles/0': got boolean, want string
           x: {valueFiles: off}|at '/serviceCharts/x/valueFiles': got boolean, want array
