@@ -48,7 +48,7 @@ services:
 | Field | Type | Present | Meaning |
 |---|---|---|---|
 | `apiVersion` | string | always | `badil.dev/v1` |
-| `services` | list | always | one entry per catalog service of `badil.yaml`, in catalog order |
+| `services` | list | always | at most one entry per service of `badil.yaml`, every one of them in catalog order when the preview is created; a service added to the catalog later gets an entry only when a deploy pins it, appended at the end. A renderer must not rely on every catalog service being present or on the order |
 | `services[].name` | string | always | the service name, the key of `services` in `badil.yaml` |
 | `services[].repoURL` | string | always | the service's git URL, `services.<name>.repo` of `badil.yaml` as written |
 | `services[].branch` | string | always | the branch the service tracks when not pinned: `services.<name>.branch` of `badil.yaml`, else `main` |
