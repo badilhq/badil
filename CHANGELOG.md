@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.18.0](https://github.com/badilhq/badil/compare/v0.17.0...v0.18.0) (2026-11-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* preview files from older releases fail rendering until rewritten, and the gitops repo needs badil.yaml and preview-env.yaml (upgrade steps in INSTALL).
+
+### Features
+
+* version the preview contract and split badil.yaml from preview-env.yaml ([#69](https://github.com/badilhq/badil/issues/69)) ([3c0466b](https://github.com/badilhq/badil/commit/3c0466b258a34c96290eca321a1b3843fddd0724))
+
 ## [0.17.0](https://github.com/badilhq/badil/compare/v0.16.0...v0.17.0) (2026-11-14)
 
 
