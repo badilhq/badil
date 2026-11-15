@@ -371,10 +371,20 @@ jobs:
 
       - name: Render badil cleanup interval and ServiceMonitor
         run: |
-          got=$(helm template t charts/badil -f charts/badil/ci/test-values.yaml --set cleanup.interval=1h \
-            | yq -N 'select(.kind == "Deployment") | .spec.template.spec.containers[0].env[] | select(.name == "CLEANUP_INTERVAL") | .value | tag + " " + .')
+          # Prints the Deployment's CLEANUP_INTERVAL as "<tag> <value>" and "CronJob" when one renders.
+          cleanup() {
+            helm template t charts/badil -f charts/badil/ci/test-values.yaml "$@" \
+              | yq -N '(select(.kind == "Deployment") | .spec.template.spec.containers[0].env[] | select(.name == "CLEANUP_INTERVAL") | .value | tag + " " + .), (select(.kind == "CronJob") | .kind)'
+          }
+          got=$(cleanup)
           if [ "$got" != '!!str 1h' ]; then
-            echo '::error::expected CLEANUP_INTERVAL "1h" on the Deployment when cleanup.interval is set'
+            echo '::error::expected CLEANUP_INTERVAL "1h" on the Deployment and no CronJob by default'
+            printf 'got: %s\n' "$got"
+            exit 1
+          fi
+          got=$(cleanup --set cleanup.enabled=true)
+          if [ "$got" != 'CronJob' ]; then
+            echo '::error::expected no CLEANUP_INTERVAL on the Deployment and a CronJob with cleanup.enabled=true'
             printf 'got: %s\n' "$got"
             exit 1
           fi

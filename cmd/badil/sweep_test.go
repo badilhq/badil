@@ -86,6 +86,10 @@ func (f *loopFake) DeletePreviewWithRetry(
 	return nil, errUnexpected
 }
 
+func (f *loopFake) SyncPreviewWithRetry(context.Context, string, *gitops.ServiceCatalog) (*gitops.SyncResult, error) {
+	return nil, errUnexpected
+}
+
 func (f *loopFake) TeardownPreviewWithRetry(
 	context.Context,
 	string,

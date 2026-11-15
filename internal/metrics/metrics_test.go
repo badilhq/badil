@@ -32,6 +32,8 @@ func TestMetrics_Counters(t *testing.T) {
 	m.Teardown("webhook", "unpinned")
 	m.Teardown("sweep", "noop")
 	m.SweepRun(false, time.Unix(1, 0))
+	m.SweepSynced()
+	m.SweepSynced()
 
 	assertGathered(t, m, `
 # HELP badil_webhook_deliveries_total GitHub webhook deliveries, by verified event and HTTP status.
@@ -53,12 +55,16 @@ badil_teardowns_total{result="noop",trigger="sweep"} 1
 # HELP badil_sweep_runs_total In-server cleanup sweep runs, by result.
 # TYPE badil_sweep_runs_total counter
 badil_sweep_runs_total{result="error"} 1
+# HELP badil_sweep_previews_synced_total Previews rewritten by a sweep to match badil.yaml.
+# TYPE badil_sweep_previews_synced_total counter
+badil_sweep_previews_synced_total 2
 `,
 		"badil_webhook_deliveries_total",
 		"badil_reconciles_total",
 		"badil_reconcile_skips_total",
 		"badil_teardowns_total",
 		"badil_sweep_runs_total",
+		"badil_sweep_previews_synced_total",
 	)
 	if got := testutil.ToFloat64(m.SweepLastSuccessGauge()); got != 0 {
 		t.Errorf("sweep last success = %v, want 0", got)
@@ -138,7 +144,7 @@ func TestMetrics_GitopsOp(t *testing.T) {
 	m.GitopsOp("teardown", "error", 2*time.Second)
 
 	assertGathered(t, m, `
-# HELP badil_gitops_operation_duration_seconds Duration of gitops repo writes and teardowns, retries included.
+# HELP badil_gitops_operation_duration_seconds Duration of gitops repo writes, teardowns and syncs, retries included.
 # TYPE badil_gitops_operation_duration_seconds histogram
 badil_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="0.005"} 0
 badil_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="0.01"} 0
@@ -217,6 +223,7 @@ func TestMetrics_NilIsSafe(t *testing.T) {
 	m.PreviewsListed(3)
 	m.PreviewCreated()
 	m.SweepDeleted("ttl")
+	m.SweepSynced()
 	m.GitopsOp("write", "ok", time.Second)
 	m.SweepRun(true, time.Now())
 	m.SpinUp("backend-1", time.Minute)

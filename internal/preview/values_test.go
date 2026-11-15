@@ -158,9 +158,10 @@ func TestUpdatePreviewValues_DoesNotMutateInput(t *testing.T) {
 
 func TestEqualExceptUpdatedAt(t *testing.T) {
 	in := sampleInputs()
+	services := []string{"backend-1", "front"}
 	base := preview.ApplyCatalog(
-		preview.BuildPreviewValues(in.ServiceName, in.CommitSha, []string{"backend-1", "front"}, in),
-		catalogRepos(), nil,
+		preview.BuildPreviewValues(in.ServiceName, in.CommitSha, services, in),
+		services, catalogRepos(), nil,
 	)
 	base.Services[1] = preview.ServiceEntry{
 		Name: "front", RepoURL: "https://github.com/acme/front", Branch: "main",
@@ -220,6 +221,47 @@ func TestEqualExceptUpdatedAt(t *testing.T) {
 			tt.change(&changed)
 			if got := preview.EqualExceptUpdatedAt(base, changed, "backend-1"); got != tt.want {
 				t.Errorf("EqualExceptUpdatedAt = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEqual(t *testing.T) {
+	base := func() preview.PreviewValues {
+		return preview.PreviewValues{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{
+			{
+				Name: "backend-1", RepoURL: "https://github.com/acme/backend-1.git", Branch: "main",
+				CommitSha: "abc", Metadata: &preview.Metadata{UpdatedAt: "2026-05-26T09:00:00Z"},
+			},
+			{Name: "front", RepoURL: "https://github.com/acme/front", Branch: "main", Host: "front.example.com"},
+		}}
+	}
+
+	tests := []struct {
+		name   string
+		change func(*preview.PreviewValues)
+		want   bool
+	}{
+		{name: "identical", change: func(*preview.PreviewValues) {}, want: true},
+		{name: "updated-at", change: func(v *preview.PreviewValues) { v.Services[0].Metadata.UpdatedAt = "x" }},
+		{name: "api version", change: func(v *preview.PreviewValues) { v.APIVersion = "" }},
+		{name: "host", change: func(v *preview.PreviewValues) { v.Services[1].Host = "" }},
+		{name: "branch", change: func(v *preview.PreviewValues) { v.Services[1].Branch = "develop" }},
+		{name: "repo url", change: func(v *preview.PreviewValues) { v.Services[1].RepoURL = "x" }},
+		{name: "commit sha", change: func(v *preview.PreviewValues) { v.Services[0].CommitSha = "x" }},
+		{name: "metadata removed", change: func(v *preview.PreviewValues) { v.Services[0].Metadata = nil }},
+		{
+			name:   "order",
+			change: func(v *preview.PreviewValues) { v.Services[0], v.Services[1] = v.Services[1], v.Services[0] },
+		},
+		{name: "entry removed", change: func(v *preview.PreviewValues) { v.Services = v.Services[:1] }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			changed := base()
+			tt.change(&changed)
+			if got := preview.Equal(base(), changed); got != tt.want {
+				t.Errorf("Equal = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -549,6 +591,11 @@ func TestApplyHosts_YAML(t *testing.T) {
 	}
 }
 
+// catalogServices is the catalog order of catalogRepos.
+func catalogServices() []string {
+	return []string{"backend-1", "backend-2", "front"}
+}
+
 // catalogRepos is a catalog's service repos for backend-1, backend-2 and front.
 func catalogRepos() map[string]string {
 	return map[string]string{
@@ -618,41 +665,101 @@ func TestApplyHosts_KeepsAPIVersion(t *testing.T) {
 
 func TestApplyCatalog(t *testing.T) {
 	md := &preview.Metadata{PRURL: "https://github.com/acme/backend-1/pull/42"}
+	goneMD := &preview.Metadata{PRURL: "https://github.com/acme/gone/pull/9", UpdatedAt: "2026-05-26T09:00:00Z"}
 	in := preview.PreviewValues{Services: []preview.ServiceEntry{
-		{Name: "gone-pinned", CommitSha: "x", Metadata: md},
+		{
+			Name: "gone-pinned", RepoURL: "https://github.com/acme/gone-pinned", Branch: "release",
+			CommitSha: "x", Metadata: goneMD,
+		},
 		{Name: "front", RepoURL: "https://stale.example.com/front", Branch: "stale", Host: "front.example.com"},
 		{Name: "gone"},
+		{Name: "gone-pinned-no-repo", CommitSha: "y", Metadata: md},
 		{Name: "backend-1", CommitSha: "abc", Metadata: md},
-		{Name: "backend-2", Branch: "old"},
 	}}
 
-	got := preview.ApplyCatalog(in, catalogRepos(), map[string]string{"backend-2": "develop"})
+	got := preview.ApplyCatalog(in, catalogServices(), catalogRepos(), map[string]string{"backend-2": "develop"})
 
 	if got.APIVersion != preview.APIVersion {
 		t.Errorf("APIVersion = %q, want %q", got.APIVersion, preview.APIVersion)
 	}
 	want := []preview.ServiceEntry{
 		{
-			Name: "front", RepoURL: "https://github.com/acme/front", Branch: "main",
-			Host: "front.example.com",
-		},
-		{
 			Name: "backend-1", RepoURL: "https://github.com/acme/backend-1.git", Branch: "main",
 			CommitSha: "abc", Metadata: md,
 		},
 		{Name: "backend-2", RepoURL: "https://github.com/acme/backend-2.git", Branch: "develop"},
+		{
+			Name: "front", RepoURL: "https://github.com/acme/front", Branch: "main",
+			Host: "front.example.com",
+		},
+		{
+			Name: "gone-pinned", RepoURL: "https://github.com/acme/gone-pinned", Branch: "release",
+			CommitSha: "x", Metadata: goneMD,
+		},
 	}
 	if !reflect.DeepEqual(got.Services, want) {
 		t.Errorf("Services = %+v, want %+v", got.Services, want)
 	}
-	if in.APIVersion != "" || len(in.Services) != 5 || in.Services[1].RepoURL != "https://stale.example.com/front" {
+	if in.APIVersion != "" || len(in.Services) != 5 || in.Services[1].RepoURL != "https://stale.example.com/front" ||
+		in.Services[0].Name != "gone-pinned" {
 		t.Errorf("input mutated: %+v", in)
+	}
+}
+
+func TestApplyCatalog_AddsMissingServicesInCatalogOrder(t *testing.T) {
+	in := preview.PreviewValues{Services: []preview.ServiceEntry{{Name: "front"}}}
+
+	got := preview.ApplyCatalog(in, catalogServices(), catalogRepos(), nil)
+
+	names := make([]string, 0, len(got.Services))
+	for _, svc := range got.Services {
+		names = append(names, svc.Name)
+	}
+	if !slices.Equal(names, catalogServices()) {
+		t.Fatalf("names = %v, want %v", names, catalogServices())
+	}
+	want := preview.ServiceEntry{Name: "backend-2", RepoURL: "https://github.com/acme/backend-2.git", Branch: "main"}
+	if !reflect.DeepEqual(got.Services[1], want) {
+		t.Errorf("Services[1] = %+v, want %+v", got.Services[1], want)
+	}
+	if len(in.Services) != 1 {
+		t.Errorf("input mutated: %+v", in)
+	}
+}
+
+func TestApplyCatalog_KeepsFirstEntryOfDuplicates(t *testing.T) {
+	first := preview.ServiceEntry{
+		Name:      "gone",
+		RepoURL:   "https://github.com/acme/gone.git",
+		Branch:    "main",
+		CommitSha: "aaa",
+	}
+	in := preview.PreviewValues{Services: []preview.ServiceEntry{
+		{Name: "front", CommitSha: "f1"},
+		{Name: "front", CommitSha: "f2"},
+		first,
+		{Name: "gone", RepoURL: "https://github.com/acme/gone.git", Branch: "main", CommitSha: "bbb"},
+	}}
+
+	got := preview.ApplyCatalog(
+		in,
+		[]string{"front"},
+		map[string]string{"front": "https://github.com/acme/front.git"},
+		nil,
+	)
+
+	want := []preview.ServiceEntry{
+		{Name: "front", RepoURL: "https://github.com/acme/front.git", Branch: "main", CommitSha: "f1"},
+		first,
+	}
+	if !reflect.DeepEqual(got.Services, want) {
+		t.Errorf("Services = %+v, want %+v", got.Services, want)
 	}
 }
 
 func TestApplyCatalog_KeepsAPIVersion(t *testing.T) {
 	in := preview.PreviewValues{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{{Name: "front"}}}
-	got := preview.ApplyCatalog(in, catalogRepos(), nil)
+	got := preview.ApplyCatalog(in, catalogServices(), catalogRepos(), nil)
 	if got.APIVersion != preview.APIVersion {
 		t.Errorf("APIVersion = %q, want %q", got.APIVersion, preview.APIVersion)
 	}

@@ -17,7 +17,7 @@ A renderer needs only `previews/<slug>/values.yaml`: it carries each service's r
 ## Lifecycle
 
 - **Create.** badil creates `previews/<slug>/values.yaml` on the first deploy to a slug, from the label flow or `POST /v1/deploy`.
-- **Update.** badil rewrites the file on a deploy or a teardown that changes its content. A label-flow deploy that would change only `metadata.updated-at` writes nothing, and neither does a teardown that unpins nothing, so a renderer must not expect a commit per deploy. A deploy write drops every entry whose service left the catalog, pinned or not: a renderer must remove what it deployed for an entry that disappears.
+- **Update.** badil rewrites the file on a deploy, a teardown, or a cleanup sweep sync (the file differs from `badil.yaml`), when that changes its content. A label-flow deploy that would change only `metadata.updated-at` writes nothing, and neither does a teardown that unpins nothing or a sync of a file that already matches, so a renderer must not expect a commit per deploy. When a service is removed from `badil.yaml`, its unpinned entries are dropped by the next write; a pinned entry stays until its PR's teardown, and the write after that drops it: a renderer must remove what it deployed for an entry that disappears.
 - **Delete.** badil deletes the file, and with it `previews/<slug>/`, when no service of the preview is pinned any more (teardown or cleanup sweep), when the preview expires (`CLEANUP_TTL`), or when the sweep tears down the last PR that pinned it. See [Teardown flow](ARCHITECTURE.md#http-api) and [Cleanup sweep](ARCHITECTURE.md#cleanup-sweep).
 
 The slug is the slugified head branch, or the name of a `<label>:<name>` label: lowercase `a-z` and `0-9`, every other run of characters replaced by one `-`, no leading or trailing `-`. A slug is a DNS label of at most 53 characters (Helm's release-name limit): a longer one is cut and suffixed with `-` and 6 hex characters of a hash of the full slug.
@@ -48,10 +48,10 @@ services:
 | Field | Type | Present | Meaning |
 |---|---|---|---|
 | `apiVersion` | string | always | `badil.dev/v1` |
-| `services` | list | always | at most one entry per service of `badil.yaml`, every one of them in catalog order when the preview is created; a service added to the catalog later gets an entry only when a deploy pins it, appended at the end. A renderer must not rely on every catalog service being present or on the order |
-| `services[].name` | string | always | the service name, the key of `services` in `badil.yaml` |
-| `services[].repoURL` | string | always | the service's git URL, `services.<name>.repo` of `badil.yaml` as written |
-| `services[].branch` | string | always | the branch the service tracks when not pinned: `services.<name>.branch` of `badil.yaml`, else `main` |
+| `services` | list | always | every service of `badil.yaml`, in catalog order, then the pinned entries of services removed from it, in file order, as of the file's last write. A file written before a catalog change keeps its old entries until the next write (deploy or sweep) |
+| `services[].name` | string | always | the service name, the key of `services` in `badil.yaml`; a kept pinned entry of a removed service keeps its last name |
+| `services[].repoURL` | string | always | the service's git URL, `services.<name>.repo` of `badil.yaml` as written; a kept pinned entry of a removed service keeps its last `repoURL` |
+| `services[].branch` | string | always | the branch the service tracks when not pinned: `services.<name>.branch` of `badil.yaml`, else `main`; a kept pinned entry of a removed service keeps its last `branch` |
 | `services[].commitSha` | string | pinned entries only | the full commit SHA the service is pinned at; also its image tag |
 | `services[].host` | string | exposed services only (`preview.expose` of `badil.yaml`, with `preview.domain` set) | the ingress host `<service>-<slug>.<domain>` |
 | `services[].metadata` | object | exactly when `commitSha` is | the PR that pinned the entry, every key below required |

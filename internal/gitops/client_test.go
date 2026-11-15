@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -561,13 +562,15 @@ services:
 // writeServer serves files to successive GETs of previews/slug/values.yaml
 // (the last one repeats; blob-<n> is the n-th file's sha; an empty file or no
 // file is a 404) and answers PUTs with conflicts first, then success. It
-// counts the requests and keeps the content of the last successful PUT.
+// counts the requests and keeps the content and message of the last
+// successful PUT.
 type writeServer struct {
 	files     []string
 	conflicts int32
 	gets      atomic.Int32
 	puts      atomic.Int32
 	written   atomic.Value
+	message   atomic.Value
 }
 
 func (s *writeServer) start(t *testing.T, opts ...gitops.Option) *gitops.Client {
@@ -594,11 +597,13 @@ func (s *writeServer) start(t *testing.T, opts ...gitops.Option) *gitops.Client 
 			}
 			var req struct {
 				Content []byte `json:"content"`
+				Message string `json:"message"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				t.Errorf("decode PUT body: %v", err)
 			}
 			s.written.Store(string(req.Content))
+			s.message.Store(req.Message)
 			_, _ = io.WriteString(w, `{"commit":{"html_url":"https://github.com/x/y/commit/written"}}`)
 		default:
 			t.Errorf("unexpected method %s", r.Method)
@@ -775,19 +780,31 @@ func TestWritePreviewWithRetry_Created(t *testing.T) {
 }
 
 // TestWritePreviewWithRetry_FollowsCatalog checks that a deploy update writes
-// apiVersion and each entry's repoURL and branch from the catalog, and drops
-// the entries of services no longer in it, pinned or not, keeping the order
-// of the rest.
+// apiVersion and every catalog service in catalog order with its repoURL and
+// branch from the catalog, then keeps a pinned entry of a removed service as
+// it is, and drops an unpinned one and a pinned one without repoURL.
 func TestWritePreviewWithRetry_FollowsCatalog(t *testing.T) {
 	const file = `services:
   - name: gone-pinned
+    repoURL: https://github.com/acme/gone-pinned.git
+    branch: release
     commitSha: fff
     metadata:
+      pr-author: octocat
       pr-url: https://github.com/acme/gone-pinned/pull/9
+      pr-number: "9"
+      created-at: "2026-05-25T10:00:00Z"
+      updated-at: "2026-05-25T11:00:00Z"
+      vcs.ref.name: feature/gone
+      cicd.pipeline.run.url: https://github.com/acme/gone-pinned/actions/runs/9
   - name: backend-2
     repoURL: https://github.com/acme/old.git
     branch: old
   - name: gone
+  - name: gone-pinned-no-repo
+    commitSha: eee
+    metadata:
+      pr-url: https://github.com/acme/gone-pinned-no-repo/pull/3
   - name: backend-1
 `
 	s := &writeServer{files: []string{file}}
@@ -807,9 +824,6 @@ func TestWritePreviewWithRetry_FollowsCatalog(t *testing.T) {
 	}
 	want := "apiVersion: badil.dev/v1\n" +
 		"services:\n" +
-		"  - name: backend-2\n" +
-		"    repoURL: https://github.com/acme/backend-2.git\n" +
-		"    branch: develop\n" +
 		"  - name: backend-1\n" +
 		"    repoURL: https://github.com/acme/backend-1.git\n" +
 		"    branch: main\n" +
@@ -822,9 +836,57 @@ func TestWritePreviewWithRetry_FollowsCatalog(t *testing.T) {
 		"      created-at: \"2026-05-26T10:00:00Z\"\n" +
 		"      updated-at: \"2026-05-26T10:00:00Z\"\n" +
 		"      vcs.ref.name: feature/add-pricing\n" +
-		"      cicd.pipeline.run.url: https://github.com/acme/backend-1/actions/runs/1\n"
+		"      cicd.pipeline.run.url: https://github.com/acme/backend-1/actions/runs/1\n" +
+		"  - name: backend-2\n" +
+		"    repoURL: https://github.com/acme/backend-2.git\n" +
+		"    branch: develop\n" +
+		"  - name: gone-pinned\n" +
+		"    repoURL: https://github.com/acme/gone-pinned.git\n" +
+		"    branch: release\n" +
+		"    commitSha: fff\n" +
+		"    metadata:\n" +
+		"      pr-author: octocat\n" +
+		"      pr-url: https://github.com/acme/gone-pinned/pull/9\n" +
+		"      pr-number: \"9\"\n" +
+		"      created-at: \"2026-05-25T10:00:00Z\"\n" +
+		"      updated-at: \"2026-05-25T11:00:00Z\"\n" +
+		"      vcs.ref.name: feature/gone\n" +
+		"      cicd.pipeline.run.url: https://github.com/acme/gone-pinned/actions/runs/9\n"
 	if got, _ := s.written.Load().(string); got != want {
 		t.Errorf("written content mismatch\n got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestWritePreviewWithRetry_AddsMissingService checks that a deploy to an
+// existing preview writes a catalog service the file lacks as a
+// branch-tracking entry, in catalog order.
+func TestWritePreviewWithRetry_AddsMissingService(t *testing.T) {
+	s := &writeServer{files: []string{pinnedFile()}}
+	c := s.start(t)
+	catalog := testCatalog("backend-1", "front", "backend-2")
+
+	result, err := c.WritePreviewWithRetry(
+		context.Background(), "slug", catalog,
+		"backend-1", "abc1234567890", sampleInputs(), "create", "update", true,
+	)
+	if err != nil {
+		t.Fatalf("WritePreviewWithRetry: %v", err)
+	}
+	if result.Unchanged {
+		t.Fatal("Unchanged = true, want a write")
+	}
+	names := make([]string, 0, len(result.Values.Services))
+	for _, svc := range result.Values.Services {
+		names = append(names, svc.Name)
+	}
+	if want := []string{"backend-1", "front", "backend-2"}; !slices.Equal(names, want) {
+		t.Errorf("names = %v, want %v", names, want)
+	}
+	got, _ := s.written.Load().(string)
+	if !strings.Contains(got, "      cicd.pipeline.run.url: https://github.com/acme/backend-1/actions/runs/1\n"+
+		"  - name: front\n    repoURL: https://github.com/acme/front.git\n    branch: main\n"+
+		"  - name: backend-2\n") {
+		t.Errorf("written content missing front between backend-1 and backend-2:\n%s", got)
 	}
 }
 

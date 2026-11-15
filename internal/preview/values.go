@@ -61,34 +61,62 @@ func UpdatePreviewValues(existing PreviewValues, serviceName, commitSha string, 
 	return out
 }
 
-// ApplyCatalog returns a copy of vals with apiVersion APIVersion, every entry
-// whose service is not a key of repos dropped (pinned or not; the rest keep
-// their order), and each remaining entry's repoURL set from repos and its
-// branch from branches (DefaultBranch when absent). vals is never mutated.
-func ApplyCatalog(vals PreviewValues, repos, branches map[string]string) PreviewValues {
-	services := make([]ServiceEntry, 0, len(vals.Services))
+// ApplyCatalog returns vals projected on the catalog, never mutating vals:
+//   - apiVersion is APIVersion;
+//   - one entry per name of services, in that order: the existing entry of
+//     that name (keeping its commitSha, metadata and host) or a bare {name},
+//     with repoURL from repos and branch from branches (DefaultBranch when
+//     absent);
+//   - then, in file order, every entry whose service is not in services, is
+//     pinned (commitSha set) and has a repoURL, unchanged;
+//   - a service listed twice keeps only its first entry;
+//   - every other entry is dropped.
+func ApplyCatalog(vals PreviewValues, services []string, repos, branches map[string]string) PreviewValues {
+	inCatalog := make(map[string]bool, len(services))
+	out := make([]ServiceEntry, 0, len(services)+len(vals.Services))
+	for _, name := range services {
+		inCatalog[name] = true
+		entry := ServiceEntry{Name: name}
+		if i := slices.IndexFunc(vals.Services, func(s ServiceEntry) bool { return s.Name == name }); i >= 0 {
+			entry = vals.Services[i]
+		}
+		entry.RepoURL = repos[name]
+		entry.Branch = branches[name]
+		if entry.Branch == "" {
+			entry.Branch = DefaultBranch
+		}
+		out = append(out, entry)
+	}
+	kept := make(map[string]bool)
 	for _, svc := range vals.Services {
-		url, ok := repos[svc.Name]
-		if !ok {
+		if inCatalog[svc.Name] || kept[svc.Name] || svc.CommitSha == "" || svc.RepoURL == "" {
 			continue
 		}
-		svc.RepoURL = url
-		svc.Branch = branches[svc.Name]
-		if svc.Branch == "" {
-			svc.Branch = DefaultBranch
-		}
-		services = append(services, svc)
+		kept[svc.Name] = true
+		out = append(out, svc)
 	}
-	out := vals
-	out.APIVersion = APIVersion
-	out.Services = services
-	return out
+	res := vals
+	res.APIVersion = APIVersion
+	res.Services = out
+	return res
+}
+
+// Equal reports whether a and b have the same apiVersion and hold the same
+// entries, in the same order, every field compared (metadata by value).
+func Equal(a, b PreviewValues) bool {
+	return equalValues(a, b, "", false)
 }
 
 // EqualExceptUpdatedAt reports whether a and b have the same apiVersion and
 // hold the same entries, in the same order, ignoring only the updated-at of
 // serviceName's entry. Metadata is compared by value.
 func EqualExceptUpdatedAt(a, b PreviewValues, serviceName string) bool {
+	return equalValues(a, b, serviceName, true)
+}
+
+// equalValues compares a and b as Equal does, ignoring the updated-at of
+// serviceName's entry when ignoreUpdatedAt is set.
+func equalValues(a, b PreviewValues, serviceName string, ignoreUpdatedAt bool) bool {
 	if a.APIVersion != b.APIVersion {
 		return false
 	}
@@ -101,7 +129,7 @@ func EqualExceptUpdatedAt(a, b PreviewValues, serviceName string) bool {
 			return x.Metadata == nil && y.Metadata == nil
 		}
 		mx, my := *x.Metadata, *y.Metadata
-		if x.Name == serviceName {
+		if ignoreUpdatedAt && x.Name == serviceName {
 			mx.UpdatedAt, my.UpdatedAt = "", ""
 		}
 		return mx == my

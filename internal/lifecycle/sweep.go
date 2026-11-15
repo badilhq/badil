@@ -29,10 +29,13 @@ type SweepAPI interface {
 		slug, message string,
 		stillDelete func(preview.PreviewValues) bool,
 	) (*gitops.DeleteResult, error)
+	SyncPreviewWithRetry(ctx context.Context, slug string, catalog *gitops.ServiceCatalog) (*gitops.SyncResult, error)
 }
 
-// Sweep visits every preview of the gitops repo once and applies the first
-// matching rule:
+// Sweep visits every preview of the gitops repo once, applies the first
+// matching rule 1-3, then syncs every preview that rules 1 and 2 did not
+// match (step 4). A preview whose rule 1-2 delete is cancelled by the
+// re-check is not synced: the deploy that cancelled it already projected it.
 //
 //  1. no pinned entry: the preview is deleted;
 //  2. ttl > 0 and the newest updated-at of its pinned entries is before
@@ -42,16 +45,20 @@ type SweepAPI interface {
 //     conflict, or target another preview, is unpinned without a comment
 //     (unpinOnly); one with no target, pinned outside its branch slug, goes
 //     through TeardownPR. Other open PRs are left alone.
+//  4. after rule 3, the preview is rewritten to match the catalog
+//     (SyncPreviewWithRetry). A rewrite is recorded and logged; when it
+//     changed the service list or a host, the open PRs' comments are
+//     refreshed.
 //
-// The catalog is fetched once, when there is a preview, for the preview label.
-// When it can't be read, a warning is logged and only closed PRs are torn down
-// by rule 3.
+// The catalog is fetched once, when there is a preview, for the preview label
+// and step 4. When it can't be read, a warning is logged, only closed PRs are
+// torn down by rule 3 and step 4 is skipped.
 //
-// A ttl of 0 disables rule 2. A failing preview read or rule 1-2 delete is
-// logged and counted, and the sweep goes on; Sweep then returns an error
-// carrying the count. A closed-PR teardown failure is only logged by
-// TeardownPR, not counted, and retried on the next run. A ListPreviews error is
-// returned at once.
+// A ttl of 0 disables rule 2. A failing preview read, rule 1-2 delete or step 4
+// sync is logged and counted, and the sweep goes on; Sweep then returns an
+// error carrying the count. A failed comment refresh is only logged. A
+// closed-PR teardown failure is only logged by TeardownPR, not counted, and
+// retried on the next run. A ListPreviews error is returned at once.
 //
 // The number of listed previews and each rule 1-2 deletion are recorded
 // through the Recorder; teardowns are recorded with the sweep trigger.
@@ -65,10 +72,10 @@ func Sweep(ctx context.Context, api SweepAPI, now time.Time, ttl time.Duration) 
 		slog.Int("previews", len(slugs)),
 		slog.String("ttl", ttl.String()),
 	)
-	label := sweepLabel(ctx, api, slugs)
+	catalog := sweepCatalog(ctx, api, slugs)
 	failed := 0
 	for _, slug := range slugs {
-		if sweepErr := sweepPreview(ctx, api, slug, label, now, ttl); sweepErr != nil {
+		if sweepErr := sweepPreview(ctx, api, slug, catalog, now, ttl); sweepErr != nil {
 			failed++
 			slog.ErrorContext(ctx, "cleanup preview failed",
 				slog.String("slug", slug),
@@ -86,27 +93,28 @@ func Sweep(ctx context.Context, api SweepAPI, now time.Time, ttl time.Duration) 
 	return nil
 }
 
-// sweepLabel returns the catalog's preview label, or "" when there is no
-// preview or the catalog can't be read.
-func sweepLabel(ctx context.Context, api SweepAPI, slugs []string) string {
+// sweepCatalog returns the catalog, or nil when there is no preview or the
+// catalog can't be read.
+func sweepCatalog(ctx context.Context, api SweepAPI, slugs []string) *gitops.ServiceCatalog {
 	if len(slugs) == 0 {
-		return ""
+		return nil
 	}
 	catalog, err := api.FetchServiceCatalog(ctx)
 	if err != nil {
 		slog.WarnContext(ctx, "cleanup catalog unavailable", slog.String("err", err.Error()))
-		return ""
+		return nil
 	}
-	return catalog.Label
+	return catalog
 }
 
-// sweepPreview applies the first matching sweep rule to one preview. A
-// preview that vanished since the listing is skipped. label is the preview
-// label, "" to skip rule 3's open-PR cases.
+// sweepPreview applies the first matching sweep rule 1-3 to one preview, then
+// syncs it when it was kept (step 4). A preview that vanished since the
+// listing is skipped. A nil catalog skips rule 3's open-PR cases and step 4.
 func sweepPreview(
 	ctx context.Context,
 	api SweepAPI,
-	slug, label string,
+	slug string,
+	catalog *gitops.ServiceCatalog,
 	now time.Time,
 	ttl time.Duration,
 ) error {
@@ -127,7 +135,43 @@ func sweepPreview(
 			return deleteExpired(ctx, api, slug, ttl, cutoff)
 		}
 	}
+	label := ""
+	if catalog != nil {
+		label = catalog.Label
+	}
 	teardownClosedPRs(ctx, api, slug, label, *vals)
+	if catalog == nil {
+		return nil
+	}
+	return syncPreview(ctx, api, slug, catalog)
+}
+
+// syncPreview rewrites a kept preview to match catalog (step 4), records and
+// logs a rewrite and, when it changed the service list or a host, refreshes
+// the open PRs' comments. Only the sync error is returned.
+func syncPreview(ctx context.Context, api SweepAPI, slug string, catalog *gitops.ServiceCatalog) error {
+	res, err := api.SyncPreviewWithRetry(ctx, slug, catalog)
+	if err != nil {
+		return err
+	}
+	if !res.Changed {
+		return nil
+	}
+	api.SweepSynced()
+	slog.InfoContext(ctx, "preview synced", //nolint:sloglint // lifecycle has no scoped logger yet
+		slog.String("slug", slug),
+		slog.String("gitops_commit_url", res.CommitURL),
+	)
+	if !res.Notify {
+		return nil
+	}
+	body := preview.BuildSummary(slug, res.Values, catalog.URLs, catalog.Branches, res.CommitMessage, res.CommitURL)
+	if fanErr := api.FanOutPRComments(ctx, res.Values, body); fanErr != nil {
+		slog.WarnContext(ctx, "preview sync comment failed", //nolint:sloglint // lifecycle has no scoped logger yet
+			slog.String("slug", slug),
+			slog.String("err", fanErr.Error()),
+		)
+	}
 	return nil
 }
 

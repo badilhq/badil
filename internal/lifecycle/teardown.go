@@ -37,6 +37,8 @@ type Recorder interface {
 	SweepListed(n int)
 	// SweepDeleted records one preview deleted by a sweep rule.
 	SweepDeleted(rule string)
+	// SweepSynced records one preview a sweep rewrote to match badil.yaml.
+	SweepSynced()
 }
 
 // TeardownAPI is the subset of gitops.Client used by TeardownPR, plus the
