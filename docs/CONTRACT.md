@@ -4,7 +4,7 @@ badil and the renderer of a preview never talk to each other: badil writes one f
 
 ## Versioning
 
-`v1beta1` is a beta: a later version (`v1beta2`, or `v1`) may change the file incompatibly. Each such change ships with a `preview-env` version that accepts only the new `apiVersion`, and badil's cleanup sweep rewrites every preview file to it within one sweep after badil is upgraded. A renderer refuses an `apiVersion` it does not support.
+`v1beta1` is a beta: a later version (`v1beta2`, or `v1`) may change the file incompatibly. Each such change ships with a `preview-env` version that accepts only the new `apiVersion`, and badil's cleanup sweep rewrites every preview file that has a pin to it within one sweep after badil is upgraded (the same sweep deletes files without a pin). A renderer refuses an `apiVersion` it does not support.
 
 To upgrade to `badil.dev/v1beta1`, upgrade badil and bump the ApplicationSet to `preview-env` 0.10.0 together, then wait one sweep, which rewrites every `badil.dev/v1` file that has a pin to `badil.dev/v1beta1`. Until a file is rewritten, `preview-env` refuses it and Argo CD shows the render error. The steps are in [INSTALL §10](INSTALL.md#10-upgrade) and the error strings in the upgrade block of [ARCHITECTURE](ARCHITECTURE.md#gitops-repo-contract).
 

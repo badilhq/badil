@@ -120,7 +120,7 @@ Upgrade (badil and `preview-env` 0.10.0); steps 1 and 5 apply only when the gito
 4. Wait for one sweep (at most `cleanup.interval`, `1h` by default, or one CronJob `schedule` run with `cleanup.enabled=true`; with `cleanup.interval` empty and the CronJob off, no sweep runs and nothing is rewritten): the sync rewrites every file that has a pin to `badil.dev/v1beta1` (files with `badil.dev/v1` or with no `apiVersion`), and the sweep deletes the others.
 5. When step 1 applied, delete `services.yaml` from the gitops repo: nothing reads it any more.
 
-Between step 2 and the sweep, Argo CD shows a render error on the Application of each preview whose file the deployed `preview-env` refuses, until the file is rewritten or the chart bumped:
+Between step 2 and the sweep, Argo CD shows a render error on the Application of each preview whose file the deployed `preview-env` refuses:
 
 - From step 2 until step 3, `preview-env` 0.9.0 refuses the files badil has rewritten: `at '/apiVersion': value must be 'badil.dev/v1'`.
 - From step 3 until the sweep, `preview-env` 0.10.0 refuses the files not yet rewritten: `at '/apiVersion': value must be 'badil.dev/v1beta1'` (a `badil.dev/v1` file) or `missing property 'apiVersion'` (a file written before 0.18.0).
