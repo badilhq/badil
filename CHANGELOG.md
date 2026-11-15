@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.20.0](https://github.com/badilhq/badil/compare/v0.19.0...v0.20.0) (2026-11-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* preview files use apiVersion badil.dev/v1beta1 instead of badil.dev/v1, and preview-env 0.10.0 accepts only badil.dev/v1beta1.
+
+### Features
+
+* rename the preview contract apiVersion to badil.dev/v1beta1 ([#73](https://github.com/badilhq/badil/issues/73)) ([7cb002c](https://github.com/badilhq/badil/commit/7cb002c0ceb5c73ded39c2e7e918837258f9cf3e))
+
 ## [0.19.0](https://github.com/badilhq/badil/compare/v0.18.0...v0.19.0) (2026-11-15)
 
 
