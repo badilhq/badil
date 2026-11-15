@@ -32,6 +32,8 @@ func assertMetrics(t *testing.T, m *metrics.Metrics, want map[string]float64, na
 			"# TYPE badil_previews gauge\n",
 		"badil_sweep_previews_deleted_total": "# HELP badil_sweep_previews_deleted_total " +
 			"Previews deleted by the cleanup sweep, by rule.\n# TYPE badil_sweep_previews_deleted_total counter\n",
+		"badil_sweep_previews_synced_total": "# HELP badil_sweep_previews_synced_total " +
+			"Previews rewritten by a sweep to match badil.yaml.\n# TYPE badil_sweep_previews_synced_total counter\n",
 	}
 	var expected strings.Builder
 	matched := 0
@@ -235,27 +237,32 @@ func TestSweepMetrics(t *testing.T) {
 	f := &fakeAPI{
 		Metrics:  metrics.New(),
 		label:    "preview",
-		previews: []string{"unpinned", "expired", "closed", "open"},
+		previews: []string{"unpinned", "expired", "closed", "open", "stale"},
 		files: map[string]*preview.PreviewValues{
 			"unpinned": values(preview.ServiceEntry{Name: "backend-1"}),
 			"expired":  values(pin("backend-1", pr42, stale)),
 			"closed":   values(pin("backend-2", pr7, recent)),
 			"open":     values(pin("backend-1", pr42, recent)),
+			"stale":    values(pin("front", "https://github.com/acme/front/pull/3", recent)),
 		},
-		prOpen:    map[string]bool{"acme/backend-1#42": true},
-		prHeadRef: map[string]string{"acme/backend-1#42": "open"},
-		prLabels:  map[string][]string{"acme/backend-1#42": {"preview"}},
+		prOpen:    map[string]bool{"acme/backend-1#42": true, "acme/front#3": true},
+		prHeadRef: map[string]string{"acme/backend-1#42": "open", "acme/front#3": "stale"},
+		prLabels:  map[string][]string{"acme/backend-1#42": {"preview"}, "acme/front#3": {"preview"}},
+		// "open" syncs unchanged, "stale" is rewritten.
+		sync: map[string]*gitops.SyncResult{"stale": {Changed: true}},
 	}
 	if err := lifecycle.Sweep(context.Background(), f, now, ttl); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
 
 	assertMetrics(t, f.Metrics, map[string]float64{
-		`badil_previews`: 1,
+		`badil_previews`: 2,
 		`badil_sweep_previews_deleted_total{rule="no_pin"}`:       1,
 		`badil_sweep_previews_deleted_total{rule="ttl"}`:          1,
 		`badil_teardowns_total{result="deleted",trigger="sweep"}`: 1,
-	}, "badil_previews", "badil_sweep_previews_deleted_total", "badil_teardowns_total")
+		`badil_sweep_previews_synced_total`:                       1,
+	}, "badil_previews", "badil_sweep_previews_deleted_total", "badil_teardowns_total",
+		"badil_sweep_previews_synced_total")
 }
 
 func TestSweepMetrics_UnpinOnlyIsASweepTeardown(t *testing.T) {

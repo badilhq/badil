@@ -43,8 +43,9 @@ type Client struct {
 // Option configures a Client built by NewClient.
 type Option func(*Client)
 
-// WithMetrics times WritePreviewWithRetry and TeardownPreviewWithRetry in m,
-// and counts the previews WritePreviewWithRetry creates.
+// WithMetrics times WritePreviewWithRetry, TeardownPreviewWithRetry and
+// SyncPreviewWithRetry in m, and counts the previews WritePreviewWithRetry
+// creates.
 func WithMetrics(m *metrics.Metrics) Option {
 	return func(c *Client) {
 		c.metrics = m
@@ -281,9 +282,10 @@ type WriteResult struct {
 // commitSha, the rest tracking their branch).
 //
 // After every build or merge, preview.ApplyCatalog then preview.ApplyHosts
-// set apiVersion and each entry's repoURL, branch and host from catalog, and
-// drop the entries of services no longer in it, so the written file follows
-// the current catalog.
+// project the file on catalog: apiVersion, every catalog service in catalog
+// order (a missing one added as a branch-tracking entry) with its repoURL,
+// branch and host, then the pinned entries of services no longer in it; their
+// unpinned entries are dropped. The written file follows the current catalog.
 //
 // With skipUnchanged, when the file exists and the values to write differ
 // from it only in serviceName's updated-at (preview.EqualExceptUpdatedAt),
@@ -316,10 +318,12 @@ func (c *Client) WritePreviewWithRetry(
 	return res, err
 }
 
-// applyCatalog returns vals with the facts of catalog applied: apiVersion,
-// repoURL and branch (preview.ApplyCatalog), then hosts (preview.ApplyHosts).
+// applyCatalog returns vals projected on catalog: every catalog service in
+// catalog order with its repoURL and branch, then the pinned entries of removed
+// services (preview.ApplyCatalog), then hosts (preview.ApplyHosts).
 func applyCatalog(vals preview.PreviewValues, slug string, catalog *ServiceCatalog) preview.PreviewValues {
-	return preview.ApplyHosts(preview.ApplyCatalog(vals, catalog.Repos, catalog.Branches), slug, catalog.URLs)
+	projected := preview.ApplyCatalog(vals, catalog.Services, catalog.Repos, catalog.Branches)
+	return preview.ApplyHosts(projected, slug, catalog.URLs)
 }
 
 // writePreviewWithRetry is WritePreviewWithRetry, untimed.
@@ -455,6 +459,84 @@ func (c *Client) teardownPreviewWithRetry(
 		}
 	}
 	return nil, fmt.Errorf("teardown %s: %d attempts exhausted", previewPath(slug), MaxWriteRetries)
+}
+
+// SyncResult is the outcome of SyncPreviewWithRetry. Changed is true when
+// the file was rewritten; Values, CommitURL and CommitMessage then describe
+// that write. Notify is true when the written file's ordered list of entry
+// names or any entry's host differs from the file it replaced.
+type SyncResult struct {
+	Values        preview.PreviewValues
+	CommitURL     string
+	CommitMessage string
+	Changed       bool
+	Notify        bool
+}
+
+// SyncPreviewWithRetry rewrites previews/<slug>/values.yaml as its projection
+// on catalog (applyCatalog) when that differs from the file (preview.Equal),
+// with the message "chore(preview): sync <slug> with badil.yaml". On a 409
+// conflict the file is re-fetched and the projection recomputed, up to
+// MaxWriteRetries attempts. A file that already matches is not written. A
+// missing file (on read or re-fetch) is a no-op: an empty SyncResult and a nil
+// error.
+//
+// Its duration, retries included, is observed as the sync operation.
+func (c *Client) SyncPreviewWithRetry(ctx context.Context, slug string, catalog *ServiceCatalog) (*SyncResult, error) {
+	start := time.Now()
+	res, err := c.syncPreviewWithRetry(ctx, slug, catalog)
+	c.observe("sync", start, err)
+	return res, err
+}
+
+// syncPreviewWithRetry is SyncPreviewWithRetry, untimed.
+func (c *Client) syncPreviewWithRetry(ctx context.Context, slug string, catalog *ServiceCatalog) (*SyncResult, error) {
+	existing, sha, err := c.GetPreview(ctx, slug)
+	if errors.Is(err, ErrNotFound) {
+		return &SyncResult{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	message := fmt.Sprintf("chore(preview): sync %s with badil.yaml", slug)
+	for attempt := 1; attempt <= MaxWriteRetries; attempt++ {
+		vals := applyCatalog(*existing, slug, catalog)
+		if preview.Equal(*existing, vals) {
+			return &SyncResult{}, nil
+		}
+		commitURL, writeErr := c.WritePreview(ctx, slug, vals, sha, message)
+		if writeErr == nil {
+			return &SyncResult{
+				Values:        vals,
+				CommitURL:     commitURL,
+				CommitMessage: message,
+				Changed:       true,
+				Notify:        summaryChanged(*existing, vals),
+			}, nil
+		}
+		if statusCode(writeErr) != http.StatusConflict {
+			return nil, writeErr
+		}
+		// 409 — re-fetch and recompute the projection.
+		existing, sha, err = c.GetPreview(ctx, slug)
+		if errors.Is(err, ErrNotFound) {
+			return &SyncResult{}, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("conflict re-fetch: %w", err)
+		}
+	}
+	return nil, fmt.Errorf("sync %s: %d attempts exhausted", previewPath(slug), MaxWriteRetries)
+}
+
+// summaryChanged reports whether the ordered list of entry names or any
+// entry's host differs between a and b: the parts of the PR comment a sync
+// can change.
+func summaryChanged(a, b preview.PreviewValues) bool {
+	return !slices.EqualFunc(a.Services, b.Services, func(x, y preview.ServiceEntry) bool {
+		return x.Name == y.Name && x.Host == y.Host
+	})
 }
 
 // DeleteResult is the outcome of DeletePreviewWithRetry. Deleted is false

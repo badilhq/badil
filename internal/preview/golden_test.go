@@ -42,9 +42,10 @@ func TestGoldenYAML(t *testing.T) {
 		Timestamp:      "2026-05-26T10:00:00Z",
 		WorkflowRunURL: "https://github.com/acme/backend-1/actions/runs/1",
 	}
+	goldenServices := []string{"backend-1", "backend-2", "front"}
 	vals := preview.ApplyCatalog(
-		preview.BuildPreviewValues(in.ServiceName, in.CommitSha, []string{"backend-1", "backend-2", "front"}, in),
-		goldenRepos(), map[string]string{"backend-2": "develop"},
+		preview.BuildPreviewValues(in.ServiceName, in.CommitSha, goldenServices, in),
+		goldenServices, goldenRepos(), map[string]string{"backend-2": "develop"},
 	)
 
 	var buf bytes.Buffer

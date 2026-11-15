@@ -99,11 +99,19 @@ type fanOut struct {
 	body string
 }
 
+// syncCall is one SyncPreviewWithRetry call and the number of teardowns made
+// before it.
+type syncCall struct {
+	slug            string
+	teardownsBefore int
+}
+
 // fakeAPI is an in-memory SweepAPI. files holds what GetPreview reads; fresh,
 // when set for a slug, is what DeletePreviewWithRetry re-reads (a deploy that
 // landed in between). PR states, labels and head refs are keyed by
 // "owner/repo#n". label is the catalog's preview label, unless catalogErr is
-// set. Metrics records the outcomes; nil records nothing.
+// set. SyncPreviewWithRetry returns sync[slug] (an empty result when unset) or
+// syncErr[slug]. Metrics records the outcomes; nil records nothing.
 type fakeAPI struct {
 	*metrics.Metrics
 
@@ -121,8 +129,11 @@ type fakeAPI struct {
 	prOpen    map[string]bool
 	prErr     map[string]error
 	fanErr    error
+	sync      map[string]*gitops.SyncResult
+	syncErr   map[string]error
 
 	deletes   []deleteCall
+	syncs     []syncCall
 	prReads   []string
 	teardowns []teardownCall
 	upserts   []string
@@ -185,6 +196,21 @@ func (f *fakeAPI) TeardownPreviewWithRetry(
 		CommitURL:     sweepCommitURL,
 		CommitMessage: "chore(preview): delete " + slug + " preview",
 	}, nil
+}
+
+func (f *fakeAPI) SyncPreviewWithRetry(
+	_ context.Context,
+	slug string,
+	_ *gitops.ServiceCatalog,
+) (*gitops.SyncResult, error) {
+	f.syncs = append(f.syncs, syncCall{slug: slug, teardownsBefore: len(f.teardowns)})
+	if err := f.syncErr[slug]; err != nil {
+		return nil, err
+	}
+	if res, ok := f.sync[slug]; ok {
+		return res, nil
+	}
+	return &gitops.SyncResult{}, nil
 }
 
 func (f *fakeAPI) UpsertPRComment(_ context.Context, owner, repo string, prNumber int, body string) error {

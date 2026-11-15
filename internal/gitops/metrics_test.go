@@ -53,6 +53,12 @@ func TestClientMetrics_TimesRetryOperations(t *testing.T) {
 	if _, err := c.TeardownPreviewWithRetry(ctx, "gone", "acme", "backend-1", 42); err != nil {
 		t.Fatalf("TeardownPreviewWithRetry: %v", err)
 	}
+	if _, err := c.SyncPreviewWithRetry(ctx, "broken", testCatalog("backend-1")); err == nil {
+		t.Fatal("SyncPreviewWithRetry: want an error")
+	}
+	if _, err := c.SyncPreviewWithRetry(ctx, "gone", testCatalog("backend-1")); err != nil {
+		t.Fatalf("SyncPreviewWithRetry: %v", err)
+	}
 
 	// Durations vary, so only each operation's observation count is compared.
 	families, err := m.Gatherer().Gather()
@@ -72,7 +78,9 @@ func TestClientMetrics_TimesRetryOperations(t *testing.T) {
 			got[labels["op"]+"/"+labels["result"]] = metric.GetHistogram().GetSampleCount()
 		}
 	}
-	if want := map[string]uint64{"write/ok": 1, "teardown/error": 1, "teardown/ok": 1}; !maps.Equal(got, want) {
+	if want := map[string]uint64{
+		"write/ok": 1, "teardown/error": 1, "teardown/ok": 1, "sync/error": 1, "sync/ok": 1,
+	}; !maps.Equal(got, want) {
 		t.Errorf("gitops operation counts = %v, want %v", got, want)
 	}
 }

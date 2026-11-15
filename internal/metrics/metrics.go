@@ -38,6 +38,7 @@ type Metrics struct {
 	sweepRuns         *prometheus.CounterVec
 	sweepLastSuccess  prometheus.Gauge
 	sweepDeleted      *prometheus.CounterVec
+	sweepSynced       prometheus.Counter
 	previews          prometheus.Gauge
 	spinUp            *prometheus.HistogramVec
 	argoCDEvents      *prometheus.CounterVec
@@ -76,7 +77,7 @@ func New() *Metrics {
 		gitopsDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: namespace,
 			Name:      "gitops_operation_duration_seconds",
-			Help:      "Duration of gitops repo writes and teardowns, retries included.",
+			Help:      "Duration of gitops repo writes, teardowns and syncs, retries included.",
 			Buckets:   prometheus.DefBuckets,
 		}, []string{"op", labelResult}),
 		sweepRuns: prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -94,6 +95,11 @@ func New() *Metrics {
 			Name:      "sweep_previews_deleted_total",
 			Help:      "Previews deleted by the cleanup sweep, by rule.",
 		}, []string{"rule"}),
+		sweepSynced: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "sweep_previews_synced_total",
+			Help:      "Previews rewritten by a sweep to match badil.yaml.",
+		}),
 		previews: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: namespace,
 			Name:      "previews",
@@ -123,6 +129,7 @@ func New() *Metrics {
 		m.sweepRuns,
 		m.sweepLastSuccess,
 		m.sweepDeleted,
+		m.sweepSynced,
 		m.previews,
 		m.spinUp,
 		m.argoCDEvents,
@@ -203,6 +210,14 @@ func (m *Metrics) SweepDeleted(rule string) {
 	}
 	m.sweepDeleted.WithLabelValues(rule).Inc()
 	m.updatePreviews(func(n int) int { return n - 1 })
+}
+
+// SweepSynced counts one preview a sweep rewrote to match badil.yaml.
+func (m *Metrics) SweepSynced() {
+	if m == nil {
+		return
+	}
+	m.sweepSynced.Inc()
 }
 
 // updatePreviews sets the previews gauge to f of its value, or to 0 when f
