@@ -24,7 +24,7 @@ CI does not run golangci-lint; run `make lint` locally.
 - One change per PR, small and short-lived.
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/): `type(scope): description`.
 - Add or update tests with behaviour changes.
-- A change to the preview contract ([`docs/CONTRACT.md`](docs/CONTRACT.md)) regenerates the schemas (`make schema`) and the goldens (`make contract-golden`). Adding, removing or changing a field means a new `apiVersion` (`badil.dev/v2`): the contract rejects unknown fields, so a v1 renderer would refuse the file.
+- A change to the preview contract ([`docs/CONTRACT.md`](docs/CONTRACT.md)) regenerates the schemas (`make schema`) and the goldens (`make contract-golden`). Adding, removing or changing a field means a new `apiVersion` (`v1beta2`, or `v1`, under `badil.dev/`): the contract rejects unknown fields, so a v1beta1 renderer refuses the file.
 
 ## Releases
 
