@@ -1,6 +1,6 @@
 # Three services from two repos: api pinned by a PR, with a host; front
 # tracking its branch, with a host; worker tracking its branch, without one.
-apiVersion: badil.dev/v1
+apiVersion: badil.dev/v1beta1
 services:
   - name: api
     repoURL: https://github.com/acme/platform.git

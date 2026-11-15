@@ -46,7 +46,7 @@ func TestGenerate_KeyConstraints(t *testing.T) {
 		{"draft", s["$schema"], "https://json-schema.org/draft/2020-12/schema"},
 		{"root required", s["required"], []any{"apiVersion", "services", "argocdNamespace"}},
 		{"root closed", s["additionalProperties"], false},
-		{"apiVersion const", at(t, s, "properties", "apiVersion", "const"), "badil.dev/v1"},
+		{"apiVersion const", at(t, s, "properties", "apiVersion", "const"), "badil.dev/v1beta1"},
 		{
 			"argocdNamespace pattern",
 			at(t, s, "properties", "argocdNamespace", "pattern"),
@@ -136,7 +136,7 @@ func TestGenerateContract_RootConstraints(t *testing.T) {
 		{"root properties", keys, []string{"apiVersion", "services"}},
 		{"root required", s["required"], []any{"apiVersion", "services"}},
 		{"root closed", s["additionalProperties"], false},
-		{"apiVersion const", at(t, s, "properties", "apiVersion", "const"), "badil.dev/v1"},
+		{"apiVersion const", at(t, s, "properties", "apiVersion", "const"), "badil.dev/v1beta1"},
 		{"service entry closed", at(t, s, "properties", "services", "items", "additionalProperties"), false},
 	}
 	for _, tt := range tests {

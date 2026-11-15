@@ -11,8 +11,8 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// contractDir holds the conformance fixtures of the v1 contract.
-const contractDir = "../../testdata/contract/v1"
+// contractDir holds the conformance fixtures of the v1beta1 contract.
+const contractDir = "../../testdata/contract/v1beta1"
 
 // wantPrefix starts the line of an invalid fixture that names the error it
 // must fail with.
@@ -22,7 +22,7 @@ const wantPrefix = "# want: "
 // Helm uses.
 func compileContract(t *testing.T) *jsonschema.Schema {
 	t.Helper()
-	b, err := os.ReadFile("../../schema/preview.v1.schema.json")
+	b, err := os.ReadFile("../../schema/preview.v1beta1.schema.json")
 	if err != nil {
 		t.Fatalf("read schema: %v", err)
 	}
@@ -30,7 +30,7 @@ func compileContract(t *testing.T) *jsonschema.Schema {
 	if err != nil {
 		t.Fatalf("unmarshal schema: %v", err)
 	}
-	const url = "file:///preview.v1.schema.json"
+	const url = "file:///preview.v1beta1.schema.json"
 	c := jsonschema.NewCompiler()
 	if err = c.AddResource(url, doc); err != nil {
 		t.Fatalf("add schema: %v", err)

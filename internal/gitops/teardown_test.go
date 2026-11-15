@@ -113,7 +113,7 @@ func runTeardown(t *testing.T, g *teardownGitHub) (*gitops.TeardownResult, error
 const pr7URL = "https://github.com/acme/backend-2/pull/7"
 
 // onlyPR42 is a preview pinned by acme/backend-1#42 alone.
-const onlyPR42 = `apiVersion: badil.dev/v1
+const onlyPR42 = `apiVersion: badil.dev/v1beta1
 services:
   - name: backend-1
     repoURL: https://github.com/acme/backend-1.git
@@ -127,7 +127,7 @@ services:
 `
 
 // pr42AndPR7 is a preview pinned by acme/backend-1#42 and acme/backend-2#7.
-const pr42AndPR7 = `apiVersion: badil.dev/v1
+const pr42AndPR7 = `apiVersion: badil.dev/v1beta1
 services:
   - name: backend-1
     repoURL: https://github.com/acme/backend-1.git
@@ -161,7 +161,7 @@ func TestTeardown_UpdateWhenPinsRemain(t *testing.T) {
 		t.Errorf("PUT message/sha = %q/%q, want %q/blob-1", reqs[0].message, reqs[0].sha, wantMsg)
 	}
 	// apiVersion and every entry's repoURL and branch are kept.
-	wantBody := "apiVersion: badil.dev/v1\n" +
+	wantBody := "apiVersion: badil.dev/v1beta1\n" +
 		"services:\n" +
 		"  - name: backend-1\n" +
 		"    repoURL: https://github.com/acme/backend-1.git\n" +

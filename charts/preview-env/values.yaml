@@ -12,13 +12,13 @@
 # service Application are created there. Must be a Kubernetes namespace name.
 argocdNamespace: argocd
 
-# apiVersion: required, badil.dev/v1. There is no default: a preview file
+# apiVersion: required, badil.dev/v1beta1. There is no default: a preview file
 # without it (written by an older badil) fails rendering.
 #
 # services: one entry per service of the preview, in catalog order. Unknown
 # fields are rejected.
 #
-# apiVersion: badil.dev/v1
+# apiVersion: badil.dev/v1beta1
 # services:
 #   - name: backend-1                                    # required
 #     repoURL: https://github.com/acme/backend-1.git     # required: the service's git URL, the Application source and an AppProject sourceRepo
