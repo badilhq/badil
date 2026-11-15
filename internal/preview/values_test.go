@@ -727,6 +727,36 @@ func TestApplyCatalog_AddsMissingServicesInCatalogOrder(t *testing.T) {
 	}
 }
 
+func TestApplyCatalog_KeepsFirstEntryOfDuplicates(t *testing.T) {
+	first := preview.ServiceEntry{
+		Name:      "gone",
+		RepoURL:   "https://github.com/acme/gone.git",
+		Branch:    "main",
+		CommitSha: "aaa",
+	}
+	in := preview.PreviewValues{Services: []preview.ServiceEntry{
+		{Name: "front", CommitSha: "f1"},
+		{Name: "front", CommitSha: "f2"},
+		first,
+		{Name: "gone", RepoURL: "https://github.com/acme/gone.git", Branch: "main", CommitSha: "bbb"},
+	}}
+
+	got := preview.ApplyCatalog(
+		in,
+		[]string{"front"},
+		map[string]string{"front": "https://github.com/acme/front.git"},
+		nil,
+	)
+
+	want := []preview.ServiceEntry{
+		{Name: "front", RepoURL: "https://github.com/acme/front.git", Branch: "main", CommitSha: "f1"},
+		first,
+	}
+	if !reflect.DeepEqual(got.Services, want) {
+		t.Errorf("Services = %+v, want %+v", got.Services, want)
+	}
+}
+
 func TestApplyCatalog_KeepsAPIVersion(t *testing.T) {
 	in := preview.PreviewValues{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{{Name: "front"}}}
 	got := preview.ApplyCatalog(in, catalogServices(), catalogRepos(), nil)

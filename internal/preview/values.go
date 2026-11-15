@@ -69,6 +69,7 @@ func UpdatePreviewValues(existing PreviewValues, serviceName, commitSha string, 
 //     absent);
 //   - then, in file order, every entry whose service is not in services, is
 //     pinned (commitSha set) and has a repoURL, unchanged;
+//   - a service listed twice keeps only its first entry;
 //   - every other entry is dropped.
 func ApplyCatalog(vals PreviewValues, services []string, repos, branches map[string]string) PreviewValues {
 	inCatalog := make(map[string]bool, len(services))
@@ -86,10 +87,12 @@ func ApplyCatalog(vals PreviewValues, services []string, repos, branches map[str
 		}
 		out = append(out, entry)
 	}
+	kept := make(map[string]bool)
 	for _, svc := range vals.Services {
-		if inCatalog[svc.Name] || svc.CommitSha == "" || svc.RepoURL == "" {
+		if inCatalog[svc.Name] || kept[svc.Name] || svc.CommitSha == "" || svc.RepoURL == "" {
 			continue
 		}
+		kept[svc.Name] = true
 		out = append(out, svc)
 	}
 	res := vals

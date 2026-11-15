@@ -33,7 +33,9 @@ type SweepAPI interface {
 }
 
 // Sweep visits every preview of the gitops repo once, applies the first
-// matching rule 1-3, then syncs every preview it keeps (step 4):
+// matching rule 1-3, then syncs every preview that rules 1 and 2 did not
+// match (step 4). A preview whose rule 1-2 delete is cancelled by the
+// re-check is not synced: the deploy that cancelled it already projected it.
 //
 //  1. no pinned entry: the preview is deleted;
 //  2. ttl > 0 and the newest updated-at of its pinned entries is before
@@ -54,9 +56,9 @@ type SweepAPI interface {
 //
 // A ttl of 0 disables rule 2. A failing preview read, rule 1-2 delete or step 4
 // sync is logged and counted, and the sweep goes on; Sweep then returns an
-// error carrying the count. A failed comment refresh is only logged. A closed-PR teardown failure is only logged by
-// TeardownPR, not counted, and retried on the next run. A ListPreviews error is
-// returned at once.
+// error carrying the count. A failed comment refresh is only logged. A
+// closed-PR teardown failure is only logged by TeardownPR, not counted, and
+// retried on the next run. A ListPreviews error is returned at once.
 //
 // The number of listed previews and each rule 1-2 deletion are recorded
 // through the Recorder; teardowns are recorded with the sweep trigger.
