@@ -62,6 +62,12 @@ func TestSyncPreviewWithRetry(t *testing.T) {
 			wantWritten: []string{"apiVersion: badil.dev/v1beta1\nservices:\n"},
 		},
 		{
+			name:        "badil.dev/v1 file",
+			files:       []string{pinnedFile("apiVersion: badil.dev/v1beta1\n", "apiVersion: badil.dev/v1\n")},
+			wantChanged: true, wantGets: 1, wantPuts: 1,
+			wantWritten: []string{"apiVersion: badil.dev/v1beta1\nservices:\n"},
+		},
+		{
 			name:      "changed after a 409 re-fetch",
 			files:     []string{staleBranchFile(), pinnedFile("acme/backend-2.git", "acme/x.git")},
 			conflicts: 1, wantChanged: true, wantGets: 2, wantPuts: 2,
