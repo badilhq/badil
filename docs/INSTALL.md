@@ -112,14 +112,13 @@ helm install badil oci://ghcr.io/badilhq/charts/badil -n badil \
   --set config.gitopsRepo="$GITOPS_REPO" \
   --set existingSecret=badil \
   --set ingress.enabled=true --set ingress.host=badil.example.com \
-  --set cleanup.interval=1h \
   -f values.yaml   # leave this line out on a local http cluster
 ```
 
 - Without `--version`, Helm installs the latest chart. Add `--version X.Y.Z` to pin a release (do so in production), and take the step 3 example files from the same `vX.Y.Z` tag. The image tag defaults to the chart `appVersion`.
 - The Ingress also exposes `POST /v1/deploy`, the manual trigger, protected by the `deploy-token` bearer token (see [README](../README.md)), and `POST /webhooks/argocd`, protected by the optional `argocd-webhook-token` bearer token.
 - `cleanup.ttl` (e.g. `168h`) is optional: it also deletes previews with no deploy for that long.
-- `cleanup.interval=1h` runs the cleanup sweep in the server, which exports its metrics (with the Prometheus Operator, scrape them with `metrics.serviceMonitor.enabled=true` and `metrics.serviceMonitor.labels` matching its selector, e.g. `release: <kube-prometheus-stack release>`); `cleanup.enabled=true`, an hourly CronJob without metrics, is the alternative, not to combine with it.
+- The cleanup sweep runs in the server every hour by default (`cleanup.interval`, `1h`): it deletes stale previews and rewrites every kept preview to match `badil.yaml`, and exports its metrics (with the Prometheus Operator, scrape them with `metrics.serviceMonitor.enabled=true` and `metrics.serviceMonitor.labels` matching its selector, e.g. `release: <kube-prometheus-stack release>`). `cleanup.enabled=true` switches it to an hourly CronJob without metrics and turns the in-server sweep off.
 - Keep `replicaCount: 1`.
 
 Once the Secret exists, delete the local `.env` and PEM. The non-secret values you set stay readable with `helm get values badil -n badil`, which the [upgrade](#10-upgrade) uses.
@@ -260,7 +259,7 @@ Set `preview.domain` in `badil.yaml`, create a wildcard DNS record `*.<domain>` 
    helm get values badil -n badil -o yaml > badil-values.yaml
    helm upgrade badil oci://ghcr.io/badilhq/charts/badil -n badil --version X.Y.Z -f badil-values.yaml
    ```
-3. When upgrading to `preview-env` 0.9.0 from an earlier version: rewrite every live preview before the next step, by pushing to its PR or removing and re-adding its label. `preview-env` 0.9.0 refuses preview files without `apiVersion: badil.dev/v1`, which only the new badil writes; the cleanup sweep deletes previews no PR pins any more.
+3. When upgrading to `preview-env` 0.9.0 from an earlier version: before the next step, wait for one sweep (at most `cleanup.interval`, `1h` by default): the sync rewrites every pre-v1 file that has a pin, and the sweep deletes the others. `preview-env` 0.9.0 refuses preview files without `apiVersion: badil.dev/v1`, which only the new badil writes.
 4. Bump the chart: set the ApplicationSet's `preview-env` `targetRevision` and its `valueFiles` (`$values/preview-env.yaml`, then the preview file) to the ones in the new tag's [`examples/argocd/applicationset-previews.yaml`](../examples/argocd/applicationset-previews.yaml), and re-apply it.
 5. When step 1 applied: delete `services.yaml` from the gitops repo once the ApplicationSet is re-applied.
 
