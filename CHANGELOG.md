@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/badilhq/badil/compare/v0.18.0...v0.19.0) (2026-11-15)
+
+
+### Features
+
+* keep previews in sync with badil.yaml on deploys and sweeps ([#71](https://github.com/badilhq/badil/issues/71)) ([a77ae76](https://github.com/badilhq/badil/commit/a77ae76982e64cad4f58319ad903aac54c769295))
+
 ## [0.18.0](https://github.com/badilhq/badil/compare/v0.17.0...v0.18.0) (2026-11-15)
 
 
