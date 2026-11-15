@@ -55,10 +55,10 @@ func fetchedPR(open bool, labels ...string) *gitops.PullRequest {
 // and whose fetched PR is open and labeled.
 func reconcileFake() *fakeGitops {
 	return &fakeGitops{
-		servicesYAML: servicesWithPreview,
-		writeResult:  previewWriteResult(),
-		pr:           fetchedPR(true, "preview"),
-		started:      make(chan string, 8),
+		badilYAML:   servicesWithPreview,
+		writeResult: previewWriteResult(),
+		pr:          fetchedPR(true, "preview"),
+		started:     make(chan string, 8),
 	}
 }
 

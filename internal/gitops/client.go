@@ -89,22 +89,23 @@ func classifyHTTPError(resp *gh.Response, err error) error {
 	return err
 }
 
-// FetchServiceCatalog reads services.yaml from the gitops repo and returns
-// the keys of its serviceRepos mapping (the canonical service catalog) and its
-// validated `preview` block. A malformed `preview` block is an error.
+// FetchServiceCatalog reads badil.yaml from the gitops repo and returns its
+// validated service catalog (the keys of its services mapping, with each
+// service's repo and branch) and `preview` block. A malformed file is an
+// error.
 func (c *Client) FetchServiceCatalog(ctx context.Context) (*ServiceCatalog, error) {
-	content, _, resp, err := c.gh.Repositories.GetContents(ctx, c.owner, c.repo, "services.yaml", nil)
+	content, _, resp, err := c.gh.Repositories.GetContents(ctx, c.owner, c.repo, configFile, nil)
 	if err != nil {
 		return nil, classifyHTTPError(resp, err)
 	}
 	if content == nil {
-		return nil, fmt.Errorf("services.yaml: not a file")
+		return nil, fmt.Errorf("%s: not a file", configFile)
 	}
 	raw, err := content.GetContent()
 	if err != nil {
-		return nil, fmt.Errorf("decode services.yaml: %w", err)
+		return nil, fmt.Errorf("decode %s: %w", configFile, err)
 	}
-	return ParseServices([]byte(raw))
+	return ParseCatalog([]byte(raw))
 }
 
 // previewsDir is the gitops repo directory holding one subdirectory per preview.
@@ -279,8 +280,10 @@ type WriteResult struct {
 // the resulting values.yaml lists every service (the triggering one pinned to
 // commitSha, the rest tracking their branch).
 //
-// After every build or merge, preview.ApplyHosts sets each entry's host from
-// urls, so the written file carries the hosts of the current catalog.
+// After every build or merge, preview.ApplyCatalog then preview.ApplyHosts
+// set apiVersion and each entry's repoURL, branch and host from catalog, and
+// drop the entries of services no longer in it, so the written file follows
+// the current catalog.
 //
 // With skipUnchanged, when the file exists and the values to write differ
 // from it only in serviceName's updated-at (preview.EqualExceptUpdatedAt),
@@ -296,8 +299,7 @@ type WriteResult struct {
 func (c *Client) WritePreviewWithRetry(
 	ctx context.Context,
 	slug string,
-	catalog []string,
-	urls preview.URLConfig,
+	catalog *ServiceCatalog,
 	serviceName, commitSha string,
 	inputs preview.DeployInputs,
 	createMessage, updateMessage string,
@@ -305,7 +307,7 @@ func (c *Client) WritePreviewWithRetry(
 ) (*WriteResult, error) {
 	start := time.Now()
 	res, err := c.writePreviewWithRetry(
-		ctx, slug, catalog, urls, serviceName, commitSha, inputs, createMessage, updateMessage, skipUnchanged,
+		ctx, slug, catalog, serviceName, commitSha, inputs, createMessage, updateMessage, skipUnchanged,
 	)
 	c.observe("write", start, err)
 	if err == nil && res.Created {
@@ -314,12 +316,17 @@ func (c *Client) WritePreviewWithRetry(
 	return res, err
 }
 
+// applyCatalog returns vals with the facts of catalog applied: apiVersion,
+// repoURL and branch (preview.ApplyCatalog), then hosts (preview.ApplyHosts).
+func applyCatalog(vals preview.PreviewValues, slug string, catalog *ServiceCatalog) preview.PreviewValues {
+	return preview.ApplyHosts(preview.ApplyCatalog(vals, catalog.Repos, catalog.Branches), slug, catalog.URLs)
+}
+
 // writePreviewWithRetry is WritePreviewWithRetry, untimed.
 func (c *Client) writePreviewWithRetry(
 	ctx context.Context,
 	slug string,
-	catalog []string,
-	urls preview.URLConfig,
+	catalog *ServiceCatalog,
 	serviceName, commitSha string,
 	inputs preview.DeployInputs,
 	createMessage, updateMessage string,
@@ -334,13 +341,13 @@ func (c *Client) writePreviewWithRetry(
 	var vals preview.PreviewValues
 	var message string
 	if exists {
-		vals = preview.ApplyHosts(preview.UpdatePreviewValues(*existing, serviceName, commitSha, inputs), slug, urls)
+		vals = applyCatalog(preview.UpdatePreviewValues(*existing, serviceName, commitSha, inputs), slug, catalog)
 		if skipUnchanged && preview.EqualExceptUpdatedAt(*existing, vals, serviceName) {
 			return &WriteResult{Values: *existing, Unchanged: true}, nil
 		}
 		message = updateMessage
 	} else {
-		vals = preview.ApplyHosts(preview.BuildPreviewValues(serviceName, commitSha, catalog, inputs), slug, urls)
+		vals = applyCatalog(preview.BuildPreviewValues(serviceName, commitSha, catalog.Services, inputs), slug, catalog)
 		message = createMessage
 	}
 
@@ -359,7 +366,7 @@ func (c *Client) writePreviewWithRetry(
 			return nil, fmt.Errorf("conflict re-fetch: %w", getErr)
 		}
 		sha = latestSHA
-		vals = preview.ApplyHosts(preview.UpdatePreviewValues(*latest, serviceName, commitSha, inputs), slug, urls)
+		vals = applyCatalog(preview.UpdatePreviewValues(*latest, serviceName, commitSha, inputs), slug, catalog)
 		if skipUnchanged && preview.EqualExceptUpdatedAt(*latest, vals, serviceName) {
 			return &WriteResult{Values: *latest, Unchanged: true}, nil
 		}

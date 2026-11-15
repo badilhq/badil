@@ -11,7 +11,7 @@ Self-hosted, single-tenant. Everything runs in the user's cluster; badil talks t
    └──────────────── PR comment (fan-out) ◄───────────────────────────────────────────────────┘                  ▼
                                      ArgoCD ApplicationSet (git dir generator: previews/*)
                                        └─ preview-env chart → AppProject + Namespace + one Application per service
-                                            └─ service chart (path per serviceCharts, default k8s/) at commitSha or its branch (default main)
+                                            └─ service chart (repoURL of the entry, path per serviceCharts of preview-env.yaml, default k8s/) at commitSha or the entry's branch
 
  label removed or pull_request closed ──► badil serve (async) ── unpins the PR's services, or deletes previews/<slug>/values.yaml ──► ArgoCD prunes
  badil cleanup (CronJob) ── deletes stale previews/<slug>/, unpins closed PRs, and open PRs whose label moved, conflicts or is gone ──► ArgoCD prunes
@@ -26,33 +26,27 @@ Self-hosted, single-tenant. Everything runs in the user's cluster; badil talks t
 | `badil bootstrap-app` / `verify-app` | this repo | Create a GitHub App via the manifest flow / check credentials |
 | `preview-env` chart | this repo, [`charts/preview-env`](../charts/preview-env) | Renders AppProject, Namespace, one ArgoCD Application per service; the AppProject and Applications in the namespace set by `argocdNamespace` (default `argocd`); Application annotations `preview.badil.dev/*` carry the PR metadata |
 | ApplicationSet | this repo, [`examples/argocd`](../examples/argocd) | Git directory generator on `previews/*` |
-| Service chart | each service repo, at `k8s/` unless `serviceCharts` sets `path` (uses the `app` chart, [`charts/app`](../charts/app)) | Image tag = `commitSha` or `$ARGOCD_APP_REVISION` |
+| Service chart | each service repo, at `k8s/` unless `serviceCharts` (in `preview-env.yaml`) sets `path` (uses the `app` chart, [`charts/app`](../charts/app)) | Image tag = `commitSha` or `$ARGOCD_APP_REVISION` |
 | `badil` chart | this repo, [`charts/badil`](../charts/badil) | Installs `badil serve` (Deployment, Service, optional Ingress) and the cleanup CronJob (off by default) |
 
 ## Gitops repo contract
 
 ```
-services.yaml                    # serviceRepos: { <service>: <git url> }, optional preview, serviceCharts and previewNamespace blocks
-previews/<slug>/values.yaml      # written by badil
+badil.yaml                       # read by badil only: services { <service>: { repo, branch } }, optional preview block
+preview-env.yaml                 # read by preview-env only (an ApplicationSet value file): optional serviceCharts and previewNamespace
+previews/<slug>/values.yaml      # written by badil, read by preview-env: apiVersion badil.dev/v1, self-contained per service
 ```
 
+Each file has one reader: badil never parses chart settings, and the chart never sees badil's settings. Both live at the repo root, at fixed paths. [CONTRACT](CONTRACT.md) publishes `previews/<slug>/values.yaml` for any renderer: its schema, lifecycle, conformance fixtures and a renderer's obligations.
+
 ```yaml
-# services.yaml
-serviceRepos:
-  backend-1: https://github.com/acme/backend-1.git
-  front: https://github.com/acme/front.git
-serviceCharts:                  # optional: per-service chart settings, every key optional
+# badil.yaml
+services:                       # required, non-empty: the service catalog, in catalog order
   backend-1:
-    branch: master              # default "main": targetRevision of unpinned services, and the PR-comment badge
-    path: deploy/helm           # default "k8s/": chart path in the service repo
-    imageTagParam: image.tag    # default "app.image.tag": Helm parameter set to the image tag
-    hostParam: ingress.hostname # default "app.ingress.host": Helm parameter set to the preview host
-    valueFiles:                 # default none: extra values files, applied in order
-      - values-preview.yaml
-previewNamespace:               # optional: extra metadata of every preview Namespace, read by preview-env only
-  labels:                       # string values; a label the chart sets is refused
-    pod-security.kubernetes.io/enforce: baseline
-  annotations: {}               # string values; argocd.argoproj.io/sync-wave is refused
+    repo: https://github.com/acme/backend-1.git   # required, non-empty string
+    branch: master              # optional, default "main": the branch badil writes into each preview entry, and the PR-comment badge
+  front:
+    repo: https://github.com/acme/front.git
 preview:                        # optional: preview label, preview cap and per-preview URLs (URLs off without domain)
   label: preview                # optional, default "preview": the PR label that creates the preview
   maxPreviews: 10               # optional, default no cap: deploys that would create a preview past it are refused
@@ -64,25 +58,67 @@ preview:                        # optional: preview label, preview cap and per-p
       path: /docs               # optional, default "/": PR-comment link only
 ```
 
-`services.yaml` is a value file of the `preview-env` chart and is read by badil on every deploy. A malformed `preview` or `serviceCharts` block fails `/v1/deploy` and makes every reconcile log `preview reconcile failed`, with an error naming the offending key. An `expose` entry for a service missing from `serviceRepos` is ignored.
+badil reads `badil.yaml` on every deploy and reconcile. An unknown or repeated key at any level is rejected, as is a `services` entry that is not a mapping. A malformed file fails `/v1/deploy` and makes every reconcile log `preview reconcile failed`, with an error prefixed `badil.yaml:` naming the offending key; a missing file fails the same way (`gitops: not found`). An `expose` entry for a service missing from `services` is ignored.
 
+- `services.<name>.repo` and `services.<name>.branch` accept any YAML string (`branch: yes` is the branch `yes`: `badil.yaml` never reaches Helm) and reject a number, a boolean, a null, a mapping or a sequence. A PR's repo maps to the services whose `repo` is `https://github.com/<owner>/<repo>`, compared case-insensitively, with or without a trailing `/` or `.git`. Other URL forms (SSH, GitHub Enterprise) never match, so the label flow never deploys those services.
 - `preview.label` must be a non-empty string; it is matched case-insensitively, like GitHub label names. `<label>:<name>` labels name the preview (see the label flow below).
-- `preview.maxPreviews` must be a YAML integer of at least 1; a string (`"3"`), `0`, a negative number or a float is rejected, and a null or empty value means unset. It does not need `preview.domain`. See Preview cap in the [HTTP API](#http-api) section. It needs a badil release that includes it: an older badil rejects the unknown key, so every `/v1/deploy` and every reconcile fails. Upgrade badil before setting it.
-- Every `serviceRepos` value must be a string. A PR's repo maps to the services whose URL is `https://github.com/<owner>/<repo>`, compared case-insensitively, with or without a trailing `/` or `.git`. Other URL forms (SSH, GitHub Enterprise) never match, so the label flow never deploys those services.
-- `previewNamespace.labels` and `previewNamespace.annotations` are added to every preview Namespace, after the chart's own (`app.kubernetes.io/name`, `app.kubernetes.io/instance`, `app.kubernetes.io/part-of`, `app.kubernetes.io/managed-by`, and the annotation `argocd.argoproj.io/sync-wave`). badil does not interpret the block. The chart refuses to render (Argo CD shows a sync error) when either is not a map, a value is not a string (quote YAML 1.1 booleans such as `yes`, `no`, `on`, `off`), or a key is one the chart sets. The block needs `preview-env` 0.8.0 or later; an older chart ignores it.
-- Every `serviceCharts` key must be a service of `serviceRepos`, and unknown fields are rejected. A null entry, or a null field, uses the defaults. `branch`, `path`, `imageTagParam` and `hostParam` must be non-empty strings, and `valueFiles` a list of non-empty strings; unquoted YAML 1.1 booleans (`yes`, `no`, `on`, `off`, `y`, `n`) must be quoted. Since `preview-env` 0.4.1 the chart also refuses to render a non-string value (Argo CD shows a sync error), because badil's check only blocks its own writes while Argo CD re-renders existing previews from the same `services.yaml`. badil only uses `branch` (for the PR-comment badge); the chart reads every field. The block needs `preview-env` 0.4.0 or later and badil 0.11.0 or later: an older chart ignores it and applies the defaults, and an older badil neither validates it nor shows the branch.
+- `preview.maxPreviews` must be a YAML integer of at least 1; a string (`"3"`), `0`, a negative number or a float is rejected, and a null or empty value means unset. It does not need `preview.domain`. See Preview cap in the [HTTP API](#http-api) section.
+
+```yaml
+# preview-env.yaml
+serviceCharts:                  # optional: per-service chart settings, every key optional
+  backend-1:
+    path: deploy/helm           # default "k8s/": chart path in the service repo
+    imageTagParam: image.tag    # default "app.image.tag": Helm parameter set to the image tag
+    hostParam: ingress.hostname # default "app.ingress.host": Helm parameter set to the preview host
+    valueFiles:                 # default none: extra values files, applied in order
+      - values-preview.yaml
+previewNamespace:               # optional: extra metadata of every preview Namespace
+  labels:                       # string values; a label the chart sets is refused
+    pod-security.kubernetes.io/enforce: baseline
+  annotations: {}               # string values; argocd.argoproj.io/sync-wave is refused
+```
+
+The ApplicationSet passes `preview-env.yaml`, then the preview file, as value files of `preview-env`, and its `argocdNamespace` as a parameter. The file is required by the example ApplicationSet (Argo CD fails the render on a missing value file); with no setting it holds `{}`. The chart's schema validates the merged values on every render (Argo CD shows a sync error); its root is closed, so any other root key (a leftover `serviceRepos` or `preview`) fails the render with `at '': additional properties '<key>' not allowed`.
+
+- `previewNamespace.labels` and `previewNamespace.annotations` are added to every preview Namespace, after the chart's own (`app.kubernetes.io/name`, `app.kubernetes.io/instance`, `app.kubernetes.io/part-of`, `app.kubernetes.io/managed-by`, and the annotation `argocd.argoproj.io/sync-wave`). The chart's schema rejects the block when it, `labels` or `annotations` is not a map (null included), a value is not a string (quote YAML 1.1 booleans such as `yes`, `no`, `on`, `off`), a key is one the chart sets, or the block has another key.
+- `serviceCharts` entries reject unknown fields, `branch` included (a service's branch is `services.<name>.branch` in `badil.yaml`). A null entry or a null field is rejected; omit the entry or the field to use the defaults. `path`, `imageTagParam` and `hostParam` must be non-empty strings, and `valueFiles` a list of non-empty strings; unquoted YAML 1.1 booleans (`yes`, `no`, `on`, `off`, `y`, `n`) must be quoted. An entry for a service not in the preview is ignored.
 
 ```yaml
 # previews/feature-pricing/values.yaml
-services:
-  - name: backend-1
-    commitSha: "<sha>"          # pinned: targetRevision + image tag
-    host: backend-1-feature-pricing.127.0.0.1.nip.io   # exposed services only: ingress host written by badil
-    metadata: { pr-author, pr-url, pr-number, created-at, updated-at, vcs.ref.name, cicd.pipeline.run.url }
-                                # cicd.pipeline.run.url is "" for label deploys
-  - name: backend-2             # no commitSha: tracks its branch (default main)
-  - name: front
+apiVersion: badil.dev/v1        # required, always badil.dev/v1
+services:                       # required: at most one entry per catalog service (see CONTRACT.md for order)
+  - name: backend-1             # required
+    repoURL: https://github.com/acme/backend-1.git   # required: services.<service>.repo of badil.yaml, as written
+    branch: master              # required: services.<service>.branch of badil.yaml, else main
+    commitSha: "<sha>"          # optional: pinned at this commit (targetRevision and image tag)
+    host: backend-1-feature-pricing.127.0.0.1.nip.io   # optional: ingress host of an exposed service
+    metadata:                   # optional, present exactly when commitSha is: all seven keys required
+      pr-author: octocat
+      pr-url: https://github.com/acme/backend-1/pull/42
+      pr-number: "42"
+      created-at: "2026-05-26T10:00:00Z"
+      updated-at: "2026-05-26T10:00:00Z"
+      vcs.ref.name: feature/pricing
+      cicd.pipeline.run.url: ""   # "" for label deploys
+  - name: front                 # no commitSha: tracks its branch
+    repoURL: https://github.com/acme/front.git
+    branch: main
 ```
+
+The file is self-contained: a renderer needs only it to know each service's repo, revision and image tag. Contract v1:
+
+- **Strict.** Every object is closed: an unknown field at any level of an entry or of `metadata` is rejected. `apiVersion` must be `badil.dev/v1`. Every field has the type shown; a null value is rejected, as is a pinned entry without `metadata` or `metadata` without `commitSha`.
+- **Written on every deploy.** Each deploy write sets `apiVersion`, and every entry's `repoURL` and `branch` from the catalog as it is then: a branch change in `badil.yaml` is written on the next deploy, even for an unchanged SHA. An entry whose service is no longer in `services` is dropped, pinned or not; Argo CD prunes its Application. Teardowns (unpin, sweep) only clear `commitSha` and `metadata` and keep the rest as written.
+- **Validated by the chart.** `preview-env` ships `values.schema.json`, generated from badil's Go types (`make schema`), and Helm validates the merged values (`preview-env.yaml`, the preview file and `argocdNamespace`) against it on every render; a violation fails the render with the field's JSON pointer, for example `at '': missing property 'apiVersion'`. CI fails when the schema is out of date. The root of the merged values is closed: a key other than `apiVersion`, `services`, `serviceCharts`, `previewNamespace` and `argocdNamespace` fails the render.
+
+Upgrade (badil and `preview-env` 0.9.0), from a gitops repo with `services.yaml`; a new badil fails every deploy and reconcile without `badil.yaml`, and `preview-env` 0.9.0 rejects `serviceRepos`, `preview` and `serviceCharts.<service>.branch` in its values:
+
+1. Commit `badil.yaml` and `preview-env.yaml` at the root of the gitops repo, and keep `services.yaml`, which the running badil and the deployed ApplicationSet still read: each `serviceRepos.<service>` URL becomes `services.<service>.repo`, each `serviceCharts.<service>.branch` becomes `services.<service>.branch`, and the `preview` block moves as is to `badil.yaml`; `serviceCharts` (without `branch`) and `previewNamespace` move to `preview-env.yaml` (`{}` when neither is set).
+2. Upgrade badil.
+3. Rewrite every live preview (push to its PR, or remove and re-add the label; the cleanup sweep deletes previews no PR pins any more): a preview file written by an older badil has no `apiVersion`, so `preview-env` 0.9.0 refuses to render it, and shows `missing property 'apiVersion'` in Argo CD until it is rewritten.
+4. Bump the chart: set the ApplicationSet's `targetRevision` to 0.9.0 and its first value file to `$values/preview-env.yaml`, as in [`examples/argocd/applicationset-previews.yaml`](../examples/argocd/applicationset-previews.yaml), and re-apply it (`kubectl apply -f applicationset-previews.yaml`): Argo CD does not manage the ApplicationSet.
+5. Delete `services.yaml` from the gitops repo: nothing reads it any more.
 
 ## Per-preview URLs
 
@@ -108,7 +144,9 @@ A quota on compute resources (`requests.cpu`, `requests.memory`, `limits.memory`
 A preview runs each service in one of two modes, set by `commitSha` in `previews/<slug>/values.yaml`:
 
 - **Pinned** (`commitSha` set): the Application uses `targetRevision: <sha>` and sets the image tag parameter (default `app.image.tag`) to `<sha>`. It changes only when badil writes a new SHA.
-- **Branch-tracking** (no `commitSha`): the Application uses `targetRevision: <branch>` (default `main`) and sets the image tag parameter (default `app.image.tag`) to `$ARGOCD_APP_REVISION`, which Argo CD resolves to the commit it syncs. It follows new commits on that branch.
+- **Branch-tracking** (no `commitSha`): the Application uses `targetRevision: <branch>`, the entry's `branch`, and sets the image tag parameter (default `app.image.tag`) to `$ARGOCD_APP_REVISION`, which Argo CD resolves to the commit it syncs. It follows new commits on that branch.
+
+In both modes the Application's `repoURL` is the entry's `repoURL`, and the AppProject's `sourceRepos` are the distinct `repoURL`s of the file's entries.
 
 A service can briefly sit in `ImagePullBackOff` because its image tag does not exist yet. A branch-tracking service hits it when Argo CD syncs a new commit on that branch before that commit's CI has pushed the image. A pinned service hits it because badil pins the PR head SHA as soon as the label or a push arrives, before CI has pushed that commit's image; the pod starts when the image is in the registry, and the PR comment says so. This is accepted because it resolves without intervention:
 
@@ -128,10 +166,10 @@ References: [Helm build environment in Argo CD](https://argo-cd.readthedocs.io/e
 
 ## Service repo contract
 
-The `preview-env` chart ([`application.yaml`](../charts/preview-env/templates/application.yaml)) renders one Argo CD Application per service from the service's repo URL in `services.yaml`, and expects each service repo to provide:
+The `preview-env` chart ([`application.yaml`](../charts/preview-env/templates/application.yaml)) renders one Argo CD Application per entry of the preview file, from the entry's `repoURL` and `branch`, and expects each service repo to provide:
 
 - A Helm chart at `k8s/` by default, or at the service's `serviceCharts` `path`.
-- A `main` branch by default, or the service's `serviceCharts` `branch`: branch-tracking services use it as `targetRevision`.
+- A `main` branch by default, or the service's `branch` in `badil.yaml`: branch-tracking services use it as `targetRevision`.
 - A Helm parameter `app.image.tag` by default (the service chart declares the [`app`](../charts/app) chart as a dependency aliased `app`), or the service's `serviceCharts` `imageTagParam`.
 - Images tagged with the full git commit SHA: pinned services use the PR head SHA (label flow) or the `commit_sha` sent to `/v1/deploy`, branch-tracking services use `$ARGOCD_APP_REVISION`.
 - For services in `preview.expose`: ingress enabled and a Helm parameter setting the ingress host, `app.ingress.host` by default or the service's `serviceCharts` `hostParam`. Otherwise the PR-comment link is dead.
@@ -140,7 +178,7 @@ The `preview-env` chart ([`application.yaml`](../charts/preview-env/templates/ap
 
 `hostParam` is passed as a Helm `--set`, key verbatim. A list-indexed name such as `ingress.hosts[0].host` replaces the chart's default list, so the full list (with its `paths`) and `ingress.enabled: true` must come from a file in `valueFiles`; the parameter then only sets that element's field.
 
-Override them per service in `serviceCharts` (`preview-env` 0.4.0 or later); image tags must still be the full commit SHA.
+Override them per service in `serviceCharts` of `preview-env.yaml` (the branch in `badil.yaml`); image tags must still be the full commit SHA.
 
 The ApplicationSet example sources `preview-env` from an OCI registry (`oci://` with `path: "."`), which requires Argo CD 3.1 or later.
 
@@ -180,7 +218,7 @@ POST /webhooks/argocd       # only when ARGOCD_WEBHOOK_TOKEN is set (404 otherwi
   → 204, recorded or ignored (see Spin-up endpoint)
 ```
 
-Manual deploy flow (`/v1/deploy`): validate `service` against `services.yaml` → slugify `head_ref` → refuse a new preview past the preview cap (below) with 409 → read or bootstrap `previews/<slug>/values.yaml` → write with SHA optimistic locking + 409 retry → PR comment fan-out (best-effort, failures returned as `warnings`). It always writes, even when only `updated-at` changes, so a repeated deploy of the same commit refreshes the TTL clock.
+Manual deploy flow (`/v1/deploy`): validate `service` against the `services` of `badil.yaml` → slugify `head_ref` → refuse a new preview past the preview cap (below) with 409 → read or bootstrap `previews/<slug>/values.yaml` → write with SHA optimistic locking + 409 retry → PR comment fan-out (best-effort, failures returned as `warnings`). It always writes, even when only `updated-at` changes, so a repeated deploy of the same commit refreshes the TTL clock.
 
 Label flow: CI only builds and pushes images; the `preview` label (`preview.label`) on a PR decides whether it has a preview, and in which one. badil answers `opened`, `reopened`, `synchronize`, `labeled`, `unlabeled` and `closed` deliveries 200 at once and reconciles the PR in the background:
 

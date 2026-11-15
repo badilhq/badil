@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"regexp"
-	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -15,19 +13,19 @@ import (
 	"github.com/badilhq/badil/internal/preview"
 )
 
-// ServiceCatalog is the parsed services.yaml of the gitops repo.
+// ServiceCatalog is the parsed badil.yaml of the gitops repo.
 type ServiceCatalog struct {
-	// Services lists the keys of serviceRepos, in file order.
+	// Services lists the keys of services, in file order.
 	Services []string
 	// URLs is the validated `preview` block; its zero value means off.
 	URLs preview.URLConfig
 	// Label is the pull request label that requests a preview (preview.label,
 	// default "preview"). GitHub label names compare case-insensitively.
 	Label string
-	// Repos maps each service to its git URL, as written in serviceRepos.
+	// Repos maps each service to its git URL, as written in services.<name>.repo.
 	Repos map[string]string
-	// Branches maps each service whose serviceCharts entry sets branch to that
-	// branch. It is nil when no entry sets one.
+	// Branches maps each service whose entry sets branch to that branch; a
+	// service without one uses main. It is nil when no entry sets one.
 	Branches map[string]string
 	// MaxPreviews is preview.maxPreviews, the most previews that may exist
 	// before a deploy that would create a new one is refused. 0 means no cap.
@@ -70,35 +68,20 @@ var domainPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9
 // strTag is the resolved YAML tag of a string scalar.
 const strTag = "!!str"
 
-// nullTag is the resolved YAML tag of a null scalar.
-const nullTag = "!!null"
-
 // pairStride is the step between keys in a mapping node's Content, which
 // alternates key and value nodes.
 const pairStride = 2
 
-// errMalformedServiceCharts is wrapped by every serviceCharts block validation
-// error raised after decoding.
-var errMalformedServiceCharts = errors.New("malformed serviceCharts block")
+// configFile is the path of badil's configuration in the gitops repo.
+const configFile = "badil.yaml"
 
-// servicesFile is services.yaml. Top-level keys other than serviceRepos, preview
-// and serviceCharts are kept in Rest so that only the preview and serviceCharts
-// blocks are strict.
-type servicesFile struct {
-	ServiceRepos  yaml.Node                `yaml:"serviceRepos"`
-	Preview       *previewBlock            `yaml:"preview"`
-	ServiceCharts map[string]*serviceChart `yaml:"serviceCharts"`
-	Rest          map[string]any           `yaml:",inline"`
-}
-
-// serviceChart is a serviceCharts entry. Its fields stay nodes so that a YAML
-// string can be told apart from a scalar yaml.v3 would convert (`branch: 123`).
-type serviceChart struct {
-	Branch        yaml.Node `yaml:"branch"`
-	Path          yaml.Node `yaml:"path"`
-	ImageTagParam yaml.Node `yaml:"imageTagParam"`
-	HostParam     yaml.Node `yaml:"hostParam"`
-	ValueFiles    yaml.Node `yaml:"valueFiles"`
+// badilFile is badil.yaml. Every key is known: decoding with KnownFields
+// rejects any other. Services stays a node to keep catalog order; its entries
+// are checked by parseServiceEntries, since yaml.Node.Decode ignores
+// KnownFields.
+type badilFile struct {
+	Services yaml.Node     `yaml:"services"`
+	Preview  *previewBlock `yaml:"preview"`
 }
 
 type previewBlock struct {
@@ -172,38 +155,21 @@ func malformed(key, format string, args ...any) error {
 	return fmt.Errorf("%w: %s: %s", errMalformedPreview, key, fmt.Sprintf(format, args...))
 }
 
-func malformedCharts(key, msg string) error {
-	return fmt.Errorf("%w: %s: %s", errMalformedServiceCharts, key, msg)
-}
-
-// ParseServices parses and validates the content of services.yaml.
-func ParseServices(raw []byte) (*ServiceCatalog, error) {
-	var doc servicesFile
+// ParseCatalog parses and validates the content of badil.yaml.
+func ParseCatalog(raw []byte) (*ServiceCatalog, error) {
+	var doc badilFile
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	dec.KnownFields(true)
 	if err := dec.Decode(&doc); err != nil && !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("services.yaml: %w", err)
+		return nil, fmt.Errorf("%s: %w", configFile, err)
 	}
-	if doc.ServiceRepos.Kind != yaml.MappingNode {
-		return nil, errors.New("services.yaml: missing 'serviceRepos' mapping")
-	}
-	services := make([]string, 0, len(doc.ServiceRepos.Content)/pairStride)
-	repos := make(map[string]string, len(doc.ServiceRepos.Content)/pairStride)
-	for i := 0; i+1 < len(doc.ServiceRepos.Content); i += pairStride {
-		name := doc.ServiceRepos.Content[i].Value
-		val := doc.ServiceRepos.Content[i+1]
-		if val.Kind == yaml.AliasNode && val.Alias != nil {
-			val = val.Alias
-		}
-		if val.Kind != yaml.ScalarNode || val.Tag != strTag {
-			return nil, fmt.Errorf("services.yaml: serviceRepos.%s must be a string", name)
-		}
-		services = append(services, name)
-		repos[name] = val.Value
+	services, repos, branches, err := parseServiceEntries(&doc.Services)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", configFile, err)
 	}
 	urls, err := previewURLs(doc.Preview)
 	if err != nil {
-		return nil, fmt.Errorf("services.yaml: %w", err)
+		return nil, fmt.Errorf("%s: %w", configFile, err)
 	}
 	label := DefaultLabel
 	if doc.Preview != nil && doc.Preview.Label != nil {
@@ -213,29 +179,40 @@ func ParseServices(raw []byte) (*ServiceCatalog, error) {
 	if doc.Preview != nil && doc.Preview.MaxPreviews != nil {
 		maxPrev = int(*doc.Preview.MaxPreviews)
 	}
-	branches, err := parseServiceCharts(doc.ServiceCharts, repos)
-	if err != nil {
-		return nil, fmt.Errorf("services.yaml: %w", err)
-	}
 	return &ServiceCatalog{
 		Services: services, URLs: urls, Label: label, Repos: repos, Branches: branches,
 		MaxPreviews: maxPrev,
 	}, nil
 }
 
-// parseServiceCharts validates the decoded serviceCharts block, in sorted
-// service order, and returns the branch of each entry that sets one (nil when
-// none does).
-func parseServiceCharts(sc map[string]*serviceChart, repos map[string]string) (map[string]string, error) {
+// parseServiceEntries validates the services mapping, in file order, and
+// returns the service names, the repo of each, and the branch of each entry
+// that sets one (nil when none does).
+func parseServiceEntries(n *yaml.Node) ([]string, map[string]string, map[string]string, error) {
+	n = resolveAlias(n)
+	switch {
+	case n.Kind == 0 || n.Tag == "!!null":
+		return nil, nil, nil, errors.New("missing 'services' mapping")
+	case n.Kind != yaml.MappingNode:
+		return nil, nil, nil, errors.New("'services' must be a mapping")
+	}
+	if len(n.Content) == 0 {
+		return nil, nil, nil, errors.New("'services' must not be empty")
+	}
+	services := make([]string, 0, len(n.Content)/pairStride)
+	repos := make(map[string]string, len(n.Content)/pairStride)
 	var branches map[string]string
-	for _, name := range slices.Sorted(maps.Keys(sc)) {
-		if _, ok := repos[name]; !ok {
-			return nil, malformedCharts("serviceCharts."+name, "not in serviceRepos")
+	for i := 0; i+1 < len(n.Content); i += pairStride {
+		name := n.Content[i].Value
+		if _, dup := repos[name]; dup {
+			return nil, nil, nil, fmt.Errorf("services.%s is defined more than once", name)
 		}
-		branch, err := chartEntry(name, sc[name])
+		repo, branch, err := serviceEntry(name, resolveAlias(n.Content[i+1]))
 		if err != nil {
-			return nil, err
+			return nil, nil, nil, err
 		}
+		services = append(services, name)
+		repos[name] = repo
 		if branch == "" {
 			continue
 		}
@@ -244,93 +221,68 @@ func parseServiceCharts(sc map[string]*serviceChart, repos map[string]string) (m
 		}
 		branches[name] = branch
 	}
-	return branches, nil
+	return services, repos, branches, nil
 }
 
-// chartEntry validates the fields of one serviceCharts entry, in file-format
-// order, and returns its branch ("" when unset). A null entry sets nothing.
-func chartEntry(name string, c *serviceChart) (string, error) {
-	if c == nil {
-		return "", nil
+// serviceEntry validates one services entry and returns its repo and its
+// branch ("" when absent). Each key is checked on the node: repo is required,
+// branch optional, any other key or a repeated key an error (decoding into a
+// yaml.Node does not detect duplicate keys).
+func serviceEntry(name string, n *yaml.Node) (string, string, error) {
+	if n.Kind != yaml.MappingNode {
+		return "", "", fmt.Errorf("services.%s must be a mapping", name)
 	}
-	branch, err := chartString(name, "branch", c.Branch)
-	if err != nil {
-		return "", err
+	var repo, branch string
+	var hasRepo bool
+	seen := make(map[string]bool, len(n.Content)/pairStride)
+	for i := 0; i+1 < len(n.Content); i += pairStride {
+		key, val := n.Content[i].Value, resolveAlias(n.Content[i+1])
+		if seen[key] {
+			return "", "", fmt.Errorf("services.%s.%s is defined more than once", name, key)
+		}
+		seen[key] = true
+		switch key {
+		case "repo":
+			if !nonEmptyString(val) {
+				return "", "", fmt.Errorf("services.%s.repo must be a non-empty string", name)
+			}
+			repo, hasRepo = val.Value, true
+		case "branch":
+			if !nonEmptyString(val) {
+				return "", "", fmt.Errorf("services.%s.branch must be a non-empty string", name)
+			}
+			branch = val.Value
+		default:
+			return "", "", fmt.Errorf("services.%s: unknown key %q", name, key)
+		}
 	}
-	if _, err = chartString(name, "path", c.Path); err != nil {
-		return "", err
+	if !hasRepo {
+		return "", "", fmt.Errorf("services.%s: missing 'repo'", name)
 	}
-	if _, err = chartString(name, "imageTagParam", c.ImageTagParam); err != nil {
-		return "", err
-	}
-	if _, err = chartString(name, "hostParam", c.HostParam); err != nil {
-		return "", err
-	}
-	if err = chartValueFiles(name, c.ValueFiles); err != nil {
-		return "", err
-	}
-	return branch, nil
+	return repo, branch, nil
 }
 
-// chartString returns the value of a serviceCharts string field, "" when it is
-// absent or null, and an error when it is not a non-empty YAML string.
-func chartString(name, field string, n yaml.Node) (string, error) {
-	if n.Kind == yaml.AliasNode && n.Alias != nil {
-		n = *n.Alias
-	}
-	switch {
-	case n.Kind == 0 || n.Tag == nullTag:
-		return "", nil
-	case n.Kind != yaml.ScalarNode || n.Tag != strTag || n.Value == "":
-		return "", malformedCharts("serviceCharts."+name+"."+field, "must be a non-empty string")
-	case yaml11Bool(&n):
-		return "", malformedCharts("serviceCharts."+name+"."+field, quoteMsg(n.Value))
-	}
-	return n.Value, nil
-}
-
-// yaml11BoolRe matches the YAML 1.1 boolean forms that yaml.v3 tags !!str but
-// Helm, which reads services.yaml as YAML 1.1, decodes as booleans.
-var yaml11BoolRe = regexp.MustCompile(`^(y|Y|yes|Yes|YES|n|N|no|No|NO|on|On|ON|off|Off|OFF)$`)
-
-// yaml11Bool reports whether n is a plain (unquoted) scalar that YAML 1.1
-// reads as a boolean.
-func yaml11Bool(n *yaml.Node) bool {
-	if n.Style&(yaml.DoubleQuotedStyle|yaml.SingleQuotedStyle) != 0 {
+// nonEmptyString reports whether n is a non-empty scalar usable as a string.
+// Any scalar counts (yaml.v3 tags `yes` or `on` !!str, `2024-01-01`
+// !!timestamp) except one tagged !!int, !!float, !!bool or !!null; a mapping
+// or a sequence does not.
+func nonEmptyString(n *yaml.Node) bool {
+	if n.Kind != yaml.ScalarNode || n.Value == "" {
 		return false
 	}
-	return yaml11BoolRe.MatchString(n.Value)
+	switch n.Tag {
+	case "!!int", "!!float", "!!bool", "!!null":
+		return false
+	}
+	return true
 }
 
-func quoteMsg(v string) string {
-	return fmt.Sprintf("%q must be quoted: YAML 1.1 reads it as a boolean", v)
-}
-
-// chartValueFiles checks that a serviceCharts valueFiles field, when set, is a
-// list of non-empty YAML strings.
-func chartValueFiles(name string, n yaml.Node) error {
+// resolveAlias returns the node an alias points to, or n itself.
+func resolveAlias(n *yaml.Node) *yaml.Node {
 	if n.Kind == yaml.AliasNode && n.Alias != nil {
-		n = *n.Alias
+		return n.Alias
 	}
-	if n.Kind == 0 || n.Tag == nullTag {
-		return nil
-	}
-	bad := malformedCharts("serviceCharts."+name+".valueFiles", "must be a list of non-empty strings")
-	if n.Kind != yaml.SequenceNode {
-		return bad
-	}
-	for _, item := range n.Content {
-		if item.Kind == yaml.AliasNode && item.Alias != nil {
-			item = item.Alias
-		}
-		if item.Kind != yaml.ScalarNode || item.Tag != strTag || item.Value == "" {
-			return bad
-		}
-		if yaml11Bool(item) {
-			return malformedCharts("serviceCharts."+name+".valueFiles", quoteMsg(item.Value))
-		}
-	}
-	return nil
+	return n
 }
 
 // previewURLs validates the decoded preview block. An absent block or an

@@ -1,0 +1,135 @@
+---
+# Source: preview-env/templates/namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: two-pinned
+  labels:
+    app.kubernetes.io/name: two-pinned
+    app.kubernetes.io/instance: two-pinned
+    app.kubernetes.io/part-of: preview-environments
+    app.kubernetes.io/managed-by: argocd
+    "team": "platform"
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+
+---
+# Source: preview-env/templates/appproject.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: two-pinned
+  namespace: "argocd"
+  labels:
+    app.kubernetes.io/name: two-pinned
+    app.kubernetes.io/instance: two-pinned
+    app.kubernetes.io/part-of: preview-environments
+    app.kubernetes.io/managed-by: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: "Preview environment: two-pinned"
+  sourceRepos:
+    - "https://github.com/acme/platform.git"
+  destinations:
+    - namespace: two-pinned
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+
+---
+# Source: preview-env/templates/application.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: two-pinned-api
+  namespace: "argocd"
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/instance: two-pinned
+    app.kubernetes.io/part-of: preview-environments
+    app.kubernetes.io/managed-by: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    preview.badil.dev/vcs.ref.revision: "f00dbabe0123456789abcdef0123456789abcdef"
+    preview.badil.dev/host: ""
+    preview.badil.dev/pr-author: "hubot"
+    preview.badil.dev/pr-url: "https://github.com/acme/platform/pull/7"
+    preview.badil.dev/pr-number: "7"
+    preview.badil.dev/created-at: "2026-06-01T09:00:00Z"
+    preview.badil.dev/updated-at: "2026-06-01T09:00:00Z"
+    preview.badil.dev/vcs.ref.name: "fix/retries"
+    preview.badil.dev/cicd.pipeline.run.url: "https://github.com/acme/platform/actions/runs/2002"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: two-pinned
+  source:
+    repoURL: "https://github.com/acme/platform.git"
+    targetRevision: "f00dbabe0123456789abcdef0123456789abcdef"
+    path: "deploy/chart"
+    helm:
+      releaseName: api
+      valueFiles:
+        - "values-preview.yaml"
+      parameters:
+        - name: "app.image.tag"
+          value: "f00dbabe0123456789abcdef0123456789abcdef"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: two-pinned
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+
+---
+# Source: preview-env/templates/application.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: two-pinned-worker
+  namespace: "argocd"
+  labels:
+    app.kubernetes.io/name: worker
+    app.kubernetes.io/instance: two-pinned
+    app.kubernetes.io/part-of: preview-environments
+    app.kubernetes.io/managed-by: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    preview.badil.dev/vcs.ref.revision: "f00dbabe0123456789abcdef0123456789abcdef"
+    preview.badil.dev/host: ""
+    preview.badil.dev/pr-author: "hubot"
+    preview.badil.dev/pr-url: "https://github.com/acme/platform/pull/7"
+    preview.badil.dev/pr-number: "7"
+    preview.badil.dev/created-at: "2026-06-01T09:00:00Z"
+    preview.badil.dev/updated-at: "2026-06-01T09:00:00Z"
+    preview.badil.dev/vcs.ref.name: "fix/retries"
+    preview.badil.dev/cicd.pipeline.run.url: "https://github.com/acme/platform/actions/runs/2002"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: two-pinned
+  source:
+    repoURL: "https://github.com/acme/platform.git"
+    targetRevision: "f00dbabe0123456789abcdef0123456789abcdef"
+    path: "k8s/"
+    helm:
+      releaseName: worker
+      parameters:
+        - name: "app.image.tag"
+          value: "f00dbabe0123456789abcdef0123456789abcdef"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: two-pinned
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false

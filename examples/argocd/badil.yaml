@@ -1,0 +1,25 @@
+# badil's configuration, at the root of the gitops repo. badil reads it; the
+# preview-env chart does not. Unknown keys are rejected at every level.
+
+# Service catalog (required, at least one service). The order is the catalog
+# order of every preview.
+services:
+  backend-1:
+    repo: "https://github.com/badilhq/demo-backend-1.git"  # required: the service's git URL
+    # branch: main                # optional, default "main": branch of unpinned services
+  backend-2:
+    repo: "https://github.com/badilhq/demo-backend-2.git"
+  front:
+    repo: "https://github.com/badilhq/demo-front.git"
+
+# Per-preview URLs (optional): each exposed service gets the ingress host
+# <service>-<slug>.<domain> and a link in the PR comment.
+# preview:
+#   label: preview                # optional, default "preview": the PR label that creates the preview; "preview:<name>" picks its name
+#   maxPreviews: 10               # optional, default no cap: a deploy that would create a preview past it is refused
+#   domain: previews.example.com  # lowercase bare domain; needs a wildcard DNS record for *.<domain>
+#   tls: true                     # optional, default true: https links (ingress TLS stays in the service chart)
+#   expose:
+#     front: {}
+#     backend-1:
+#       path: /docs               # optional, default "/": PR-comment link only

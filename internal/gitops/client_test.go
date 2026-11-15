@@ -65,16 +65,19 @@ func sampleInputs() preview.DeployInputs {
 }
 
 func TestFetchServiceCatalog(t *testing.T) {
-	const servicesYAML = `serviceRepos:
-  backend-1: https://github.com/acme/backend-1.git
-  backend-2: https://github.com/acme/backend-2.git
-  front: https://github.com/acme/front.git
+	const badilYAML = `services:
+  backend-1:
+    repo: https://github.com/acme/backend-1.git
+  backend-2:
+    repo: https://github.com/acme/backend-2.git
+  front:
+    repo: https://github.com/acme/front.git
 `
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/repos/acme/gitops/contents/services.yaml" {
+		if r.URL.Path != "/repos/acme/gitops/contents/badil.yaml" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
-		_, _ = io.WriteString(w, encodeContent("services.yaml", "sha-svc", servicesYAML))
+		_, _ = io.WriteString(w, encodeContent("badil.yaml", "sha-svc", badilYAML))
 	}))
 	defer srv.Close()
 
@@ -162,7 +165,10 @@ func TestWritePreview_Create(t *testing.T) {
 			t.Errorf("create request must not include sha; got body: %s", body)
 		}
 		w.WriteHeader(http.StatusCreated)
-		_, _ = io.WriteString(w, `{"content":{"sha":"new-blob"},"commit":{"html_url":"https://github.com/acme/gitops/commit/abc"}}`)
+		_, _ = io.WriteString(
+			w,
+			`{"content":{"sha":"new-blob"},"commit":{"html_url":"https://github.com/acme/gitops/commit/abc"}}`,
+		)
 	}))
 	defer srv.Close()
 
@@ -198,7 +204,13 @@ func TestWritePreview_Update(t *testing.T) {
 
 	c := newClient(t, srv)
 	vals := preview.BuildPreviewValues("backend-1", "newsha", []string{"backend-1"}, sampleInputs())
-	commitURL, err := c.WritePreview(context.Background(), "slug", vals, "old-blob", "chore(preview): update backend-1 in slug")
+	commitURL, err := c.WritePreview(
+		context.Background(),
+		"slug",
+		vals,
+		"old-blob",
+		"chore(preview): update backend-1 in slug",
+	)
 	if err != nil {
 		t.Fatalf("WritePreview: %v", err)
 	}
@@ -232,6 +244,16 @@ func TestWritePreview_Unauthorized(t *testing.T) {
 // hostURLs exposes backend-1 under the domain 127.0.0.1.nip.io.
 func hostURLs() preview.URLConfig {
 	return preview.URLConfig{Domain: "127.0.0.1.nip.io", Expose: map[string]string{"backend-1": "/"}}
+}
+
+// testCatalog is a catalog of services, each at https://github.com/acme/<name>.git
+// and tracking main, with the hosts of hostURLs.
+func testCatalog(services ...string) *gitops.ServiceCatalog {
+	repos := make(map[string]string, len(services))
+	for _, name := range services {
+		repos[name] = "https://github.com/acme/" + name + ".git"
+	}
+	return &gitops.ServiceCatalog{Services: services, Repos: repos, URLs: hostURLs()}
 }
 
 func TestWritePreviewWithRetry_ConflictThenSuccess(t *testing.T) {
@@ -305,11 +327,12 @@ func TestWritePreviewWithRetry_ConflictThenSuccess(t *testing.T) {
 	in := sampleInputs()
 	in.CommitSha = "newsha"
 	in.Timestamp = "2026-05-26T10:00:00Z"
+	catalog := testCatalog("backend-1", "backend-2")
+	catalog.Branches = map[string]string{"backend-2": "develop"}
 
 	result, err := c.WritePreviewWithRetry(
 		context.Background(), "slug",
-		[]string{"backend-1", "backend-2"},
-		hostURLs(),
+		catalog,
 		"backend-1", "newsha", in,
 		"chore(preview): create slug preview",
 		"chore(preview): update backend-1 in slug",
@@ -338,6 +361,18 @@ func TestWritePreviewWithRetry_ConflictThenSuccess(t *testing.T) {
 	}
 	if result.Values.Services[1].CommitSha != "" {
 		t.Errorf("backend-2 commitSha = %q, want empty (main-tracking)", result.Values.Services[1].CommitSha)
+	}
+	// The re-fetched file has no apiVersion, repoURL or branch: the retry
+	// write must carry the catalog's facts.
+	written, _ := capturedBody.Load().(string)
+	for _, expect := range []string{
+		"apiVersion: badil.dev/v1\nservices:\n",
+		"  - name: backend-1\n    repoURL: https://github.com/acme/backend-1.git\n    branch: main\n",
+		"  - name: backend-2\n    repoURL: https://github.com/acme/backend-2.git\n    branch: develop\n",
+	} {
+		if !strings.Contains(written, expect) {
+			t.Errorf("retry body missing %q:\n%s", expect, written)
+		}
 	}
 	assertWrittenHosts(t, result.Values, &capturedBody, "slug")
 }
@@ -393,10 +428,12 @@ func TestWritePreviewWithRetry_FreshCreateUsesCatalog(t *testing.T) {
 	defer srv.Close()
 
 	c := newClient(t, srv)
+	catalog := testCatalog("backend-1", "backend-2", "front")
+	catalog.Repos["front"] = "https://github.com/acme/front"
+	catalog.Branches = map[string]string{"backend-2": "develop"}
 	result, err := c.WritePreviewWithRetry(
 		context.Background(), "fresh-slug",
-		[]string{"backend-1", "backend-2", "front"},
-		hostURLs(),
+		catalog,
 		"backend-1", "abc1234567890", sampleInputs(),
 		"chore(preview): create fresh-slug preview",
 		"chore(preview): update backend-1 in fresh-slug",
@@ -423,7 +460,12 @@ func TestWritePreviewWithRetry_FreshCreateUsesCatalog(t *testing.T) {
 		}
 	}
 	written, _ := capturedBody.Load().(string)
-	for _, expect := range []string{"name: backend-1", "name: backend-2", "name: front"} {
+	for _, expect := range []string{
+		"apiVersion: badil.dev/v1\nservices:\n",
+		"  - name: backend-1\n    repoURL: https://github.com/acme/backend-1.git\n    branch: main\n",
+		"  - name: backend-2\n    repoURL: https://github.com/acme/backend-2.git\n    branch: develop\n",
+		"  - name: front\n    repoURL: https://github.com/acme/front\n    branch: main\n",
+	} {
 		if !strings.Contains(written, expect) {
 			t.Errorf("written body missing %q:\n%s", expect, written)
 		}
@@ -494,8 +536,11 @@ func TestFanOutPRComments_UpdateAndCreate(t *testing.T) {
 // hostURLs writes it, except updated-at, which is older. Its replacer
 // arguments are applied to it.
 func pinnedFile(replace ...string) string {
-	const file = `services:
+	const file = `apiVersion: badil.dev/v1
+services:
   - name: backend-1
+    repoURL: https://github.com/acme/backend-1.git
+    branch: main
     commitSha: abc1234567890
     host: backend-1-slug.127.0.0.1.nip.io
     metadata:
@@ -507,6 +552,8 @@ func pinnedFile(replace ...string) string {
       vcs.ref.name: feature/add-pricing
       cicd.pipeline.run.url: https://github.com/acme/backend-1/actions/runs/1
   - name: backend-2
+    repoURL: https://github.com/acme/backend-2.git
+    branch: main
 `
 	return strings.NewReplacer(replace...).Replace(file)
 }
@@ -514,12 +561,13 @@ func pinnedFile(replace ...string) string {
 // writeServer serves files to successive GETs of previews/slug/values.yaml
 // (the last one repeats; blob-<n> is the n-th file's sha; an empty file or no
 // file is a 404) and answers PUTs with conflicts first, then success. It
-// counts the requests.
+// counts the requests and keeps the content of the last successful PUT.
 type writeServer struct {
 	files     []string
 	conflicts int32
 	gets      atomic.Int32
 	puts      atomic.Int32
+	written   atomic.Value
 }
 
 func (s *writeServer) start(t *testing.T, opts ...gitops.Option) *gitops.Client {
@@ -544,6 +592,13 @@ func (s *writeServer) start(t *testing.T, opts ...gitops.Option) *gitops.Client 
 				_, _ = io.WriteString(w, `{"message":"sha does not match"}`)
 				return
 			}
+			var req struct {
+				Content []byte `json:"content"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Errorf("decode PUT body: %v", err)
+			}
+			s.written.Store(string(req.Content))
 			_, _ = io.WriteString(w, `{"commit":{"html_url":"https://github.com/x/y/commit/written"}}`)
 		default:
 			t.Errorf("unexpected method %s", r.Method)
@@ -558,6 +613,7 @@ func TestWritePreviewWithRetry_SkipUnchanged(t *testing.T) {
 		name          string
 		files         []string
 		conflicts     int32
+		catalog       func(*gitops.ServiceCatalog)
 		skipUnchanged bool
 		wantUnchanged bool
 		wantGets      int32
@@ -591,6 +647,30 @@ func TestWritePreviewWithRetry_SkipUnchanged(t *testing.T) {
 			wantGets: 1, wantPuts: 1,
 		},
 		{
+			name:  "catalog branch change",
+			files: []string{pinnedFile()}, skipUnchanged: true, wantGets: 1, wantPuts: 1,
+			catalog: func(c *gitops.ServiceCatalog) { c.Branches = map[string]string{"backend-2": "develop"} },
+		},
+		{
+			name:  "catalog repo url change",
+			files: []string{pinnedFile()}, skipUnchanged: true, wantGets: 1, wantPuts: 1,
+			catalog: func(c *gitops.ServiceCatalog) { c.Repos["backend-2"] = "https://github.com/acme/b2.git" },
+		},
+		{
+			name:  "service removed from the catalog",
+			files: []string{pinnedFile()}, skipUnchanged: true, wantGets: 1, wantPuts: 1,
+			catalog: func(c *gitops.ServiceCatalog) { delete(c.Repos, "backend-2"); c.Services = c.Services[:1] },
+		},
+		{
+			name: "file without apiVersion",
+			files: []string{
+				pinnedFile("apiVersion: badil.dev/v1\n", ""),
+			},
+			skipUnchanged: true,
+			wantGets:      1,
+			wantPuts:      1,
+		},
+		{
 			name:  "unchanged after a 409 re-fetch",
 			files: []string{pinnedFile("abc1234567890", "0000000old"), pinnedFile()}, conflicts: 1, skipUnchanged: true,
 			wantUnchanged: true, wantGets: 2, wantPuts: 1,
@@ -608,9 +688,13 @@ func TestWritePreviewWithRetry_SkipUnchanged(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &writeServer{files: tt.files, conflicts: tt.conflicts}
 			c := s.start(t)
+			catalog := testCatalog("backend-1", "backend-2")
+			if tt.catalog != nil {
+				tt.catalog(catalog)
+			}
 
 			result, err := c.WritePreviewWithRetry(
-				context.Background(), "slug", []string{"backend-1", "backend-2"}, hostURLs(),
+				context.Background(), "slug", catalog,
 				"backend-1", "abc1234567890", sampleInputs(), "create", "update", tt.skipUnchanged,
 			)
 			if err != nil {
@@ -667,7 +751,7 @@ func TestWritePreviewWithRetry_Created(t *testing.T) {
 			c := s.start(t, gitops.WithMetrics(m))
 
 			result, err := c.WritePreviewWithRetry(
-				context.Background(), "slug", []string{"backend-1", "backend-2"}, hostURLs(),
+				context.Background(), "slug", testCatalog("backend-1", "backend-2"),
 				"backend-1", "abc1234567890", sampleInputs(), "create", "update", tt.name == "unchanged",
 			)
 			if err != nil {
@@ -687,5 +771,85 @@ func TestWritePreviewWithRetry_Created(t *testing.T) {
 				t.Error(err)
 			}
 		})
+	}
+}
+
+// TestWritePreviewWithRetry_FollowsCatalog checks that a deploy update writes
+// apiVersion and each entry's repoURL and branch from the catalog, and drops
+// the entries of services no longer in it, pinned or not, keeping the order
+// of the rest.
+func TestWritePreviewWithRetry_FollowsCatalog(t *testing.T) {
+	const file = `services:
+  - name: gone-pinned
+    commitSha: fff
+    metadata:
+      pr-url: https://github.com/acme/gone-pinned/pull/9
+  - name: backend-2
+    repoURL: https://github.com/acme/old.git
+    branch: old
+  - name: gone
+  - name: backend-1
+`
+	s := &writeServer{files: []string{file}}
+	c := s.start(t)
+	catalog := testCatalog("backend-1", "backend-2")
+	catalog.Branches = map[string]string{"backend-2": "develop"}
+
+	result, err := c.WritePreviewWithRetry(
+		context.Background(), "slug", catalog,
+		"backend-1", "abc1234567890", sampleInputs(), "create", "update", true,
+	)
+	if err != nil {
+		t.Fatalf("WritePreviewWithRetry: %v", err)
+	}
+	if result.Unchanged {
+		t.Fatal("Unchanged = true, want a write")
+	}
+	want := "apiVersion: badil.dev/v1\n" +
+		"services:\n" +
+		"  - name: backend-2\n" +
+		"    repoURL: https://github.com/acme/backend-2.git\n" +
+		"    branch: develop\n" +
+		"  - name: backend-1\n" +
+		"    repoURL: https://github.com/acme/backend-1.git\n" +
+		"    branch: main\n" +
+		"    commitSha: abc1234567890\n" +
+		"    host: backend-1-slug.127.0.0.1.nip.io\n" +
+		"    metadata:\n" +
+		"      pr-author: octocat\n" +
+		"      pr-url: https://github.com/acme/backend-1/pull/42\n" +
+		"      pr-number: \"42\"\n" +
+		"      created-at: \"2026-05-26T10:00:00Z\"\n" +
+		"      updated-at: \"2026-05-26T10:00:00Z\"\n" +
+		"      vcs.ref.name: feature/add-pricing\n" +
+		"      cicd.pipeline.run.url: https://github.com/acme/backend-1/actions/runs/1\n"
+	if got, _ := s.written.Load().(string); got != want {
+		t.Errorf("written content mismatch\n got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestWritePreviewWithRetry_BranchChangeWritten checks that a catalog branch
+// change is written even when the commit is unchanged.
+func TestWritePreviewWithRetry_BranchChangeWritten(t *testing.T) {
+	s := &writeServer{files: []string{pinnedFile()}}
+	c := s.start(t)
+	catalog := testCatalog("backend-1", "backend-2")
+	catalog.Branches = map[string]string{"backend-2": "develop"}
+
+	result, err := c.WritePreviewWithRetry(
+		context.Background(), "slug", catalog,
+		"backend-1", "abc1234567890", sampleInputs(), "create", "update", true,
+	)
+	if err != nil {
+		t.Fatalf("WritePreviewWithRetry: %v", err)
+	}
+	if result.Unchanged || result.Values.Services[1].Branch != "develop" {
+		t.Fatalf("result = %+v, want a write with backend-2 on develop", result)
+	}
+	if got, _ := s.written.Load().(string); !strings.Contains(
+		got,
+		"  - name: backend-2\n    repoURL: https://github.com/acme/backend-2.git\n    branch: develop\n",
+	) {
+		t.Errorf("written content missing backend-2 on develop:\n%s", got)
 	}
 }

@@ -113,25 +113,37 @@ func runTeardown(t *testing.T, g *teardownGitHub) (*gitops.TeardownResult, error
 const pr7URL = "https://github.com/acme/backend-2/pull/7"
 
 // onlyPR42 is a preview pinned by acme/backend-1#42 alone.
-const onlyPR42 = `services:
+const onlyPR42 = `apiVersion: badil.dev/v1
+services:
   - name: backend-1
+    repoURL: https://github.com/acme/backend-1.git
+    branch: main
     commitSha: aaa
     metadata:
       pr-url: https://github.com/acme/backend-1/pull/42
   - name: front
+    repoURL: https://github.com/acme/front.git
+    branch: main
 `
 
 // pr42AndPR7 is a preview pinned by acme/backend-1#42 and acme/backend-2#7.
-const pr42AndPR7 = `services:
+const pr42AndPR7 = `apiVersion: badil.dev/v1
+services:
   - name: backend-1
+    repoURL: https://github.com/acme/backend-1.git
+    branch: release
     commitSha: aaa
     metadata:
       pr-url: https://github.com/acme/backend-1/pull/42
   - name: backend-2
+    repoURL: https://github.com/acme/backend-2.git
+    branch: main
     commitSha: bbb
     metadata:
       pr-url: https://github.com/acme/backend-2/pull/7
   - name: front
+    repoURL: https://github.com/acme/front.git
+    branch: main
 `
 
 func TestTeardown_UpdateWhenPinsRemain(t *testing.T) {
@@ -148,9 +160,15 @@ func TestTeardown_UpdateWhenPinsRemain(t *testing.T) {
 	if reqs[0].message != wantMsg || reqs[0].sha != "blob-1" {
 		t.Errorf("PUT message/sha = %q/%q, want %q/blob-1", reqs[0].message, reqs[0].sha, wantMsg)
 	}
-	wantBody := "services:\n" +
+	// apiVersion and every entry's repoURL and branch are kept.
+	wantBody := "apiVersion: badil.dev/v1\n" +
+		"services:\n" +
 		"  - name: backend-1\n" +
+		"    repoURL: https://github.com/acme/backend-1.git\n" +
+		"    branch: release\n" +
 		"  - name: backend-2\n" +
+		"    repoURL: https://github.com/acme/backend-2.git\n" +
+		"    branch: main\n" +
 		"    commitSha: bbb\n" +
 		"    metadata:\n" +
 		"      pr-author: \"\"\n" +
@@ -160,7 +178,9 @@ func TestTeardown_UpdateWhenPinsRemain(t *testing.T) {
 		"      updated-at: \"\"\n" +
 		"      vcs.ref.name: \"\"\n" +
 		"      cicd.pipeline.run.url: \"\"\n" +
-		"  - name: front\n"
+		"  - name: front\n" +
+		"    repoURL: https://github.com/acme/front.git\n" +
+		"    branch: main\n"
 	if reqs[0].content != wantBody {
 		t.Errorf("PUT content mismatch\n got:\n%s\nwant:\n%s", reqs[0].content, wantBody)
 	}

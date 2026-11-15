@@ -24,12 +24,12 @@ spec:
           targetRevision: HEAD
           ref: values
         - repoURL: oci://ghcr.io/badilhq/charts/preview-env
-          targetRevision: 0.8.0
+          targetRevision: 0.9.0
           path: "."
           helm:
             releaseName: "{{ .path.basename }}"
             valueFiles:
-              - "$values/services.yaml"
+              - "$values/preview-env.yaml"
               - "$values/{{ .path.path }}/values.yaml"
             parameters:
               # Must match the namespace Argo CD runs in: the AppProject and

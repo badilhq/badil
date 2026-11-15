@@ -17,11 +17,20 @@ import (
 //	go test -run TestGoldenYAML -update ./internal/preview
 var updateGolden = flag.Bool("update", false, "rewrite golden fixture from current output")
 
-// TestGoldenYAML pins the YAML emission of BuildPreviewValues to the fixture
-// in testdata/values.golden.yaml. Failures indicate a drift in formatting
-// (indent, key order, quoting) — either the change is intentional and the
-// fixture should be regenerated with -update, or it's a regression to
-// investigate.
+// goldenRepos is the catalog's service repos for the golden fixture.
+func goldenRepos() map[string]string {
+	return map[string]string{
+		"backend-1": "https://github.com/acme/backend-1.git",
+		"backend-2": "https://github.com/acme/backend-2.git",
+		"front":     "https://github.com/acme/front",
+	}
+}
+
+// TestGoldenYAML pins the YAML emission of BuildPreviewValues then
+// ApplyCatalog to the fixture in testdata/values.golden.yaml. Failures
+// indicate a drift in formatting (indent, key order, quoting) — either the
+// change is intentional and the fixture should be regenerated with -update,
+// or it's a regression to investigate.
 func TestGoldenYAML(t *testing.T) {
 	in := preview.DeployInputs{
 		ServiceName:    "backend-1",
@@ -33,8 +42,10 @@ func TestGoldenYAML(t *testing.T) {
 		Timestamp:      "2026-05-26T10:00:00Z",
 		WorkflowRunURL: "https://github.com/acme/backend-1/actions/runs/1",
 	}
-	vals := preview.BuildPreviewValues(in.ServiceName, in.CommitSha,
-		[]string{"backend-1", "backend-2", "front"}, in)
+	vals := preview.ApplyCatalog(
+		preview.BuildPreviewValues(in.ServiceName, in.CommitSha, []string{"backend-1", "backend-2", "front"}, in),
+		goldenRepos(), map[string]string{"backend-2": "develop"},
+	)
 
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)

@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "apiVersion": {
+      "type": "string",
+      "const": "badil.dev/v1"
+    },
+    "services": {
+      "items": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "repoURL": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "commitSha": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          },
+          "metadata": {
+            "properties": {
+              "pr-author": {
+                "type": "string"
+              },
+              "pr-url": {
+                "type": "string"
+              },
+              "pr-number": {
+                "type": "string"
+              },
+              "created-at": {
+                "type": "string"
+              },
+              "updated-at": {
+                "type": "string"
+              },
+              "vcs.ref.name": {
+                "type": "string"
+              },
+              "cicd.pipeline.run.url": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "pr-author",
+              "pr-url",
+              "pr-number",
+              "created-at",
+              "updated-at",
+              "vcs.ref.name",
+              "cicd.pipeline.run.url"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "repoURL",
+          "branch"
+        ],
+        "dependentRequired": {
+          "commitSha": [
+            "metadata"
+          ],
+          "metadata": [
+            "commitSha"
+          ]
+        }
+      },
+      "type": "array"
+    },
+    "serviceCharts": {
+      "additionalProperties": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "imageTagParam": {
+            "type": "string",
+            "minLength": 1
+          },
+          "hostParam": {
+            "type": "string",
+            "minLength": 1
+          },
+          "valueFiles": {
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": "array"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "previewNamespace": {
+      "properties": {
+        "labels": {
+          "properties": {
+            "app.kubernetes.io/name": false,
+            "app.kubernetes.io/instance": false,
+            "app.kubernetes.io/part-of": false,
+            "app.kubernetes.io/managed-by": false
+          },
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "annotations": {
+          "properties": {
+            "argocd.argoproj.io/sync-wave": false
+          },
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "argocdNamespace": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "services",
+    "argocdNamespace"
+  ]
+}

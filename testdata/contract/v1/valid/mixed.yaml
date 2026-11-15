@@ -1,0 +1,24 @@
+# Three services from two repos: api pinned by a PR, with a host; front
+# tracking its branch, with a host; worker tracking its branch, without one.
+apiVersion: badil.dev/v1
+services:
+  - name: api
+    repoURL: https://github.com/acme/platform.git
+    branch: main
+    commitSha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+    host: api-feature-pricing.preview.example.com
+    metadata:
+      pr-author: octocat
+      pr-url: https://github.com/acme/platform/pull/42
+      pr-number: "42"
+      created-at: "2026-05-26T10:00:00Z"
+      updated-at: "2026-05-26T11:30:00Z"
+      vcs.ref.name: feature/pricing
+      cicd.pipeline.run.url: https://github.com/acme/platform/actions/runs/1001
+  - name: front
+    repoURL: https://github.com/acme/front.git
+    branch: main
+    host: front-feature-pricing.preview.example.com
+  - name: worker
+    repoURL: https://github.com/acme/platform.git
+    branch: develop

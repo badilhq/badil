@@ -37,4 +37,15 @@ jobs:
 
       - run: go build ./...
 
+      - name: JSON schemas up to date
+        run: |
+          go generate ./cmd/schemagen
+          for f in charts/preview-env/values.schema.json schema/preview.v1.schema.json; do
+            if [ -n "$(git status --porcelain -- "$f")" ]; then
+              echo "::error::$f is out of date: run make schema"
+              git diff -- "$f"
+              exit 1
+            fi
+          done
+
       - run: go test -race -count=1 ./...

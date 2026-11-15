@@ -43,7 +43,7 @@ func TestClientMetrics_TimesRetryOperations(t *testing.T) {
 	c := gitops.NewClient(ghc, "acme", "gitops", gitops.WithMetrics(m))
 
 	ctx := context.Background()
-	if _, err := c.WritePreviewWithRetry(ctx, "fresh", []string{"backend-1"}, hostURLs(),
+	if _, err := c.WritePreviewWithRetry(ctx, "fresh", testCatalog("backend-1"),
 		"backend-1", "abc", sampleInputs(), "create", "update", false); err != nil {
 		t.Fatalf("WritePreviewWithRetry: %v", err)
 	}

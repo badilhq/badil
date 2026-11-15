@@ -1,0 +1,27 @@
+# Two services from one repo, both pinned by the same PR.
+apiVersion: badil.dev/v1
+services:
+  - name: api
+    repoURL: https://github.com/acme/platform.git
+    branch: main
+    commitSha: "f00dbabe0123456789abcdef0123456789abcdef"
+    metadata:
+      pr-author: hubot
+      pr-url: https://github.com/acme/platform/pull/7
+      pr-number: "7"
+      created-at: "2026-06-01T09:00:00Z"
+      updated-at: "2026-06-01T09:00:00Z"
+      vcs.ref.name: fix/retries
+      cicd.pipeline.run.url: https://github.com/acme/platform/actions/runs/2002
+  - name: worker
+    repoURL: https://github.com/acme/platform.git
+    branch: main
+    commitSha: "f00dbabe0123456789abcdef0123456789abcdef"
+    metadata:
+      pr-author: hubot
+      pr-url: https://github.com/acme/platform/pull/7
+      pr-number: "7"
+      created-at: "2026-06-01T09:00:00Z"
+      updated-at: "2026-06-01T09:00:00Z"
+      vcs.ref.name: fix/retries
+      cicd.pipeline.run.url: https://github.com/acme/platform/actions/runs/2002

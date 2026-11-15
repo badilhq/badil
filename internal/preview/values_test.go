@@ -158,13 +158,18 @@ func TestUpdatePreviewValues_DoesNotMutateInput(t *testing.T) {
 
 func TestEqualExceptUpdatedAt(t *testing.T) {
 	in := sampleInputs()
-	base := preview.BuildPreviewValues(in.ServiceName, in.CommitSha, []string{"backend-1", "front"}, in)
+	base := preview.ApplyCatalog(
+		preview.BuildPreviewValues(in.ServiceName, in.CommitSha, []string{"backend-1", "front"}, in),
+		catalogRepos(), nil,
+	)
 	base.Services[1] = preview.ServiceEntry{
-		Name: "front", CommitSha: "f00", Host: "front.example.com",
+		Name: "front", RepoURL: "https://github.com/acme/front", Branch: "main",
+		CommitSha: "f00", Host: "front.example.com",
 		Metadata: &preview.Metadata{PRURL: "https://github.com/acme/front/pull/7", UpdatedAt: "2026-05-26T09:00:00Z"},
 	}
 	clone := func() preview.PreviewValues {
-		out := preview.PreviewValues{Services: slices.Clone(base.Services)}
+		out := base
+		out.Services = slices.Clone(base.Services)
 		for i := range out.Services {
 			if md := out.Services[i].Metadata; md != nil {
 				cp := *md
@@ -186,11 +191,6 @@ func TestEqualExceptUpdatedAt(t *testing.T) {
 			want:   true,
 		},
 		{
-			name:   "empty extra",
-			change: func(v *preview.PreviewValues) { v.Services[0].Metadata.Extra = map[string]string{} },
-			want:   true,
-		},
-		{
 			name:   "other service updated-at",
 			change: func(v *preview.PreviewValues) { v.Services[1].Metadata.UpdatedAt = "2026-05-26T11:00:00Z" },
 		},
@@ -199,9 +199,12 @@ func TestEqualExceptUpdatedAt(t *testing.T) {
 		{name: "pr author", change: func(v *preview.PreviewValues) { v.Services[0].Metadata.PRAuthor = "x" }},
 		{name: "head ref", change: func(v *preview.PreviewValues) { v.Services[0].Metadata.VCSRefName = "x" }},
 		{name: "created-at", change: func(v *preview.PreviewValues) { v.Services[0].Metadata.CreatedAt = "x" }},
+		{name: "api version", change: func(v *preview.PreviewValues) { v.APIVersion = "" }},
+		{name: "repo url", change: func(v *preview.PreviewValues) { v.Services[1].RepoURL = "https://example.com/x" }},
+		{name: "branch", change: func(v *preview.PreviewValues) { v.Services[0].Branch = "develop" }},
 		{
-			name:   "extra key",
-			change: func(v *preview.PreviewValues) { v.Services[0].Metadata.Extra = map[string]string{"k": "v"} },
+			name:   "pipeline run url",
+			change: func(v *preview.PreviewValues) { v.Services[0].Metadata.PipelineRunURL = "x" },
 		},
 		{name: "metadata removed", change: func(v *preview.PreviewValues) { v.Services[0].Metadata = nil }},
 		{
@@ -506,9 +509,12 @@ func TestUnpinPR_KeepsHost(t *testing.T) {
 }
 
 func TestApplyHosts_YAML(t *testing.T) {
-	in := preview.PreviewValues{Services: []preview.ServiceEntry{
-		{Name: "backend-1", CommitSha: "abc", Metadata: &preview.Metadata{PRAuthor: "octocat"}},
-		{Name: "backend-2"},
+	in := preview.PreviewValues{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{
+		{
+			Name: "backend-1", RepoURL: "https://github.com/acme/backend-1.git", Branch: "main",
+			CommitSha: "abc", Metadata: &preview.Metadata{PRAuthor: "octocat"},
+		},
+		{Name: "backend-2", RepoURL: "https://github.com/acme/backend-2.git", Branch: "develop"},
 	}}
 	vals := preview.ApplyHosts(in, "feature-pricing", hostURLs())
 
@@ -520,8 +526,11 @@ func TestApplyHosts_YAML(t *testing.T) {
 	}
 	_ = enc.Close()
 
-	want := "services:\n" +
+	want := "apiVersion: badil.dev/v1\n" +
+		"services:\n" +
 		"  - name: backend-1\n" +
+		"    repoURL: https://github.com/acme/backend-1.git\n" +
+		"    branch: main\n" +
 		"    commitSha: abc\n" +
 		"    host: backend-1-feature-pricing.127.0.0.1.nip.io\n" +
 		"    metadata:\n" +
@@ -532,8 +541,119 @@ func TestApplyHosts_YAML(t *testing.T) {
 		"      updated-at: \"\"\n" +
 		"      vcs.ref.name: \"\"\n" +
 		"      cicd.pipeline.run.url: \"\"\n" +
-		"  - name: backend-2\n"
+		"  - name: backend-2\n" +
+		"    repoURL: https://github.com/acme/backend-2.git\n" +
+		"    branch: develop\n"
 	if got := buf.String(); got != want {
 		t.Errorf("yaml mismatch\n got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// catalogRepos is a catalog's service repos for backend-1, backend-2 and front.
+func catalogRepos() map[string]string {
+	return map[string]string{
+		"backend-1": "https://github.com/acme/backend-1.git",
+		"backend-2": "https://github.com/acme/backend-2.git",
+		"front":     "https://github.com/acme/front",
+	}
+}
+
+func TestBuildPreviewValues_SetsAPIVersion(t *testing.T) {
+	in := sampleInputs()
+	vals := preview.BuildPreviewValues(in.ServiceName, in.CommitSha, []string{"backend-1"}, in)
+	if vals.APIVersion != preview.APIVersion {
+		t.Errorf("APIVersion = %q, want %q", vals.APIVersion, preview.APIVersion)
+	}
+}
+
+func TestUpdatePreviewValues_KeepsAPIVersion(t *testing.T) {
+	in := sampleInputs()
+	existing := preview.PreviewValues{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{
+		{Name: "backend-1", RepoURL: "https://github.com/acme/backend-1.git", Branch: "main"},
+	}}
+	for _, svc := range []string{"backend-1", "extra-svc"} {
+		got := preview.UpdatePreviewValues(existing, svc, in.CommitSha, in)
+		if got.APIVersion != preview.APIVersion {
+			t.Errorf("%s: APIVersion = %q, want %q", svc, got.APIVersion, preview.APIVersion)
+		}
+		if e := got.Services[0]; e.RepoURL != existing.Services[0].RepoURL || e.Branch != "main" {
+			t.Errorf("%s: Services[0] = %+v, want repoURL and branch kept", svc, e)
+		}
+	}
+}
+
+func TestUnpinPR_KeepsAPIVersionAndFacts(t *testing.T) {
+	const pr42 = "https://github.com/acme/backend-1/pull/42"
+	b1 := pinned("backend-1", "a", pr42)
+	b1.RepoURL, b1.Branch = "https://github.com/acme/backend-1.git", "main"
+	b2 := pinned("backend-2", "b", "https://github.com/acme/backend-2/pull/7")
+	b2.RepoURL, b2.Branch = "https://github.com/acme/backend-2.git", "develop"
+	in := preview.PreviewValues{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{b1, b2}}
+
+	got, removed, stillPinned := preview.UnpinPR(in, "acme", "backend-1", 42)
+
+	if !slices.Equal(removed, []string{"backend-1"}) || !stillPinned {
+		t.Fatalf("removed = %v, pinned = %v, want [backend-1], true", removed, stillPinned)
+	}
+	if got.APIVersion != preview.APIVersion {
+		t.Errorf("APIVersion = %q, want %q", got.APIVersion, preview.APIVersion)
+	}
+	want := preview.ServiceEntry{Name: "backend-1", RepoURL: b1.RepoURL, Branch: "main"}
+	if !reflect.DeepEqual(got.Services[0], want) {
+		t.Errorf("Services[0] = %+v, want %+v", got.Services[0], want)
+	}
+	if got.Services[1].RepoURL != b2.RepoURL || got.Services[1].Branch != "develop" ||
+		got.Services[1].CommitSha != "b" {
+		t.Errorf("Services[1] = %+v, want kept", got.Services[1])
+	}
+}
+
+func TestApplyHosts_KeepsAPIVersion(t *testing.T) {
+	in := preview.PreviewValues{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{{Name: "front"}}}
+	got := preview.ApplyHosts(in, "feature-pricing", hostURLs())
+	if got.APIVersion != preview.APIVersion {
+		t.Errorf("APIVersion = %q, want %q", got.APIVersion, preview.APIVersion)
+	}
+}
+
+func TestApplyCatalog(t *testing.T) {
+	md := &preview.Metadata{PRURL: "https://github.com/acme/backend-1/pull/42"}
+	in := preview.PreviewValues{Services: []preview.ServiceEntry{
+		{Name: "gone-pinned", CommitSha: "x", Metadata: md},
+		{Name: "front", RepoURL: "https://stale.example.com/front", Branch: "stale", Host: "front.example.com"},
+		{Name: "gone"},
+		{Name: "backend-1", CommitSha: "abc", Metadata: md},
+		{Name: "backend-2", Branch: "old"},
+	}}
+
+	got := preview.ApplyCatalog(in, catalogRepos(), map[string]string{"backend-2": "develop"})
+
+	if got.APIVersion != preview.APIVersion {
+		t.Errorf("APIVersion = %q, want %q", got.APIVersion, preview.APIVersion)
+	}
+	want := []preview.ServiceEntry{
+		{
+			Name: "front", RepoURL: "https://github.com/acme/front", Branch: "main",
+			Host: "front.example.com",
+		},
+		{
+			Name: "backend-1", RepoURL: "https://github.com/acme/backend-1.git", Branch: "main",
+			CommitSha: "abc", Metadata: md,
+		},
+		{Name: "backend-2", RepoURL: "https://github.com/acme/backend-2.git", Branch: "develop"},
+	}
+	if !reflect.DeepEqual(got.Services, want) {
+		t.Errorf("Services = %+v, want %+v", got.Services, want)
+	}
+	if in.APIVersion != "" || len(in.Services) != 5 || in.Services[1].RepoURL != "https://stale.example.com/front" {
+		t.Errorf("input mutated: %+v", in)
+	}
+}
+
+func TestApplyCatalog_KeepsAPIVersion(t *testing.T) {
+	in := preview.PreviewValues{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{{Name: "front"}}}
+	got := preview.ApplyCatalog(in, catalogRepos(), nil)
+	if got.APIVersion != preview.APIVersion {
+		t.Errorf("APIVersion = %q, want %q", got.APIVersion, preview.APIVersion)
 	}
 }

@@ -8,17 +8,17 @@ import (
 )
 
 // fakeGitops captures calls and returns canned responses. Each field controls
-// one of the methods on gitopsAPI. When servicesYAML is set, the catalog is
+// one of the methods on gitopsAPI. When badilYAML is set, the catalog is
 // parsed from it instead of being taken from catalog. When started is non-nil,
 // FetchServiceCatalog sends "catalog" and TeardownPreviewWithRetry sends
 // "teardown" on entry; the test buffers the channel.
 type fakeGitops struct {
-	catalog      []string
-	servicesYAML string
-	catalogErr   error
-	writeResult  *gitops.WriteResult
-	writeErr     error
-	fanOutErr    error
+	catalog     []string
+	badilYAML   string
+	catalogErr  error
+	writeResult *gitops.WriteResult
+	writeErr    error
+	fanOutErr   error
 
 	// teardownResult nil means TeardownPreviewWithRetry returns an empty
 	// result. A non-nil teardownGate blocks the call until it is closed.
@@ -71,8 +71,8 @@ func (f *fakeGitops) FetchServiceCatalog(_ context.Context) (*gitops.ServiceCata
 	if f.catalogErr != nil {
 		return nil, f.catalogErr
 	}
-	if f.servicesYAML != "" {
-		return gitops.ParseServices([]byte(f.servicesYAML))
+	if f.badilYAML != "" {
+		return gitops.ParseCatalog([]byte(f.badilYAML))
 	}
 	return &gitops.ServiceCatalog{Services: f.catalog}, nil
 }
@@ -80,8 +80,7 @@ func (f *fakeGitops) FetchServiceCatalog(_ context.Context) (*gitops.ServiceCata
 func (f *fakeGitops) WritePreviewWithRetry(
 	_ context.Context,
 	slug string,
-	catalog []string,
-	urls preview.URLConfig,
+	catalog *gitops.ServiceCatalog,
 	serviceName, _ string,
 	inputs preview.DeployInputs,
 	_, _ string,
@@ -89,15 +88,15 @@ func (f *fakeGitops) WritePreviewWithRetry(
 ) (*gitops.WriteResult, error) {
 	f.capturedSkipUnchanged = append(f.capturedSkipUnchanged, skipUnchanged)
 	f.capturedSlug = slug
-	f.capturedCatalog = catalog
-	f.capturedURLs = urls
+	f.capturedCatalog = catalog.Services
+	f.capturedURLs = catalog.URLs
 	f.capturedService = serviceName
 	f.capturedInputs = inputs
 	if f.writeResult == nil {
 		return nil, f.writeErr
 	}
 	result := *f.writeResult
-	result.Values = preview.ApplyHosts(f.writeResult.Values, slug, urls)
+	result.Values = preview.ApplyHosts(f.writeResult.Values, slug, catalog.URLs)
 	return &result, f.writeErr
 }
 

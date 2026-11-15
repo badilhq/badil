@@ -12,9 +12,9 @@ From an empty cluster to a first preview. Contract details live in [ARCHITECTURE
 
 ## 2. Gitops repo
 
-- Commit a `services.yaml` at the root, starting from [`examples/argocd/services.yaml`](../examples/argocd/services.yaml). `serviceRepos` is required; `preview`, `serviceCharts` and `previewNamespace` are optional.
-- `previewNamespace` (optional, `preview-env` 0.8.0 or later) adds labels and annotations to every preview Namespace, for example a Pod Security level (`pod-security.kubernetes.io/enforce: baseline`) or cost-allocation labels. Values must be strings; a key the chart already sets fails the render.
-- `serviceRepos` URLs must be `https://github.com/<owner>/<repo>` (with or without `.git`), or the label flow never matches them.
+- Commit at the root a `badil.yaml`, starting from [`examples/argocd/badil.yaml`](../examples/argocd/badil.yaml) (`services` required, `preview` optional), and a `preview-env.yaml`, starting from [`examples/argocd/preview-env.yaml`](../examples/argocd/preview-env.yaml) (`serviceCharts` and `previewNamespace` optional; the file may be `{}`).
+- `previewNamespace` (optional, in `preview-env.yaml`) adds labels and annotations to every preview Namespace, for example a Pod Security level (`pod-security.kubernetes.io/enforce: baseline`) or cost-allocation labels. Values must be strings; a key the chart already sets fails the render.
+- Each `services.<name>.repo` URL in `badil.yaml` must be `https://github.com/<owner>/<repo>` (with or without `.git`), or the label flow never matches it.
 - Contract: ARCHITECTURE [Gitops repo contract](ARCHITECTURE.md#gitops-repo-contract).
 - badil creates `previews/` itself; a missing directory reads as no previews.
 - badil commits straight to the default branch. Its protection must let the App push directly: no required pull request, or the App on the bypass list.
@@ -235,7 +235,7 @@ badil sets no quota or network policy on previews. To cap each preview's resourc
 
 - Create the `preview` label (or your custom `preview.label`) in each service repo, e.g. `gh label create preview --repo <owner>/<repo>`. Create any `preview:<name>` label yourself in each repo too: badil never creates labels.
 - CI must push the image tagged with the full commit SHA: ARCHITECTURE [Pinned and branch-tracking services](ARCHITECTURE.md#pinned-and-branch-tracking-services).
-- Chart contract and `serviceCharts` overrides: ARCHITECTURE [Service repo contract](ARCHITECTURE.md#service-repo-contract).
+- Chart contract and `serviceCharts` overrides (in `preview-env.yaml`): ARCHITECTURE [Service repo contract](ARCHITECTURE.md#service-repo-contract).
 
 ## 8. First preview
 
@@ -249,17 +249,20 @@ badil sets no quota or network policy on previews. To cap each preview's resourc
 
 ## 9. Preview URLs (optional)
 
-Set `preview.domain` in `services.yaml`, create a wildcard DNS record `*.<domain>` pointing to the ingress controller, and list the services under `expose`. Details: ARCHITECTURE [Per-preview URLs](ARCHITECTURE.md#per-preview-urls).
+Set `preview.domain` in `badil.yaml`, create a wildcard DNS record `*.<domain>` pointing to the ingress controller, and list the services under `expose`. Details: ARCHITECTURE [Per-preview URLs](ARCHITECTURE.md#per-preview-urls).
 
 ## 10. Upgrade
 
-1. Upgrade badil first, with the values of the installed release:
+1. When the gitops repo still has `services.yaml`: commit `badil.yaml` and `preview-env.yaml` at its root before upgrading badil (which fails every deploy and reconcile without `badil.yaml`), and keep `services.yaml` until step 5: the running badil and the deployed ApplicationSet still read it. Each `serviceRepos.<name>` URL becomes `services.<name>.repo`, each `serviceCharts.<name>.branch` becomes `services.<name>.branch`, and the `preview` block moves as is to `badil.yaml`; `serviceCharts` (without `branch`) and `previewNamespace` go to `preview-env.yaml`, `{}` when neither is set. See ARCHITECTURE [Gitops repo contract](ARCHITECTURE.md#gitops-repo-contract).
+2. Upgrade badil, with the values of the installed release:
 
    ```bash
    helm get values badil -n badil -o yaml > badil-values.yaml
    helm upgrade badil oci://ghcr.io/badilhq/charts/badil -n badil --version X.Y.Z -f badil-values.yaml
    ```
-2. Then set the ApplicationSet's `preview-env` `targetRevision` to the one in the new tag's [`examples/argocd/applicationset-previews.yaml`](../examples/argocd/applicationset-previews.yaml), and re-apply it.
+3. When upgrading to `preview-env` 0.9.0 from an earlier version: rewrite every live preview before the next step, by pushing to its PR or removing and re-adding its label. `preview-env` 0.9.0 refuses preview files without `apiVersion: badil.dev/v1`, which only the new badil writes; the cleanup sweep deletes previews no PR pins any more.
+4. Bump the chart: set the ApplicationSet's `preview-env` `targetRevision` and its `valueFiles` (`$values/preview-env.yaml`, then the preview file) to the ones in the new tag's [`examples/argocd/applicationset-previews.yaml`](../examples/argocd/applicationset-previews.yaml), and re-apply it.
+5. When step 1 applied: delete `services.yaml` from the gitops repo once the ApplicationSet is re-applied.
 
 ## 11. Troubleshooting
 
@@ -269,8 +272,8 @@ Set `preview.domain` in `services.yaml`, create a wildcard DNS record `*.<domain
 | Deliveries return 401 `invalid signature` | `github-webhook-secret` differs from the App's webhook secret | Make the Secret key and the App's webhook secret match, then restart badil |
 | Deliveries return 403 `installation not allowed` | `config.githubInstallationId` is wrong, or the repo is under another account | Set the ID listed by `badil verify-app`; install the App on repos of that account only |
 | Deliveries time out or fail to connect | The ingress or DNS is unreachable from GitHub | Expose the host publicly over https and check `/healthz` from outside |
-| `preview reconcile failed … services.yaml: …` in `kubectl logs -n badil deploy/badil` | `services.yaml` is malformed; the error names the key | Fix that key in `services.yaml` |
-| `preview reconcile skipped … reason="repo not in catalog"` | The `serviceRepos` URL isn't `https://github.com/<owner>/<repo>[.git]` | Fix the URL in `services.yaml` |
+| `preview reconcile failed … badil.yaml: …` in `kubectl logs -n badil deploy/badil` | `badil.yaml` is malformed; the error names the key | Fix that key in `badil.yaml` |
+| `preview reconcile skipped … reason="repo not in catalog"` | The `services.<name>.repo` URL isn't `https://github.com/<owner>/<repo>[.git]` | Fix the URL in `badil.yaml` |
 | `preview reconcile skipped … reason="fork pr"` | The PR comes from a fork | Expected: fork PRs never get a preview |
 | No comment after labeling | The App isn't installed on that repo, or the label differs from `preview.label` | Install the App on the repo, or use the configured label |
 | Pods in `ImagePullBackOff` | The image isn't pushed yet, or the namespace can't pull from the registry | If CI is still pushing, wait; otherwise check registry access (prerequisites) |

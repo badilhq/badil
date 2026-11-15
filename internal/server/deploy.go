@@ -28,8 +28,7 @@ type gitopsAPI interface {
 	WritePreviewWithRetry(
 		ctx context.Context,
 		slug string,
-		catalog []string,
-		urls preview.URLConfig,
+		catalog *gitops.ServiceCatalog,
 		serviceName, commitSha string,
 		inputs preview.DeployInputs,
 		createMessage, updateMessage string,
