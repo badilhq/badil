@@ -259,7 +259,7 @@ Set `preview.domain` in `badil.yaml`, create a wildcard DNS record `*.<domain>` 
    helm get values badil -n badil -o yaml > badil-values.yaml
    helm upgrade badil oci://ghcr.io/badilhq/charts/badil -n badil --version X.Y.Z -f badil-values.yaml
    ```
-3. When upgrading to `preview-env` 0.9.0 from an earlier version: before the next step, wait for one sweep (at most `cleanup.interval`, `1h` by default): the sync rewrites every pre-v1 file that has a pin, and the sweep deletes the others. `preview-env` 0.9.0 refuses preview files without `apiVersion: badil.dev/v1`, which only the new badil writes.
+3. When upgrading to `preview-env` 0.9.0 from an earlier version: before the next step, wait for one sweep (at most `cleanup.interval`, `1h` by default, or one CronJob `schedule` run with `cleanup.enabled=true`; with `cleanup.interval` empty and the CronJob off, no sweep runs and nothing is rewritten): the sync rewrites every pre-v1 file that has a pin, and the sweep deletes the others. `preview-env` 0.9.0 refuses preview files without `apiVersion: badil.dev/v1`, which only the new badil writes.
 4. Bump the chart: set the ApplicationSet's `preview-env` `targetRevision` and its `valueFiles` (`$values/preview-env.yaml`, then the preview file) to the ones in the new tag's [`examples/argocd/applicationset-previews.yaml`](../examples/argocd/applicationset-previews.yaml), and re-apply it.
 5. When step 1 applied: delete `services.yaml` from the gitops repo once the ApplicationSet is re-applied.
 
