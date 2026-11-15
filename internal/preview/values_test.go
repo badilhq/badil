@@ -568,7 +568,7 @@ func TestApplyHosts_YAML(t *testing.T) {
 	}
 	_ = enc.Close()
 
-	want := "apiVersion: badil.dev/v1\n" +
+	want := "apiVersion: badil.dev/v1beta1\n" +
 		"services:\n" +
 		"  - name: backend-1\n" +
 		"    repoURL: https://github.com/acme/backend-1.git\n" +

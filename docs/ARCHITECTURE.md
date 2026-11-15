@@ -34,7 +34,7 @@ Self-hosted, single-tenant. Everything runs in the user's cluster; badil talks t
 ```
 badil.yaml                       # read by badil only: services { <service>: { repo, branch } }, optional preview block
 preview-env.yaml                 # read by preview-env only (an ApplicationSet value file): optional serviceCharts and previewNamespace
-previews/<slug>/values.yaml      # written by badil, read by preview-env: apiVersion badil.dev/v1, self-contained per service
+previews/<slug>/values.yaml      # written by badil, read by preview-env: apiVersion badil.dev/v1beta1, self-contained per service
 ```
 
 Each file has one reader: badil never parses chart settings, and the chart never sees badil's settings. Both live at the repo root, at fixed paths. [CONTRACT](CONTRACT.md) publishes `previews/<slug>/values.yaml` for any renderer: its schema, lifecycle, conformance fixtures and a renderer's obligations.
@@ -86,7 +86,7 @@ The ApplicationSet passes `preview-env.yaml`, then the preview file, as value fi
 
 ```yaml
 # previews/feature-pricing/values.yaml
-apiVersion: badil.dev/v1        # required, always badil.dev/v1
+apiVersion: badil.dev/v1beta1   # required, always badil.dev/v1beta1
 services:                       # required: at most one entry per catalog service (see CONTRACT.md for order)
   - name: backend-1             # required
     repoURL: https://github.com/acme/backend-1.git   # required: services.<service>.repo of badil.yaml, as written
@@ -106,19 +106,24 @@ services:                       # required: at most one entry per catalog servic
     branch: main
 ```
 
-The file is self-contained: a renderer needs only it to know each service's repo, revision and image tag. Contract v1:
+The file is self-contained: a renderer needs only it to know each service's repo, revision and image tag. Contract v1beta1:
 
-- **Strict.** Every object is closed: an unknown field at any level of an entry or of `metadata` is rejected. `apiVersion` must be `badil.dev/v1`. Every field has the type shown; a null value is rejected, as is a pinned entry without `metadata` or `metadata` without `commitSha`.
+- **Strict.** Every object is closed: an unknown field at any level of an entry or of `metadata` is rejected. `apiVersion` must be `badil.dev/v1beta1`. Every field has the type shown; a null value is rejected, as is a pinned entry without `metadata` or `metadata` without `commitSha`.
 - **Written on every deploy and sweep.** Each deploy write, and the cleanup sweep's sync (step 4 of [Cleanup sweep](#cleanup-sweep)), project the file on the catalog as it is then: `apiVersion`, every service of `services` in catalog order with its `repoURL`, `branch` and `host` (a missing one added as a branch-tracking entry), then the pinned entries of services no longer in `services` that have a `repoURL`, unchanged except `host`, recomputed from `preview.expose`. A `badil.yaml` change is written on the next deploy, even for an unchanged SHA, and in every preview by the next sweep. See [Pinned and branch-tracking services](#pinned-and-branch-tracking-services) for removed services. Teardowns (unpin, sweep) only clear `commitSha` and `metadata` and keep the rest as written.
 - **Validated by the chart.** `preview-env` ships `values.schema.json`, generated from badil's Go types (`make schema`), and Helm validates the merged values (`preview-env.yaml`, the preview file and `argocdNamespace`) against it on every render; a violation fails the render with the field's JSON pointer, for example `at '': missing property 'apiVersion'`. CI fails when the schema is out of date. The root of the merged values is closed: a key other than `apiVersion`, `services`, `serviceCharts`, `previewNamespace` and `argocdNamespace` fails the render.
 
-Upgrade (badil and `preview-env` 0.9.0), from a gitops repo with `services.yaml`; a new badil fails every deploy and reconcile without `badil.yaml`, and `preview-env` 0.9.0 rejects `serviceRepos`, `preview` and `serviceCharts.<service>.branch` in its values:
+Upgrade (badil and `preview-env` 0.10.0); steps 1 and 5 apply only when the gitops repo still has `services.yaml`, since a new badil fails every deploy and reconcile without `badil.yaml` and `preview-env` from 0.9.0 rejects `serviceRepos`, `preview` and `serviceCharts.<service>.branch`:
 
-1. Commit `badil.yaml` and `preview-env.yaml` at the root of the gitops repo, and keep `services.yaml`, which the running badil and the deployed ApplicationSet still read: each `serviceRepos.<service>` URL becomes `services.<service>.repo`, each `serviceCharts.<service>.branch` becomes `services.<service>.branch`, and the `preview` block moves as is to `badil.yaml`; `serviceCharts` (without `branch`) and `previewNamespace` move to `preview-env.yaml` (`{}` when neither is set).
+1. When the gitops repo still has `services.yaml`: commit `badil.yaml` and `preview-env.yaml` at the root of the gitops repo, and keep `services.yaml`, which the running badil and the deployed ApplicationSet still read: each `serviceRepos.<service>` URL becomes `services.<service>.repo`, each `serviceCharts.<service>.branch` becomes `services.<service>.branch`, and the `preview` block moves as is to `badil.yaml`; `serviceCharts` (without `branch`) and `previewNamespace` move to `preview-env.yaml` (`{}` when neither is set).
 2. Upgrade badil.
-3. Wait for one sweep (at most `cleanup.interval`, `1h` by default, or one CronJob `schedule` run with `cleanup.enabled=true`; with `cleanup.interval` empty and the CronJob off, no sweep runs and nothing is rewritten): the sync rewrites every pre-v1 file that has a pin (the sweep deletes the others). A preview file written by an older badil has no `apiVersion`, so `preview-env` 0.9.0 refuses to render it, and shows `missing property 'apiVersion'` in Argo CD until it is rewritten.
-4. Bump the chart: set the ApplicationSet's `targetRevision` to 0.9.0 and its first value file to `$values/preview-env.yaml`, as in [`examples/argocd/applicationset-previews.yaml`](../examples/argocd/applicationset-previews.yaml), and re-apply it (`kubectl apply -f applicationset-previews.yaml`): Argo CD does not manage the ApplicationSet.
-5. Delete `services.yaml` from the gitops repo: nothing reads it any more.
+3. Right after, bump the chart: set the ApplicationSet's `targetRevision` to 0.10.0 and its first value file to `$values/preview-env.yaml`, as in [`examples/argocd/applicationset-previews.yaml`](../examples/argocd/applicationset-previews.yaml), and re-apply it (`kubectl apply -f applicationset-previews.yaml`): Argo CD does not manage the ApplicationSet.
+4. Wait for one sweep (at most `cleanup.interval`, `1h` by default, or one CronJob `schedule` run with `cleanup.enabled=true`; with `cleanup.interval` empty and the CronJob off, no sweep runs and nothing is rewritten): the sync rewrites every file that has a pin to `badil.dev/v1beta1` (files with `badil.dev/v1` or with no `apiVersion`), and the sweep deletes the others.
+5. When step 1 applied, delete `services.yaml` from the gitops repo: nothing reads it any more.
+
+Between step 2 and the sweep, Argo CD shows a render error on the Application of each preview whose file the deployed `preview-env` refuses:
+
+- From step 2 until step 3, `preview-env` 0.9.0 refuses the files badil has rewritten: `at '/apiVersion': value must be 'badil.dev/v1'`.
+- From step 3 until the sweep, `preview-env` 0.10.0 refuses the files not yet rewritten: `at '/apiVersion': value must be 'badil.dev/v1beta1'` (a `badil.dev/v1` file) or `missing property 'apiVersion'` (a file written before 0.18.0).
 
 ## Per-preview URLs
 

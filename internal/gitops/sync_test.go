@@ -57,9 +57,15 @@ func TestSyncPreviewWithRetry(t *testing.T) {
 			wantWritten: []string{"    repoURL: https://github.com/acme/backend-2.git\n"},
 		},
 		{
-			name: "file without apiVersion", files: []string{pinnedFile("apiVersion: badil.dev/v1\n", "")},
+			name: "file without apiVersion", files: []string{pinnedFile("apiVersion: badil.dev/v1beta1\n", "")},
 			wantChanged: true, wantGets: 1, wantPuts: 1,
-			wantWritten: []string{"apiVersion: badil.dev/v1\nservices:\n"},
+			wantWritten: []string{"apiVersion: badil.dev/v1beta1\nservices:\n"},
+		},
+		{
+			name:        "badil.dev/v1 file",
+			files:       []string{pinnedFile("apiVersion: badil.dev/v1beta1\n", "apiVersion: badil.dev/v1\n")},
+			wantChanged: true, wantGets: 1, wantPuts: 1,
+			wantWritten: []string{"apiVersion: badil.dev/v1beta1\nservices:\n"},
 		},
 		{
 			name:      "changed after a 409 re-fetch",
@@ -123,7 +129,7 @@ func assertSyncWrite(t *testing.T, s *writeServer, result *gitops.SyncResult, wa
 		t.Errorf("commit message = %q, want %q", got, wantMessage)
 	}
 	written, _ := s.written.Load().(string)
-	if !strings.HasPrefix(written, "apiVersion: badil.dev/v1\n") {
+	if !strings.HasPrefix(written, "apiVersion: badil.dev/v1beta1\n") {
 		t.Errorf("written content has no apiVersion:\n%s", written)
 	}
 	for _, part := range want {

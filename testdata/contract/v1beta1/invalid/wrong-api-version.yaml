@@ -1,5 +1,5 @@
-# want: at '/apiVersion': value must be 'badil.dev/v1'
-apiVersion: badil.dev/v2
+# want: at '/apiVersion': value must be 'badil.dev/v1beta1'
+apiVersion: badil.dev/v1
 services:
   - name: api
     repoURL: https://github.com/acme/platform.git

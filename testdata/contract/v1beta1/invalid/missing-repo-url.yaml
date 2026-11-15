@@ -1,5 +1,5 @@
 # want: at '/services/0': missing property 'repoURL'
-apiVersion: badil.dev/v1
+apiVersion: badil.dev/v1beta1
 services:
   - name: api
     branch: main

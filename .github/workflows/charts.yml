@@ -91,7 +91,7 @@ jobs:
       - name: Render preview-env with YAML 1.1 ambiguous metadata
         run: |
           out=$(helm template preview-x charts/preview-env -f - <<'EOF'
-          apiVersion: badil.dev/v1
+          apiVersion: badil.dev/v1beta1
           services:
             - name: backend-1
               repoURL: https://github.com/acme/backend-1.git
@@ -121,7 +121,7 @@ jobs:
       - name: Render preview-env with badil-written hosts
         run: |
           out=$(helm template feature-pricing charts/preview-env -f - <<'EOF'
-          apiVersion: badil.dev/v1
+          apiVersion: badil.dev/v1beta1
           services:
             - name: backend-1
               repoURL: https://github.com/acme/backend-1.git
@@ -168,7 +168,7 @@ jobs:
       - name: Render preview-env with serviceCharts overrides
         run: |
           out=$(helm template preview-x charts/preview-env -f - <<'EOF'
-          apiVersion: badil.dev/v1
+          apiVersion: badil.dev/v1beta1
           services:
             - name: api
               repoURL: https://github.com/acme/api.git
@@ -482,12 +482,12 @@ jobs:
               repoURL: https://github.com/acme/backend-1.git
               branch: main
           EOF
-          fails "at '/apiVersion': value must be 'badil.dev/v1'" <<'EOF'
+          fails "at '/apiVersion': value must be 'badil.dev/v1beta1'" <<'EOF'
           apiVersion: badil.dev/v2
           services: []
           EOF
           fails "at '/services/0': additional properties 'image' not allowed" <<'EOF'
-          apiVersion: badil.dev/v1
+          apiVersion: badil.dev/v1beta1
           services:
             - name: backend-1
               repoURL: https://github.com/acme/backend-1.git
@@ -495,13 +495,13 @@ jobs:
               image: x
           EOF
           fails "at '/services/0': missing property 'repoURL'" <<'EOF'
-          apiVersion: badil.dev/v1
+          apiVersion: badil.dev/v1beta1
           services:
             - name: backend-1
               branch: main
           EOF
           fails "at '/services/0': properties 'metadata' required, if 'commitSha' exists" <<'EOF'
-          apiVersion: badil.dev/v1
+          apiVersion: badil.dev/v1beta1
           services:
             - name: backend-1
               repoURL: https://github.com/acme/backend-1.git
@@ -511,10 +511,10 @@ jobs:
 
       - name: Render the valid contract fixtures to their goldens
         run: |
-          for f in testdata/contract/v1/valid/*.yaml; do
+          for f in testdata/contract/v1beta1/valid/*.yaml; do
             n=$(basename "$f" .yaml)
-            golden="testdata/contract/v1/preview-env/$n.golden.yaml"
-            if ! out=$(helm template "$n" charts/preview-env -f testdata/contract/v1/preview-env.yaml -f "$f"); then
+            golden="testdata/contract/v1beta1/preview-env/$n.golden.yaml"
+            if ! out=$(helm template "$n" charts/preview-env -f testdata/contract/v1beta1/preview-env.yaml -f "$f"); then
               echo "::error::preview-env failed to render $f"
               exit 1
             fi
@@ -526,13 +526,13 @@ jobs:
 
       - name: Render the invalid contract fixtures fails
         run: |
-          for f in testdata/contract/v1/invalid/*.yaml; do
+          for f in testdata/contract/v1beta1/invalid/*.yaml; do
             want=$(sed -n 's/^# want: //p' "$f")
             if [ -z "$want" ]; then
               echo "::error::$f has no '# want: ' line"
               exit 1
             fi
-            if out=$(helm template "$(basename "$f" .yaml)" charts/preview-env -f testdata/contract/v1/preview-env.yaml -f "$f" 2>&1); then
+            if out=$(helm template "$(basename "$f" .yaml)" charts/preview-env -f testdata/contract/v1beta1/preview-env.yaml -f "$f" 2>&1); then
               echo "::error::expected render of $f to fail"
               exit 1
             fi

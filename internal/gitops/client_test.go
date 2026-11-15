@@ -367,7 +367,7 @@ func TestWritePreviewWithRetry_ConflictThenSuccess(t *testing.T) {
 	// write must carry the catalog's facts.
 	written, _ := capturedBody.Load().(string)
 	for _, expect := range []string{
-		"apiVersion: badil.dev/v1\nservices:\n",
+		"apiVersion: badil.dev/v1beta1\nservices:\n",
 		"  - name: backend-1\n    repoURL: https://github.com/acme/backend-1.git\n    branch: main\n",
 		"  - name: backend-2\n    repoURL: https://github.com/acme/backend-2.git\n    branch: develop\n",
 	} {
@@ -462,7 +462,7 @@ func TestWritePreviewWithRetry_FreshCreateUsesCatalog(t *testing.T) {
 	}
 	written, _ := capturedBody.Load().(string)
 	for _, expect := range []string{
-		"apiVersion: badil.dev/v1\nservices:\n",
+		"apiVersion: badil.dev/v1beta1\nservices:\n",
 		"  - name: backend-1\n    repoURL: https://github.com/acme/backend-1.git\n    branch: main\n",
 		"  - name: backend-2\n    repoURL: https://github.com/acme/backend-2.git\n    branch: develop\n",
 		"  - name: front\n    repoURL: https://github.com/acme/front\n    branch: main\n",
@@ -537,7 +537,7 @@ func TestFanOutPRComments_UpdateAndCreate(t *testing.T) {
 // hostURLs writes it, except updated-at, which is older. Its replacer
 // arguments are applied to it.
 func pinnedFile(replace ...string) string {
-	const file = `apiVersion: badil.dev/v1
+	const file = `apiVersion: badil.dev/v1beta1
 services:
   - name: backend-1
     repoURL: https://github.com/acme/backend-1.git
@@ -669,7 +669,7 @@ func TestWritePreviewWithRetry_SkipUnchanged(t *testing.T) {
 		{
 			name: "file without apiVersion",
 			files: []string{
-				pinnedFile("apiVersion: badil.dev/v1\n", ""),
+				pinnedFile("apiVersion: badil.dev/v1beta1\n", ""),
 			},
 			skipUnchanged: true,
 			wantGets:      1,
@@ -822,7 +822,7 @@ func TestWritePreviewWithRetry_FollowsCatalog(t *testing.T) {
 	if result.Unchanged {
 		t.Fatal("Unchanged = true, want a write")
 	}
-	want := "apiVersion: badil.dev/v1\n" +
+	want := "apiVersion: badil.dev/v1beta1\n" +
 		"services:\n" +
 		"  - name: backend-1\n" +
 		"    repoURL: https://github.com/acme/backend-1.git\n" +

@@ -3,7 +3,7 @@
 // preview values contract, generated from internal/preview.PreviewValues.
 package main
 
-//go:generate go run . -out ../../charts/preview-env/values.schema.json -contract-out ../../schema/preview.v1.schema.json
+//go:generate go run . -out ../../charts/preview-env/values.schema.json -contract-out ../../schema/preview.v1beta1.schema.json
 
 import (
 	"encoding/json"
@@ -19,7 +19,11 @@ import (
 
 func main() {
 	out := flag.String("out", "values.schema.json", "file to write the chart values schema to")
-	contractOut := flag.String("contract-out", "preview.v1.schema.json", "file to write the preview contract schema to")
+	contractOut := flag.String(
+		"contract-out",
+		"preview.v1beta1.schema.json",
+		"file to write the preview contract schema to",
+	)
 	flag.Parse()
 	if err := run(*out, *contractOut); err != nil {
 		fmt.Fprintln(os.Stderr, "schemagen:", err)

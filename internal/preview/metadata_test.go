@@ -13,7 +13,7 @@ import (
 
 // singleQuotedValues is a values file whose metadata is single-quoted, as a
 // hand edit or another YAML writer may leave it, so it must still decode.
-const singleQuotedValues = `apiVersion: badil.dev/v1
+const singleQuotedValues = `apiVersion: badil.dev/v1beta1
 services:
   - name: backend-1
     repoURL: https://github.com/acme/backend-1.git

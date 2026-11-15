@@ -1,6 +1,12 @@
 # Preview contract
 
-badil and the renderer of a preview never talk to each other: badil writes one file per preview into the gitops repo, and a renderer turns it into running workloads. This page is that file's contract, `badil.dev/v1`, and what a renderer must do with it. [`preview-env`](../charts/preview-env), driven by the example [ApplicationSet](../examples/argocd/applicationset-previews.yaml), is the renderer badil ships; any other renderer that follows this page works with badil unchanged.
+badil and the renderer of a preview never talk to each other: badil writes one file per preview into the gitops repo, and a renderer turns it into running workloads. This page is that file's contract, `badil.dev/v1beta1`, and what a renderer must do with it. [`preview-env`](../charts/preview-env), driven by the example [ApplicationSet](../examples/argocd/applicationset-previews.yaml), is the renderer badil ships; any other renderer that follows this page works with badil unchanged.
+
+## Versioning
+
+`v1beta1` is a beta: a later version (`v1beta2`, or `v1`) may change the file incompatibly. Each such change ships with a `preview-env` version that accepts only the new `apiVersion`, and badil's cleanup sweep rewrites every preview file that has a pin to it within one sweep after badil is upgraded (the same sweep deletes files without a pin). A renderer refuses an `apiVersion` it does not support.
+
+To upgrade to `badil.dev/v1beta1`, upgrade badil and bump the ApplicationSet to `preview-env` 0.10.0 together, then wait one sweep, which rewrites every `badil.dev/v1` file that has a pin to `badil.dev/v1beta1`. Until a file is rewritten, `preview-env` refuses it and Argo CD shows the render error. The steps are in [INSTALL §10](INSTALL.md#10-upgrade) and the error strings in the upgrade block of [ARCHITECTURE](ARCHITECTURE.md#gitops-repo-contract).
 
 ## Files
 
@@ -22,10 +28,10 @@ A renderer needs only `previews/<slug>/values.yaml`: it carries each service's r
 
 The slug is the slugified head branch, or the name of a `<label>:<name>` label: lowercase `a-z` and `0-9`, every other run of characters replaced by one `-`, no leading or trailing `-`. A slug is a DNS label of at most 53 characters (Helm's release-name limit): a longer one is cut and suffixed with `-` and 6 hex characters of a hash of the full slug.
 
-## v1 file
+## v1beta1 file
 
 ```yaml
-apiVersion: badil.dev/v1
+apiVersion: badil.dev/v1beta1
 services:
   - name: api
     repoURL: https://github.com/acme/platform.git
@@ -47,7 +53,7 @@ services:
 
 | Field | Type | Present | Meaning |
 |---|---|---|---|
-| `apiVersion` | string | always | `badil.dev/v1` |
+| `apiVersion` | string | always | `badil.dev/v1beta1` |
 | `services` | list | always | every service of `badil.yaml`, in catalog order, then the pinned entries of services removed from it, in file order, as of the file's last write. A file written before a catalog change keeps its old entries until the next write (deploy or sweep) |
 | `services[].name` | string | always | the service name, the key of `services` in `badil.yaml`; a kept pinned entry of a removed service keeps its last name |
 | `services[].repoURL` | string | always | the service's git URL, `services.<name>.repo` of `badil.yaml` as written; a kept pinned entry of a removed service keeps its last `repoURL` |
@@ -63,13 +69,13 @@ services:
 | `metadata.vcs.ref.name` | string | | head branch of the PR |
 | `metadata.cicd.pipeline.run.url` | string | | CI run that called `/v1/deploy`; `""` for label deploys |
 
-The contract is strict: `apiVersion` must be `badil.dev/v1`, every object is closed (an unknown field at any level is invalid), every field has the type shown, a null value is invalid, and an entry with `commitSha` but no `metadata`, or `metadata` but no `commitSha`, is invalid. Every string badil writes reads back as a string under YAML 1.1: values such as `"42"` or `"on"` are quoted.
+The contract is strict: `apiVersion` must be `badil.dev/v1beta1`, every object is closed (an unknown field at any level is invalid), every field has the type shown, a null value is invalid, and an entry with `commitSha` but no `metadata`, or `metadata` but no `commitSha`, is invalid. Every string badil writes reads back as a string under YAML 1.1: values such as `"42"` or `"on"` are quoted.
 
-The JSON Schema of the contract is [`schema/preview.v1.schema.json`](../schema/preview.v1.schema.json) (draft 2020-12), generated from badil's Go types.
+The JSON Schema of the contract is [`schema/preview.v1beta1.schema.json`](../schema/preview.v1beta1.schema.json) (draft 2020-12), generated from badil's Go types.
 
 ## Renderer obligations
 
-A renderer of `badil.dev/v1`:
+A renderer of `badil.dev/v1beta1`:
 
 1. Runs one environment per `previews/<slug>/` directory, named by the slug: the slug is its namespace and its release name.
 2. Deploys a pinned entry (with `commitSha`) from `repoURL` at `commitSha`, with the image tag `commitSha`.
@@ -87,8 +93,8 @@ A renderer of `badil.dev/v1`:
 ## Bring your own renderer
 
 - Replace the template of the example ApplicationSet, or the whole ApplicationSet, with your renderer: Kustomize, your own app-of-apps, or another tool that watches `previews/*/values.yaml` in the gitops repo.
-- Validate every file with [`schema/preview.v1.schema.json`](../schema/preview.v1.schema.json) before rendering it, so an unsupported `apiVersion` or an invalid file is refused, not half-deployed.
-- Test against [`testdata/contract/v1/`](../testdata/contract/v1): every file of `valid/` must render and every file of `invalid/` must be refused. The `preview-env/` goldens show what `preview-env` renders from each valid file with the settings of `testdata/contract/v1/preview-env.yaml`.
+- Validate every file with [`schema/preview.v1beta1.schema.json`](../schema/preview.v1beta1.schema.json) before rendering it, so an unsupported `apiVersion` or an invalid file is refused, not half-deployed.
+- Test against [`testdata/contract/v1beta1/`](../testdata/contract/v1beta1): every file of `valid/` must render and every file of `invalid/` must be refused. The `preview-env/` goldens show what `preview-env` renders from each valid file with the settings of `testdata/contract/v1beta1/preview-env.yaml`.
 
 ### ApplicationSet without Helm
 

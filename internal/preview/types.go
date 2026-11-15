@@ -1,7 +1,7 @@
 package preview
 
 // APIVersion is the apiVersion of the preview values contract badil writes.
-const APIVersion = "badil.dev/v1"
+const APIVersion = "badil.dev/v1beta1"
 
 // DefaultBranch is the branch a service tracks when the catalog sets none.
 const DefaultBranch = "main"

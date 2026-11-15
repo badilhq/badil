@@ -1,4 +1,4 @@
-apiVersion: badil.dev/v1
+apiVersion: badil.dev/v1beta1
 services:
   - name: backend-1
     repoURL: "https://github.com/acme/backend-1.git"

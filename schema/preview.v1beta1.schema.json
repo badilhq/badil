@@ -3,7 +3,7 @@
   "properties": {
     "apiVersion": {
       "type": "string",
-      "const": "badil.dev/v1"
+      "const": "badil.dev/v1beta1"
     },
     "services": {
       "items": {
