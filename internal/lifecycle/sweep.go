@@ -29,7 +29,7 @@ type SweepAPI interface {
 		slug, message string,
 		stillDelete func(preview.PreviewValues) bool,
 	) (*gitops.DeleteResult, error)
-	SyncPreviewWithRetry(ctx context.Context, slug string, catalog *gitops.ServiceCatalog) (*gitops.SyncResult, error)
+	PreviewSyncAPI
 }
 
 // Sweep visits every preview of the gitops repo once, applies the first
@@ -143,19 +143,21 @@ func sweepPreview(
 	if catalog == nil {
 		return nil
 	}
-	return syncPreview(ctx, api, slug, catalog)
+	_, err = syncPreview(ctx, api, slug, catalog)
+	return err
 }
 
 // syncPreview rewrites a kept preview to match catalog (step 4), records and
 // logs a rewrite and, when it changed the service list or a host, refreshes
-// the open PRs' comments. Only the sync error is returned.
-func syncPreview(ctx context.Context, api SweepAPI, slug string, catalog *gitops.ServiceCatalog) error {
+// the open PRs' comments. It reports whether the preview was rewritten; only
+// the sync error is returned.
+func syncPreview(ctx context.Context, api PreviewSyncAPI, slug string, catalog *gitops.ServiceCatalog) (bool, error) {
 	res, err := api.SyncPreviewWithRetry(ctx, slug, catalog)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !res.Changed {
-		return nil
+		return false, nil
 	}
 	api.SweepSynced()
 	slog.InfoContext(ctx, "preview synced", //nolint:sloglint // lifecycle has no scoped logger yet
@@ -163,7 +165,7 @@ func syncPreview(ctx context.Context, api SweepAPI, slug string, catalog *gitops
 		slog.String("gitops_commit_url", res.CommitURL),
 	)
 	if !res.Notify {
-		return nil
+		return true, nil
 	}
 	body := preview.BuildSummary(
 		slug, res.Values, catalog.URLs, catalog.Branches, res.CommitMessage, res.CommitURL,
@@ -175,7 +177,7 @@ func syncPreview(ctx context.Context, api SweepAPI, slug string, catalog *gitops
 			slog.String("err", fanErr.Error()),
 		)
 	}
-	return nil
+	return true, nil
 }
 
 // hasPin reports whether any entry of vals is pinned to a commit.

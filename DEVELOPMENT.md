@@ -97,7 +97,7 @@ Open the gitops repo on GitHub to confirm the commit landed on `main`.
 
 ## Verify webhook plumbing
 
-GitHub App settings → **Advanced** → **Recent Deliveries** → pick any → **Redeliver**. The server answers 200 and logs one line per event type (`webhook ping`, `webhook installation`, `webhook installation_repositories`, `webhook pull_request`); other event types log `unhandled webhook event` (or `webhook parse failed` if go-github doesn't know the type). A 401 means the webhook secret in `.env` doesn't match what GitHub has — fix on either side. A 403 means the delivery's installation is not `GITHUB_INSTALLATION_ID`: the `webhook installation rejected` log shows the received `installation_id`; compare it with `badil verify-app`.
+GitHub App settings → **Advanced** → **Recent Deliveries** → pick any → **Redeliver**. The server answers 200 and logs one line per event type (`webhook ping`, `webhook installation`, `webhook installation_repositories`, `webhook pull_request`, `webhook push`); other event types log `unhandled webhook event` (or `webhook parse failed` if go-github doesn't know the type). A 401 means the webhook secret in `.env` doesn't match what GitHub has — fix on either side. A 403 means the delivery's installation is not `GITHUB_INSTALLATION_ID`: the `webhook installation rejected` log shows the received `installation_id`; compare it with `badil verify-app`.
 
 To exercise the handler without GitHub, sign the body yourself. The HMAC covers the exact body bytes, so use `printf '%s'` (no trailing newline), never `echo`:
 
@@ -136,7 +136,7 @@ If `make dev-bootstrap` doesn't work in your environment, create the App by hand
    - **Webhook URL**: `<your-public-base-url>/webhooks/github`
    - **Webhook secret**: `openssl rand -hex 32` — save the value
    - **Repository permissions**: Contents R/W, Pull requests W, Metadata R
-   - **Subscribe to events**: `pull_request` (installation / installation_repositories fire automatically — do not subscribe to them explicitly)
+   - **Subscribe to events**: `pull_request` and `push` (installation / installation_repositories fire automatically — do not subscribe to them explicitly)
    - **Where can this be installed?**: Only on this account
 2. Click **Create GitHub App**. Note the **App ID** at the top of the page.
 3. Scroll to **Private keys** → **Generate a private key**. Move the downloaded `.pem` to `dev.private-key.pem` at the repository root.

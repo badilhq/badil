@@ -39,6 +39,7 @@ type Metrics struct {
 	sweepLastSuccess  prometheus.Gauge
 	sweepDeleted      *prometheus.CounterVec
 	sweepSynced       prometheus.Counter
+	configSyncs       *prometheus.CounterVec
 	previews          prometheus.Gauge
 	spinUp            *prometheus.HistogramVec
 	argoCDEvents      *prometheus.CounterVec
@@ -100,6 +101,11 @@ func New() *Metrics {
 			Name:      "sweep_previews_synced_total",
 			Help:      "Previews rewritten by a sweep to match badil.yaml.",
 		}),
+		configSyncs: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "config_syncs_total",
+			Help:      "Syncs of every preview, or one, with badil.yaml outside the sweep, by trigger and result.",
+		}, []string{"trigger", labelResult}),
 		previews: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: namespace,
 			Name:      "previews",
@@ -130,6 +136,7 @@ func New() *Metrics {
 		m.sweepLastSuccess,
 		m.sweepDeleted,
 		m.sweepSynced,
+		m.configSyncs,
 		m.previews,
 		m.spinUp,
 		m.argoCDEvents,
@@ -218,6 +225,15 @@ func (m *Metrics) SweepSynced() {
 		return
 	}
 	m.sweepSynced.Inc()
+}
+
+// ConfigSync counts one sync with badil.yaml outside the sweep, by trigger
+// (push or api) and result (ok or error).
+func (m *Metrics) ConfigSync(trigger, result string) {
+	if m == nil {
+		return
+	}
+	m.configSyncs.WithLabelValues(trigger, result).Inc()
 }
 
 // updatePreviews sets the previews gauge to f of its value, or to 0 when f

@@ -34,6 +34,8 @@ func assertMetrics(t *testing.T, m *metrics.Metrics, want map[string]float64, na
 			"Previews deleted by the cleanup sweep, by rule.\n# TYPE badil_sweep_previews_deleted_total counter\n",
 		"badil_sweep_previews_synced_total": "# HELP badil_sweep_previews_synced_total " +
 			"Previews rewritten by a sweep to match badil.yaml.\n# TYPE badil_sweep_previews_synced_total counter\n",
+		"badil_config_syncs_total": "# HELP badil_config_syncs_total Syncs of every preview, or one, with " +
+			"badil.yaml outside the sweep, by trigger and result.\n# TYPE badil_config_syncs_total counter\n",
 	}
 	var expected strings.Builder
 	matched := 0

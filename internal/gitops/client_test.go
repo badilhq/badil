@@ -102,6 +102,62 @@ func TestFetchServiceCatalog(t *testing.T) {
 	}
 }
 
+func TestFetchServiceCatalogSHA(t *testing.T) {
+	cases := []struct {
+		name     string
+		status   int
+		content  string
+		wantSHA  string
+		wantErr  bool
+		wantSvcs []string
+	}{
+		{
+			name:     "parsed",
+			status:   http.StatusOK,
+			content:  "services:\n  front:\n    repo: https://github.com/acme/front.git\n",
+			wantSHA:  "sha-badil",
+			wantSvcs: []string{"front"},
+		},
+		{
+			name:    "unparsable keeps the sha",
+			status:  http.StatusOK,
+			content: "services: [",
+			wantSHA: "sha-badil",
+			wantErr: true,
+		},
+		{name: "unreadable has no sha", status: http.StatusInternalServerError, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if tc.status != http.StatusOK {
+					w.WriteHeader(tc.status)
+					return
+				}
+				_, _ = io.WriteString(w, encodeContent("badil.yaml", "sha-badil", tc.content))
+			}))
+			defer srv.Close()
+
+			got, sha, err := newClient(t, srv).FetchServiceCatalogSHA(context.Background())
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
+			}
+			if sha != tc.wantSHA {
+				t.Errorf("sha = %q, want %q", sha, tc.wantSHA)
+			}
+			if !tc.wantErr && !slices.Equal(got.Services, tc.wantSvcs) {
+				t.Errorf("services = %v, want %v", got.Services, tc.wantSvcs)
+			}
+		})
+	}
+}
+
+func TestFullName(t *testing.T) {
+	if got := gitops.NewClient(gh.NewClient(nil), "acme", "gitops").FullName(); got != "acme/gitops" {
+		t.Errorf("FullName = %q, want acme/gitops", got)
+	}
+}
+
 func TestGetPreview_Success(t *testing.T) {
 	const body = `services:
   - name: backend-1

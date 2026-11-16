@@ -96,18 +96,34 @@ func classifyHTTPError(resp *gh.Response, err error) error {
 // service's repo and branch) and `preview` block. A malformed file is an
 // error.
 func (c *Client) FetchServiceCatalog(ctx context.Context) (*ServiceCatalog, error) {
+	catalog, _, err := c.FetchServiceCatalogSHA(ctx)
+	return catalog, err
+}
+
+// FetchServiceCatalogSHA is FetchServiceCatalog, plus the blob SHA of the
+// badil.yaml it read on the default branch. When the file was read but its
+// content can't be decoded or parsed, the SHA is returned with the error; it
+// is "" when the file could not be read.
+func (c *Client) FetchServiceCatalogSHA(ctx context.Context) (*ServiceCatalog, string, error) {
 	content, _, resp, err := c.gh.Repositories.GetContents(ctx, c.owner, c.repo, configFile, nil)
 	if err != nil {
-		return nil, classifyHTTPError(resp, err)
+		return nil, "", classifyHTTPError(resp, err)
 	}
 	if content == nil {
-		return nil, fmt.Errorf("%s: not a file", configFile)
+		return nil, "", fmt.Errorf("%s: not a file", configFile)
 	}
+	sha := content.GetSHA()
 	raw, err := content.GetContent()
 	if err != nil {
-		return nil, fmt.Errorf("decode %s: %w", configFile, err)
+		return nil, sha, fmt.Errorf("decode %s: %w", configFile, err)
 	}
-	return ParseCatalog([]byte(raw))
+	catalog, err := ParseCatalog([]byte(raw))
+	return catalog, sha, err
+}
+
+// FullName returns the gitops repo as owner/repo.
+func (c *Client) FullName() string {
+	return c.owner + "/" + c.repo
 }
 
 // previewsDir is the gitops repo directory holding one subdirectory per preview.

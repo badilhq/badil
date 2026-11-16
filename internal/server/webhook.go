@@ -5,8 +5,11 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	gh "github.com/google/go-github/v71/github"
+
+	"github.com/badilhq/badil/internal/lifecycle"
 )
 
 // installationEvent is implemented by go-github event types that carry the
@@ -19,7 +22,7 @@ type installationEvent interface {
 // event label of the webhook deliveries metric.
 func webhookEvent(eventType string) string {
 	switch eventType {
-	case "ping", "installation", "installation_repositories", "pull_request":
+	case "ping", "installation", "installation_repositories", "pull_request", "push":
 		return eventType
 	}
 	return "other"
@@ -113,6 +116,8 @@ func (s *Server) dispatchEvent(ctx context.Context, eventType string, event any)
 		s.handleInstallationRepositories(ctx, e)
 	case *gh.PullRequestEvent:
 		s.handlePullRequest(ctx, e)
+	case *gh.PushEvent:
+		s.handlePush(ctx, e)
 	default:
 		slog.WarnContext(ctx, "unhandled webhook event", slog.String("event", eventType))
 	}
@@ -156,4 +161,54 @@ func (s *Server) handlePullRequest(ctx context.Context, e *gh.PullRequestEvent) 
 	case "opened", "reopened", "synchronize", "labeled", "unlabeled", "closed":
 		s.startReconcile(ctx, e)
 	}
+}
+
+// handlePush starts a config sync in the background for a push to the gitops
+// repo's default branch that did not delete it. Any other push is ignored.
+func (s *Server) handlePush(ctx context.Context, e *gh.PushEvent) {
+	repo := e.GetRepo().GetFullName()
+	slog.InfoContext(ctx, "webhook push", //nolint:sloglint // server has no scoped logger yet
+		slog.String("repo", repo),
+		slog.String("ref", e.GetRef()),
+		slog.String("after", e.GetAfter()),
+		slog.Bool("deleted", e.GetDeleted()),
+	)
+	reason := ""
+	switch {
+	case !strings.EqualFold(repo, s.gitops.FullName()):
+		reason = "not the gitops repo"
+	case e.GetRef() != "refs/heads/"+e.GetRepo().GetDefaultBranch():
+		reason = "not the default branch"
+	case e.GetDeleted():
+		reason = "branch deleted"
+	}
+	if reason != "" {
+		slog.InfoContext(ctx, "config sync skipped", //nolint:sloglint // server has no scoped logger yet
+			slog.String("trigger", lifecycle.TriggerPush),
+			slog.String("repo", repo),
+			slog.String("ref", e.GetRef()),
+			slog.String("reason", reason),
+		)
+		return
+	}
+	s.startPushSync(ctx)
+}
+
+// startPushSync runs the push config sync in the background, tracked for
+// WaitBackground. It does not take s.jobs: the syncer's guard serializes it
+// with the other config syncs, and caps it at s.syncTimeout from when it holds
+// the guard. Its context is detached from ctx's cancellation.
+func (s *Server) startPushSync(ctx context.Context) {
+	sctx := context.WithoutCancel(ctx)
+	s.Go(func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				slog.ErrorContext(sctx, "config sync panicked", //nolint:sloglint // server has no scoped logger yet
+					slog.String("trigger", lifecycle.TriggerPush),
+					slog.Any("panic", rec),
+				)
+			}
+		}()
+		s.syncer.Push(sctx)
+	})
 }

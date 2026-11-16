@@ -46,6 +46,16 @@ Authorization: Bearer $BADIL_DEPLOY_TOKEN
   "pr_url": "...", "pr_number": "42", "pr_author": "...", "workflow_run_url": "..." }
 ```
 
+Sync every preview, or one, with `badil.yaml` now, instead of waiting for the push webhook or the next sweep:
+
+```
+POST /v1/sync
+Authorization: Bearer $BADIL_DEPLOY_TOKEN
+
+{}  or  { "slug": "feature-pricing" }
+→ { "synced": ["feature-pricing"], "unchanged": 3, "failed": [] }
+```
+
 A manual deploy always targets the slug of `head_ref`, and skips the one-PR-per-service check. The cleanup sweep keeps its pin only at the PR's target preview (the slug of its single `preview:<name>` label, or its branch slug when it has only the plain `preview` label), or at its branch slug when the PR has no preview label. A PR with conflicting `preview:<name>` labels keeps no pin. A webhook reconcile of the PR also unpins it from its branch slug and its named-label slugs other than its target.
 
 ## Install
@@ -56,7 +66,7 @@ From an empty cluster to a first preview: [docs/INSTALL.md](docs/INSTALL.md).
 
 Pre-1.0, and the v1 scope is complete. The full loop (label a PR, preview deployed by Argo CD, URLs tested, merge, teardown) runs end to end on a k3d testbed with a four-service demo.
 
-Working: label-triggered previews per branch or per `preview:<name>` label across repos, per-service chart overrides, upstream chart dependencies, teardown when a PR closes or loses its label, a cleanup sweep with optional TTL (in the server or as a CronJob), the manual `/v1/deploy` endpoint, PR comments with preview links, Prometheus metrics and a Grafana dashboard, preview spin-up time and GitHub deployments through Argo CD notifications.
+Working: label-triggered previews per branch or per `preview:<name>` label across repos, per-service chart overrides, upstream chart dependencies, teardown when a PR closes or loses its label, a cleanup sweep with optional TTL (in the server or as a CronJob), the manual `/v1/deploy` endpoint, previews synced when `badil.yaml` changes (push webhook, or `/v1/sync`), PR comments with preview links, Prometheus metrics and a Grafana dashboard, preview spin-up time and GitHub deployments through Argo CD notifications.
 
 Until 1.0, env vars, metric names, annotations and chart values can still change between minor releases; the [CHANGELOG](CHANGELOG.md) marks breaking changes.
 
@@ -81,7 +91,7 @@ Configuration (env):
 | `GITHUB_WEBHOOK_SECRET` | yes | |
 | `GITHUB_INSTALLATION_ID` | yes | |
 | `GITOPS_REPO` | yes | `owner/repo` |
-| `BADIL_DEPLOY_TOKEN` | yes | bearer token for manual `/v1/deploy` calls |
+| `BADIL_DEPLOY_TOKEN` | yes | bearer token for manual `/v1/deploy` and `/v1/sync` calls |
 | `LISTEN_ADDR` | no | default `:8080` |
 | `METRICS_ADDR` | no | Prometheus `/metrics` listener, default `:9090`; set to empty to disable |
 | `ARGOCD_WEBHOOK_TOKEN` | no | bearer token of Argo CD notifications; enables `/webhooks/argocd` |

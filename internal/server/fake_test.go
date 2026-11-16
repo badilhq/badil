@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"sync"
+	"time"
 
 	"github.com/badilhq/badil/internal/gitops"
 	"github.com/badilhq/badil/internal/preview"
@@ -42,6 +44,20 @@ type fakeGitops struct {
 	listCalls int
 
 	started chan string
+
+	// catalogSHA is the blob SHA FetchServiceCatalogSHA returns with the
+	// catalog; catalogDeadline is the deadline of its last call.
+	catalogSHA      string
+	catalogDeadline time.Time
+	// syncResult is what SyncPreviewWithRetry returns for a slug (an empty
+	// result when unset), unless syncErr has an error for it. A non-nil
+	// syncGate blocks the call until it is closed. syncMu guards syncs, the
+	// slugs synced so far.
+	syncResult map[string]*gitops.SyncResult
+	syncErr    map[string]error
+	syncGate   chan struct{}
+	syncMu     sync.Mutex
+	syncs      []string
 
 	capturedInputs   preview.DeployInputs
 	capturedCatalog  []string
@@ -164,4 +180,39 @@ func (f *fakeGitops) ListPreviews(context.Context) ([]string, error) {
 		return nil, f.listErr
 	}
 	return f.listed, nil
+}
+
+func (f *fakeGitops) FetchServiceCatalogSHA(ctx context.Context) (*gitops.ServiceCatalog, string, error) {
+	f.catalogDeadline, _ = ctx.Deadline()
+	catalog, err := f.FetchServiceCatalog(ctx)
+	return catalog, f.catalogSHA, err
+}
+
+func (f *fakeGitops) SyncPreviewWithRetry(
+	_ context.Context,
+	slug string,
+	_ *gitops.ServiceCatalog,
+) (*gitops.SyncResult, error) {
+	if f.syncGate != nil {
+		<-f.syncGate
+	}
+	f.syncMu.Lock()
+	defer f.syncMu.Unlock()
+	f.syncs = append(f.syncs, slug)
+	if err := f.syncErr[slug]; err != nil {
+		return nil, err
+	}
+	if res, ok := f.syncResult[slug]; ok {
+		return res, nil
+	}
+	return &gitops.SyncResult{}, nil
+}
+
+func (f *fakeGitops) FullName() string { return "acme/gitops" }
+
+// synced returns the slugs synced so far.
+func (f *fakeGitops) synced() []string {
+	f.syncMu.Lock()
+	defer f.syncMu.Unlock()
+	return append([]string(nil), f.syncs...)
 }
