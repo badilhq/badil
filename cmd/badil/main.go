@@ -30,7 +30,8 @@ import (
 // then background teardowns share it, inside the default 30s pod grace period.
 const shutdownTimeout = 25 * time.Second
 
-// cleanupTimeout bounds one cleanup sweep over every preview.
+// cleanupTimeout bounds one cleanup sweep over every preview, and one config
+// sync run.
 const cleanupTimeout = 10 * time.Minute
 
 // readHeaderTimeout bounds reading a request's headers on every listener.
@@ -103,7 +104,8 @@ func serveCmd() *cobra.Command {
 			}
 
 			srv := server.NewServer(app, gitopsClient, cfg.DeployToken, cfg.InstallationID,
-				server.WithMetrics(m), server.WithArgoCDToken(cfg.ArgoCDWebhookToken))
+				server.WithMetrics(m), server.WithArgoCDToken(cfg.ArgoCDWebhookToken),
+				server.WithSyncTimeout(cleanupTimeout))
 			httpSrv := &http.Server{
 				Addr:              cfg.ListenAddr,
 				Handler:           srv.Handler(),
