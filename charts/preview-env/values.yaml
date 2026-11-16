@@ -1,90 +1,15 @@
 # Input contract: values.schema.json validates the values on every render.
-# They are the preview file badil writes at previews/<slug>/values.yaml
-# (apiVersion, gitopsRepoURL, namespace, services, dependencies) and
-# argocdNamespace. Any other root key fails rendering. badil writes every chart setting and the image tag of each
-# service into the preview file, from the gitops repo's badil.yaml: this chart
-# has no defaults for them. A null field of a services entry, of its chart or
-# of namespace is rejected.
+# They are the preview file badil writes at previews/<slug>/values.yaml, whose
+# fields and rules are in docs/CONTRACT.md, and argocdNamespace. Any other root
+# key fails rendering. badil writes every chart setting and the image tag of
+# each service into the preview file, from the gitops repo's badil.yaml: this
+# chart has no defaults for them.
 
 # argocdNamespace: the namespace Argo CD runs in. The AppProject and every
 # service and dependency Application are created there. Must be a Kubernetes
 # namespace name.
 argocdNamespace: argocd
 
-# apiVersion: required, badil.dev/v1beta1. There is no default: a preview file
-# without it (written by an older badil) fails rendering.
-#
-# gitopsRepoURL: required, the git URL of the gitops repo. A dependency's
-# valueFiles are read from it, at HEAD.
-#
-# namespace: optional extra metadata of the preview Namespace, present when
-# badil.yaml sets it. Values are strings. A label the chart already sets
-# (app.kubernetes.io/name, app.kubernetes.io/instance,
-# app.kubernetes.io/part-of, app.kubernetes.io/managed-by) or the annotation
-# argocd.argoproj.io/sync-wave fails rendering.
-#
-# services: one entry per service of the preview, in catalog order. Unknown
-# fields are rejected.
-#
-# dependencies: required, may be empty. One entry per upstream chart of
-# badil.yaml, in its order, each rendered as an Application of sync wave -1
-# (before the services) with no image tag parameter. Unknown fields are
-# rejected.
-#
-# apiVersion: badil.dev/v1beta1
-# gitopsRepoURL: https://github.com/acme/gitops.git
-# namespace:
-#   labels: {pod-security.kubernetes.io/enforce: baseline}
-#   annotations: {}
-# services:
-#   - name: backend-1                                    # required
-#     repoURL: https://github.com/acme/backend-1.git     # required: the service's git URL, the Application source and an AppProject sourceRepo
-#     branch: main                                       # required: targetRevision when not pinned
-#     commitSha: "abc123"         # optional — pinned to this commit (targetRevision); requires metadata
-#     imageTag: "abc123"          # required: the value of the image tag parameter, passed as a string as written
-#     chart:                      # required
-#       path: k8s/                # required: chart path in the service repo
-#       imageTagParam: app.image.tag    # required: Helm parameter set to imageTag
-#       hostParam: app.ingress.host     # required: Helm parameter set to host
-#       valueFiles:               # optional: extra values files, applied in order
-#         - values-preview.yaml
-#     host: "backend-1-feature-pricing.example.com"   # optional, written by badil for exposed services; becomes the hostParam parameter
-#     metadata:                    # optional — present exactly when commitSha is; every key required
-#       pr-author: "octocat"
-#       pr-url: "https://github.com/badilhq/demo-backend-1/pull/42"
-#       pr-number: "42"
-#       created-at: "2026-02-18T14:30:00Z"
-#       updated-at: "2026-02-18T16:00:00Z"
-#       vcs.ref.name: "feature/add-pricing"
-#       cicd.pipeline.run.url: "https://github.com/badilhq/demo-backend-1/actions/runs/12345"
-#   - name: backend-2              # no commitSha → tracks its branch, no metadata
-#     repoURL: https://github.com/acme/backend-2.git
-#     branch: main
-#     imageTag: "sha-${ARGOCD_APP_REVISION_SHORT}"   # Argo CD substitutes the deployed revision
-#     chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
-# dependencies:
-#   - name: postgres                # required
-#     chart:                        # required
-#       repoURL: oci://registry-1.docker.io/bitnamicharts/postgresql   # required: an oci:// chart reference (path "."), or an https:// Helm repository
-#       version: 16.4.2             # required: targetRevision
-#     values: {auth: {password: preview}}   # optional: any object, passed as helm.valuesObject
-#     valueFiles: [deps/postgres.yaml]      # optional: paths in the gitops repo, passed as $values/<path> through a second source on gitopsRepoURL
-#   - name: mailpit
-#     chart:
-#       repoURL: https://jouve.github.io/charts
-#       name: mailpit               # required for an https:// repoURL, rejected for an oci:// one
-#       version: 0.20.0
-#     hostParam: ingress.hostname   # present exactly when host is: the Helm parameter set to host
-#     host: mailpit-feature-pricing.example.com
-#
-# The AppProject's sourceRepos lists the repoURL of every service and
-# dependency, and gitopsRepoURL when a dependency has valueFiles.
-#
-# imageTag is passed with forceString: true, so a digits-only short SHA stays
-# a string. On a branch-tracking entry it holds ${ARGOCD_APP_REVISION},
-# ${ARGOCD_APP_REVISION_SHORT} or ${ARGOCD_APP_REVISION_SHORT_8}, which Argo CD
-# replaces with the revision it deploys.
-#
 # Argo CD resolves each valueFiles entry: a relative path is joined to the
 # chart path, a path starting with "/" is joined to the service repo root, and a
 # URL with a scheme is fetched remotely (or rejected when the scheme is not

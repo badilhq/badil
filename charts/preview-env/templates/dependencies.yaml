@@ -6,16 +6,12 @@ metadata:
   name: {{ $.Release.Name }}-{{ .name }}
   namespace: {{ $.Values.argocdNamespace | quote }}
   labels:
-    app.kubernetes.io/name: {{ .name }}
-    app.kubernetes.io/instance: {{ $.Release.Name }}
-    app.kubernetes.io/part-of: preview-environments
-    app.kubernetes.io/managed-by: argocd
+    {{- include "preview-env.labels" (dict "name" .name "instance" $.Release.Name) | nindent 4 }}
   annotations:
     argocd.argoproj.io/sync-wave: "-1"
     preview.badil.dev/vcs.ref.revision: ""
     preview.badil.dev/host: {{ .host | default "" | quote }}
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
+  {{- include "preview-env.finalizers" . | nindent 2 }}
 spec:
   project: {{ $.Release.Name }}
   {{- if .valueFiles }}
@@ -28,15 +24,7 @@ spec:
   source:
     {{- $src | nindent 4 }}
   {{- end }}
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: {{ $.Release.Name }}
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=false
+  {{- include "preview-env.applicationSync" $.Release.Name | nindent 2 }}
 ---
 {{- end }}
 

@@ -4,10 +4,7 @@ kind: Namespace
 metadata:
   name: {{ .Release.Name }}
   labels:
-    app.kubernetes.io/name: {{ .Release.Name }}
-    app.kubernetes.io/instance: {{ .Release.Name }}
-    app.kubernetes.io/part-of: preview-environments
-    app.kubernetes.io/managed-by: argocd
+    {{- include "preview-env.labels" (dict "name" .Release.Name "instance" .Release.Name) | nindent 4 }}
     {{- range $k, $v := ($pn.labels | default dict) }}
     {{ $k | quote }}: {{ $v | quote }}
     {{- end }}
