@@ -147,7 +147,7 @@ A renderer of `badil.dev/v1beta1`:
 
 - Replace the template of the example ApplicationSet, or the whole ApplicationSet, with your renderer: Kustomize, your own app-of-apps, or another tool that watches `previews/*/values.yaml` in the gitops repo.
 - Validate every file with [`schema/preview.v1beta1.schema.json`](../schema/preview.v1beta1.schema.json) before rendering it, so an unsupported `apiVersion` or an invalid file is refused, not half-deployed.
-- Test against [`testdata/contract/v1beta1/`](../testdata/contract/v1beta1): every file of `valid/` must render and every file of `invalid/` must be refused. The `preview-env/` goldens show what `preview-env` renders from each valid file alone, with `argocdNamespace=argocd`.
+- Test against [`testdata/contract/v1beta1/`](../testdata/contract/v1beta1): every file of `valid/` must render and every file of `invalid/` must be refused. The `preview-env/` goldens show what `preview-env` renders from each valid file alone.
 
 ### ApplicationSet without Helm
 
