@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -219,6 +220,35 @@ func TestTeardown_UpdateComments(t *testing.T) {
 	}
 	if got := attrs["gitops_commit_url"].String(); got != teardownCommitURL {
 		t.Errorf("gitops_commit_url = %q", got)
+	}
+}
+
+func TestTeardown_UpdateCommentsLinkArgoCD(t *testing.T) {
+	fg := &fakeGitops{
+		pr: closedPR(),
+		badilYAML: "services:\n" +
+			"  backend-1: {repo: https://github.com/acme/backend-1.git}\n" +
+			"  front: {repo: https://github.com/acme/front.git}\n" +
+			"preview:\n  argocdURL: https://argocd.example.com\n",
+		teardownResult: &gitops.TeardownResult{
+			Values: preview.PreviewValues{
+				Services: []preview.ServiceEntry{{Name: "backend-1"}, {Name: "front"}},
+			},
+			Removed:       []string{"backend-1"},
+			CommitURL:     teardownCommitURL,
+			CommitMessage: "chore(preview): remove backend-1 from feature-add-pricing",
+		},
+	}
+	s, _ := newTeardownServer(t, fg)
+	closeAndWait(t, s)
+
+	const want = "\n🔎 [All apps in Argo CD]" +
+		"(https://argocd.example.com/applications?labels=app.kubernetes.io%2Finstance%3Dfeature-add-pricing)\n\n---\n"
+	if !fg.fanOutBodyCalled || !strings.Contains(fg.capturedSummary, want) {
+		t.Errorf("fan-out summary (called=%v) missing %q, got:\n%s", fg.fanOutBodyCalled, want, fg.capturedSummary)
+	}
+	if len(fg.upserts) != 1 || strings.Contains(fg.upserts[0].body, "Argo CD") {
+		t.Errorf("upserts = %+v, want one teardown comment without the Argo CD link", fg.upserts)
 	}
 }
 

@@ -250,7 +250,7 @@ func TestBuildSummary_Excluded(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			vals := preview.PreviewValues{Services: tt.services, Dependencies: deps}
-			got := preview.BuildSummary("slug", vals, preview.URLConfig{}, nil, "m", "u", tt.excluded...)
+			got := preview.BuildSummary("slug", vals, preview.URLConfig{}, "", nil, "m", "u", tt.excluded...)
 			if got != tt.want {
 				t.Errorf("summary mismatch\n got:\n%s\nwant:\n%s", got, tt.want)
 			}

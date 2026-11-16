@@ -75,9 +75,10 @@ dependencies:                   # optional: upstream charts deployed in every pr
     version: 0.20.0
     hostParam: ingress.hostname # required when exposed: Helm parameter set to the preview host
     # needs: [...]              # optional on a dependency too
-preview:                        # optional: preview label, preview cap and per-preview URLs (URLs off without domain)
+preview:                        # optional: preview label, preview cap, Argo CD link and per-preview URLs (URLs off without domain)
   label: preview                # optional, default "preview": the PR label that creates the preview
   maxPreviews: 10               # optional, default no cap: deploys that would create a preview past it are refused
+  argocdURL: https://argocd.example.com   # optional: the Argo CD UI; the PR comment links the preview's Applications
   domain: 127.0.0.1.nip.io      # lowercase bare domain: no scheme, no path, no leading or trailing dot
   tls: false                    # optional, default true: https or http in the PR-comment links only
   expose:                       # services and dependencies that get a host and a link
@@ -105,6 +106,7 @@ badil reads `badil.yaml` on every deploy, reconcile, teardown that keeps the pre
 - `namespace.labels` and `namespace.annotations` are added to every preview Namespace, after the chart's own (`app.kubernetes.io/name`, `app.kubernetes.io/instance`, `app.kubernetes.io/part-of`, `app.kubernetes.io/managed-by`, and the annotation `argocd.argoproj.io/sync-wave`). Keys and values are strings (an empty value is allowed); a null, a number or a boolean is rejected, as is a key the chart sets. An empty block writes nothing.
 - `preview.label` must be a non-empty string; it is matched case-insensitively, like GitHub label names. `<label>:<name>` labels name the preview (see the label flow below).
 - `preview.maxPreviews` must be a YAML integer of at least 1; a string (`"3"`), `0`, a negative number or a float is rejected, and a null or empty value means unset. It does not need `preview.domain`. See Preview cap in the [HTTP API](#http-api) section.
+- `preview.argocdURL` is the base URL of the Argo CD UI: a string holding an absolute `http` or `https` URL with a host (a path such as `/argocd` is allowed), no credentials (`user:password@`), no query or fragment, and only URL characters as written: no space, parenthesis or other character that needs percent-encoding (write `%20`, not a space); a trailing `/` is removed. Any other value is rejected, with `preview.argocdURL` in the error; a null means unset. It does not need `preview.domain`. When set, the preview's PR comment ends, before the `---` line, with ``🔎 [All apps in Argo CD](<argocdURL>/applications?labels=app.kubernetes.io%2Finstance%3D<slug>)``: Argo CD's application list filtered on the label `app.kubernetes.io/instance=<slug>`, which every service and dependency Application of the preview carries, with its live sync and health status. Only that comment carries it, not the teardown, expiry or refusal comments. Setting or changing it writes no preview file: a comment gets the link at its next refresh (a deploy, a teardown that keeps the preview, or a sync that refreshes comments). badil does not check that the URL is reachable, and Argo CD asks for a login as usual.
 
 The ApplicationSet passes the preview file as the only value file of `preview-env`, and its `argocdNamespace` as a parameter. The chart's schema validates the values on every render (Argo CD shows a sync error); its root is closed, so any other root key (a leftover `serviceRepos` or `preview`) fails the render with `at '': additional properties '<key>' not allowed`.
 

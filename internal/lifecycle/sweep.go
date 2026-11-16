@@ -168,7 +168,7 @@ func syncPreview(ctx context.Context, api PreviewSyncAPI, slug string, catalog *
 		return true, nil
 	}
 	body := preview.BuildSummary(
-		slug, res.Values, catalog.URLs, catalog.Branches, res.CommitMessage, res.CommitURL,
+		slug, res.Values, catalog.URLs, catalog.ArgoCDURL, catalog.Branches, res.CommitMessage, res.CommitURL,
 		catalog.Excluded(res.Values)...,
 	)
 	if fanErr := api.FanOutPRComments(ctx, res.Values, body); fanErr != nil {

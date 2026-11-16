@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -31,6 +32,10 @@ type ServiceCatalog struct {
 	// MaxPreviews is preview.maxPreviews, the most previews that may exist
 	// before a deploy that would create a new one is refused. 0 means no cap.
 	MaxPreviews int
+	// ArgoCDURL is preview.argocdURL, the base URL of the Argo CD UI without
+	// a trailing slash. When set, the preview summary links the preview's
+	// Applications in Argo CD. It is empty when absent.
+	ArgoCDURL string
 	// ImageTag is the root imageTag: the image tag format of every service
 	// whose entry sets none (preview.DefaultImageTag when absent).
 	ImageTag string
@@ -139,6 +144,7 @@ type previewBlock struct {
 	Expose      map[string]*exposeEntry `yaml:"expose"`
 	Label       *labelName              `yaml:"label"`
 	MaxPreviews *maxPreviews            `yaml:"maxPreviews"`
+	ArgoCDURL   *argocdURL              `yaml:"argocdURL"`
 }
 
 type exposeEntry struct {
@@ -185,6 +191,46 @@ func (m *maxPreviews) UnmarshalYAML(n *yaml.Node) error {
 	}
 	*m = maxPreviews(v)
 	return nil
+}
+
+// argocdURL is preview.argocdURL. It only accepts a YAML string holding an
+// absolute http or https URL with a host, no credentials, no query or fragment
+// and only URL characters other than parentheses; a trailing slash is removed.
+// A YAML null leaves the field unset.
+type argocdURL string
+
+func (a *argocdURL) UnmarshalYAML(n *yaml.Node) error {
+	const key = "preview.argocdURL"
+	if n.Tag != strTag {
+		return malformed(key, "must be a string")
+	}
+	u, err := url.Parse(n.Value)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return malformed(key, "%q must be an absolute http or https URL with a host", n.Value)
+	}
+	if strings.ContainsAny(n.Value, "?#") {
+		return malformed(key, "%q must not have a query or a fragment", n.Value)
+	}
+	if u.User != nil {
+		return malformed(key, "%q must not contain credentials", n.Value)
+	}
+	if strings.ContainsFunc(n.Value, func(r rune) bool { return !isLinkURLChar(r) }) {
+		return malformed(key, "%q must only contain URL characters, without spaces or parentheses", n.Value)
+	}
+	*a = argocdURL(strings.TrimSuffix(n.Value, "/"))
+	return nil
+}
+
+// isLinkURLChar reports whether r may appear as written in a URL (RFC 3986
+// unreserved and reserved characters and %) without breaking a Markdown link
+// target, which a space or a parenthesis ends.
+func isLinkURLChar(r rune) bool {
+	switch {
+	case 'a' <= r && r <= 'z', 'A' <= r && r <= 'Z', '0' <= r && r <= '9':
+		return true
+	default:
+		return strings.ContainsRune("-._~:/[]@!$&'*+,;=%", r)
+	}
 }
 
 // tlsFlag is preview.tls. It only accepts a YAML boolean, not the YAML 1.1
@@ -262,6 +308,9 @@ func parseDocument(doc *badilFile) (*ServiceCatalog, error) {
 	}
 	if doc.Preview != nil && doc.Preview.MaxPreviews != nil {
 		c.MaxPreviews = int(*doc.Preview.MaxPreviews)
+	}
+	if doc.Preview != nil && doc.Preview.ArgoCDURL != nil {
+		c.ArgoCDURL = string(*doc.Preview.ArgoCDURL)
 	}
 	return c, nil
 }
