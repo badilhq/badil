@@ -209,7 +209,7 @@ References: [Helm build environment in Argo CD](https://argo-cd.readthedocs.io/e
 
 ## Dependencies
 
-`dependencies` of `badil.yaml` are upstream charts deployed in every preview (only in those whose pinned services need them when `badil.yaml` declares `needs`, see [Needs](#needs)) next to the services: a database, a cache, a mail catcher. They are never pinned, get no image tag, and need no git repo of their own. badil writes them into every preview file, in `badil.yaml` order, on every deploy, teardown that keeps the preview, and sweep sync: a dependency added to or removed from `badil.yaml` reaches every preview by its next write, and the PR comment is refreshed.
+`dependencies` of `badil.yaml` are upstream charts deployed in every preview (only in those whose pinned services need them when `badil.yaml` declares `needs`, see [Needs](#needs)) next to the services: a database, a cache, a mail catcher. They are never pinned, get no image tag, and need no git repo of their own. badil writes them into every preview file, in `badil.yaml` order, on every deploy, teardown that keeps the preview, and sweep sync: a dependency added to or removed from `badil.yaml` reaches every preview that includes it by its next write, and the PR comment is refreshed. With `needs`, a dependency that no pinned part needs leaves the preview file unchanged and refreshes no comment (see Staleness in [Needs](#needs)).
 
 `preview-env` ([`dependencies.yaml`](../charts/preview-env/templates/dependencies.yaml)) renders one Application `<slug>-<name>` per dependency, in the preview namespace, from its chart source:
 
