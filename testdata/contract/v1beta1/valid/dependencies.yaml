@@ -1,0 +1,43 @@
+# One pinned service and two dependencies: postgres, an OCI chart with values
+# and a values file from the gitops repo; mailpit, a chart of a Helm
+# repository, exposed through its hostParam.
+apiVersion: badil.dev/v1beta1
+gitopsRepoURL: https://github.com/acme/gitops.git
+services:
+  - name: api
+    repoURL: https://github.com/acme/platform.git
+    branch: main
+    commitSha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+    imageTag: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+    chart:
+      path: k8s/
+      imageTagParam: app.image.tag
+      hostParam: app.ingress.host
+    metadata:
+      pr-author: octocat
+      pr-url: https://github.com/acme/platform/pull/42
+      pr-number: "42"
+      created-at: "2026-05-26T10:00:00Z"
+      updated-at: "2026-05-26T11:30:00Z"
+      vcs.ref.name: feature/pricing
+      cicd.pipeline.run.url: https://github.com/acme/platform/actions/runs/1001
+dependencies:
+  - name: postgres
+    chart:
+      repoURL: oci://registry-1.docker.io/bitnamicharts/postgresql
+      version: 16.4.2
+    values:
+      auth:
+        password: preview
+      primary:
+        persistence:
+          enabled: false
+    valueFiles:
+      - deps/postgres.yaml
+  - name: mailpit
+    chart:
+      repoURL: https://jouve.github.io/charts
+      name: mailpit
+      version: 0.20.0
+    hostParam: ingress.hostname
+    host: mailpit-dependencies.preview.example.com

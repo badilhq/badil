@@ -90,6 +90,7 @@ jobs:
         run: |
           out=$(helm template preview-x charts/preview-env -f - <<'EOF'
           apiVersion: badil.dev/v1beta1
+          gitopsRepoURL: https://github.com/acme/gitops.git
           services:
             - name: backend-1
               repoURL: https://github.com/acme/backend-1.git
@@ -105,6 +106,7 @@ jobs:
                 updated-at: "2026-05-26T10:00:00Z"
                 vcs.ref.name: "on"
                 cicd.pipeline.run.url: https://github.com/acme/backend-1/actions/runs/1
+          dependencies: []
           EOF
           )
           got=$(echo "$out" | yq -N 'select(.kind == "Application") | .metadata.annotations | (.["preview.badil.dev/pr-author"], .["preview.badil.dev/pr-number"], .["preview.badil.dev/created-at"], .["preview.badil.dev/vcs.ref.name"])')
@@ -122,6 +124,7 @@ jobs:
         run: |
           out=$(helm template feature-pricing charts/preview-env -f - <<'EOF'
           apiVersion: badil.dev/v1beta1
+          gitopsRepoURL: https://github.com/acme/gitops.git
           services:
             - name: backend-1
               repoURL: https://github.com/acme/backend-1.git
@@ -149,6 +152,7 @@ jobs:
               imageTag: ${ARGOCD_APP_REVISION}
               chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
               host: front-feature-pricing.127.0.0.1.nip.io
+          dependencies: []
           EOF
           )
           # shellcheck disable=SC2016
@@ -176,6 +180,7 @@ jobs:
         run: |
           out=$(helm template preview-x charts/preview-env -f - <<'EOF'
           apiVersion: badil.dev/v1beta1
+          gitopsRepoURL: https://github.com/acme/gitops.git
           services:
             - name: api
               repoURL: https://github.com/acme/api.git
@@ -211,6 +216,7 @@ jobs:
               branch: main
               imageTag: ${ARGOCD_APP_REVISION}
               chart: {path: charts/cron, imageTagParam: app.image.tag, hostParam: app.ingress.host}
+          dependencies: []
           EOF
           )
           got=$(echo "$out" | yq -N 'select(.kind == "Application") | .metadata.name + " " + .spec.source.repoURL + " " + .spec.source.targetRevision + " " + .spec.source.path + " " + (.spec.source.helm.valueFiles // "absent" | to_json(0)) + " " + ([.spec.source.helm.parameters[] | .name + "=" + .value + (.forceString // false | " forceString=" + to_string)] | join(","))')
@@ -235,6 +241,44 @@ jobs:
           https://github.com/acme/front.git'
           if [ "$got" != "$want" ]; then
             echo "::error::expected the AppProject sourceRepos to be the distinct repoURLs of services, in file order"
+            printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
+            exit 1
+          fi
+
+      # Each dependency is an Application of wave -1 from its chart source:
+      # an OCI chart (path "."), with its valueFiles read from the gitops repo
+      # through a second source, or a chart of a Helm repository (chart). The
+      # AppProject lists every source.
+      - name: Render preview-env dependencies
+        run: |
+          out=$(helm template dependencies charts/preview-env -f testdata/contract/v1beta1/valid/dependencies.yaml)
+          deps=$(echo "$out" | yq 'select(.kind == "Application" and .metadata.annotations["argocd.argoproj.io/sync-wave"] == "-1")')
+          got=$(echo "$deps" | yq -N '.metadata.name + " name=" + .metadata.labels["app.kubernetes.io/name"] + " revision=" + .metadata.annotations["preview.badil.dev/vcs.ref.revision"] + " host=" + .metadata.annotations["preview.badil.dev/host"] + " pr-url=" + (.metadata.annotations["preview.badil.dev/pr-url"] // "absent") + " source=" + (.spec | has("source") | to_string) + " sources=" + (.spec | has("sources") | to_string)')
+          want='dependencies-postgres name=postgres revision= host= pr-url=absent source=false sources=true
+          dependencies-mailpit name=mailpit revision= host=mailpit-dependencies.preview.example.com pr-url=absent source=true sources=false'
+          if [ "$got" != "$want" ]; then
+            echo "::error::unexpected dependency Applications"
+            printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
+            exit 1
+          fi
+          # shellcheck disable=SC2016
+          got=$(echo "$deps" | yq -N '.metadata.name as $app | (.spec.sources // [.spec.source]) | .[] | $app + " " + to_json(0)')
+          # shellcheck disable=SC2016
+          want='dependencies-postgres {"repoURL":"oci://registry-1.docker.io/bitnamicharts/postgresql","targetRevision":"16.4.2","path":".","helm":{"releaseName":"postgres","valueFiles":["$values/deps/postgres.yaml"],"valuesObject":{"auth":{"password":"preview"},"primary":{"persistence":{"enabled":false}}}}}
+          dependencies-postgres {"repoURL":"https://github.com/acme/gitops.git","targetRevision":"HEAD","ref":"values"}
+          dependencies-mailpit {"repoURL":"https://jouve.github.io/charts","targetRevision":"0.20.0","chart":"mailpit","helm":{"releaseName":"mailpit","parameters":[{"name":"ingress.hostname","value":"mailpit-dependencies.preview.example.com"}]}}'
+          if [ "$got" != "$want" ]; then
+            echo "::error::unexpected dependency Application sources"
+            printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
+            exit 1
+          fi
+          got=$(echo "$out" | yq -N 'select(.kind == "AppProject") | .spec.sourceRepos[]')
+          want='https://github.com/acme/platform.git
+          oci://registry-1.docker.io/bitnamicharts/postgresql
+          https://github.com/acme/gitops.git
+          https://jouve.github.io/charts'
+          if [ "$got" != "$want" ]; then
+            echo "::error::expected the AppProject sourceRepos to list the services, the dependency charts and the gitops repo"
             printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
             exit 1
           fi
@@ -465,8 +509,10 @@ jobs:
           while IFS='|' read -r bad msg; do
             if out=$(helm template preview-x charts/preview-env -f - 2>&1 <<EOF
           apiVersion: badil.dev/v1beta1
+          gitopsRepoURL: https://github.com/acme/gitops.git
           services:
             - {name: backend-1, repoURL: https://github.com/acme/backend-1.git, branch: main, $bad}
+          dependencies: []
           EOF
             ); then
               echo "::error::expected render to fail with $bad"
@@ -504,19 +550,24 @@ jobs:
             fi
           }
           fails "at '': missing property 'apiVersion'" <<'EOF'
+          gitopsRepoURL: https://github.com/acme/gitops.git
           services:
             - name: backend-1
               repoURL: https://github.com/acme/backend-1.git
               branch: main
               imageTag: ${ARGOCD_APP_REVISION}
               chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
+          dependencies: []
           EOF
           fails "at '/apiVersion': value must be 'badil.dev/v1beta1'" <<'EOF'
           apiVersion: badil.dev/v2
+          gitopsRepoURL: https://github.com/acme/gitops.git
           services: []
+          dependencies: []
           EOF
           fails "at '/services/0': additional properties 'image' not allowed" <<'EOF'
           apiVersion: badil.dev/v1beta1
+          gitopsRepoURL: https://github.com/acme/gitops.git
           services:
             - name: backend-1
               repoURL: https://github.com/acme/backend-1.git
@@ -524,17 +575,21 @@ jobs:
               imageTag: ${ARGOCD_APP_REVISION}
               chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
               image: x
+          dependencies: []
           EOF
           fails "at '/services/0': missing property 'repoURL'" <<'EOF'
           apiVersion: badil.dev/v1beta1
+          gitopsRepoURL: https://github.com/acme/gitops.git
           services:
             - name: backend-1
               branch: main
               imageTag: ${ARGOCD_APP_REVISION}
               chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
+          dependencies: []
           EOF
           fails "at '/services/0': properties 'metadata' required, if 'commitSha' exists" <<'EOF'
           apiVersion: badil.dev/v1beta1
+          gitopsRepoURL: https://github.com/acme/gitops.git
           services:
             - name: backend-1
               repoURL: https://github.com/acme/backend-1.git
@@ -542,6 +597,7 @@ jobs:
               commitSha: abc123
               imageTag: abc123
               chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
+          dependencies: []
           EOF
 
       - name: Render the valid contract fixtures to their goldens

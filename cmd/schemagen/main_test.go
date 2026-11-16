@@ -43,6 +43,8 @@ func TestGenerate_KeyConstraints(t *testing.T) {
 	metadata := at(t, entry, "properties", "metadata")
 	chart := at(t, entry, "properties", "chart")
 	ns := at(t, s, "properties", "namespace")
+	dep := at(t, s, "properties", "dependencies", "items")
+	depChart := at(t, dep, "properties", "chart")
 	tests := []struct {
 		name string
 		got  any
@@ -50,8 +52,17 @@ func TestGenerate_KeyConstraints(t *testing.T) {
 	}{
 		{"no $id", s["$id"], nil},
 		{"draft", s["$schema"], "https://json-schema.org/draft/2020-12/schema"},
-		{"root properties", keys, []string{"apiVersion", "argocdNamespace", "namespace", "services"}},
-		{"root required", s["required"], []any{"apiVersion", "services", "argocdNamespace"}},
+		{
+			"root properties",
+			keys,
+			[]string{"apiVersion", "argocdNamespace", "dependencies", "gitopsRepoURL", "namespace", "services"},
+		},
+		{
+			"root required",
+			s["required"],
+			[]any{"apiVersion", "gitopsRepoURL", "services", "dependencies", "argocdNamespace"},
+		},
+		{"gitopsRepoURL non-empty", at(t, s, "properties", "gitopsRepoURL", "minLength"), 1.0},
 		{"root closed", s["additionalProperties"], false},
 		{"apiVersion const", at(t, s, "properties", "apiVersion", "const"), "badil.dev/v1beta1"},
 		{
@@ -112,6 +123,27 @@ func TestGenerate_KeyConstraints(t *testing.T) {
 			map[string]any{"argocd.argoproj.io/sync-wave": false},
 		},
 		{"annotations no propertyNames", at(t, ns, "properties", "annotations", "propertyNames"), nil},
+		{"dependency closed", at(t, dep, "additionalProperties"), false},
+		{"dependency required", at(t, dep, "required"), []any{"name", "chart"}},
+		{
+			"dependency dependentRequired",
+			at(t, dep, "dependentRequired"),
+			map[string]any{"host": []any{"hostParam"}, "hostParam": []any{"host"}},
+		},
+		{"dependency values free-form", at(t, dep, "properties", "values"), map[string]any{"type": "object"}},
+		{"dependency valueFiles non-empty", at(t, dep, "properties", "valueFiles", "minItems"), 1.0},
+		{"dependency chart closed", at(t, depChart, "additionalProperties"), false},
+		{"dependency chart required", at(t, depChart, "required"), []any{"repoURL", "version"}},
+		{"dependency chart repoURL pattern", at(t, depChart, "properties", "repoURL", "pattern"), "^(oci|https)://"},
+		{
+			"dependency chart name without oci",
+			[]any{at(t, depChart, "if"), at(t, depChart, "then"), at(t, depChart, "else")},
+			[]any{
+				map[string]any{"properties": map[string]any{"repoURL": map[string]any{"pattern": "^oci://"}}},
+				map[string]any{"properties": map[string]any{"name": false}},
+				map[string]any{"required": []any{"name"}},
+			},
+		},
 	}
 	for _, tt := range tests {
 		if !reflect.DeepEqual(tt.got, tt.want) {
@@ -148,11 +180,12 @@ func TestGenerateContract_RootConstraints(t *testing.T) {
 	}{
 		{"no $id", s["$id"], nil},
 		{"draft", s["$schema"], "https://json-schema.org/draft/2020-12/schema"},
-		{"root properties", keys, []string{"apiVersion", "namespace", "services"}},
-		{"root required", s["required"], []any{"apiVersion", "services"}},
+		{"root properties", keys, []string{"apiVersion", "dependencies", "gitopsRepoURL", "namespace", "services"}},
+		{"root required", s["required"], []any{"apiVersion", "gitopsRepoURL", "services", "dependencies"}},
 		{"root closed", s["additionalProperties"], false},
 		{"apiVersion const", at(t, s, "properties", "apiVersion", "const"), "badil.dev/v1beta1"},
 		{"service entry closed", at(t, s, "properties", "services", "items", "additionalProperties"), false},
+		{"dependency closed", at(t, s, "properties", "dependencies", "items", "additionalProperties"), false},
 	}
 	for _, tt := range tests {
 		if !reflect.DeepEqual(tt.got, tt.want) {

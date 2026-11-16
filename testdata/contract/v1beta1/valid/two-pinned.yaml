@@ -1,6 +1,7 @@
 # Two services from one repo, both pinned by the same PR, their image tag the
 # first 8 characters of the SHA with a suffix.
 apiVersion: badil.dev/v1beta1
+gitopsRepoURL: https://github.com/acme/gitops.git
 services:
   - name: api
     repoURL: https://github.com/acme/platform.git
@@ -36,3 +37,4 @@ services:
       updated-at: "2026-06-01T09:00:00Z"
       vcs.ref.name: fix/retries
       cicd.pipeline.run.url: https://github.com/acme/platform/actions/runs/2002
+dependencies: []

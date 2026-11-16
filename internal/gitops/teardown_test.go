@@ -134,6 +134,7 @@ const pr7URL = "https://github.com/acme/backend-2/pull/7"
 
 // onlyPR42 is a preview pinned by acme/backend-1#42 alone.
 const onlyPR42 = `apiVersion: badil.dev/v1beta1
+gitopsRepoURL: https://github.com/acme/gitops.git
 services:
   - name: backend-1
     repoURL: https://github.com/acme/backend-1.git
@@ -144,6 +145,7 @@ services:
   - name: front
     repoURL: https://github.com/acme/front.git
     branch: main
+dependencies: []
 `
 
 // teardownBadil is the badil.yaml of the previews of these tests: image tags
@@ -165,6 +167,7 @@ preview:
 
 // pr42AndPR7 is a preview pinned by acme/backend-1#42 and acme/backend-2#7.
 const pr42AndPR7 = `apiVersion: badil.dev/v1beta1
+gitopsRepoURL: https://github.com/acme/gitops.git
 services:
   - name: backend-1
     repoURL: https://github.com/acme/backend-1.git
@@ -188,6 +191,7 @@ services:
     branch: main
     imageTag: sha-${ARGOCD_APP_REVISION_SHORT}
     chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
+dependencies: []
 `
 
 func TestTeardown_UpdateWhenPinsRemain(t *testing.T) {
@@ -207,6 +211,7 @@ func TestTeardown_UpdateWhenPinsRemain(t *testing.T) {
 	// The unpinned backend-1 is projected on badil.yaml in the same commit:
 	// its branch-tracking imageTag, chart and host.
 	wantBody := "apiVersion: badil.dev/v1beta1\n" +
+		"gitopsRepoURL: https://github.com/acme/gitops.git\n" +
 		"services:\n" +
 		"  - name: backend-1\n" +
 		"    repoURL: https://github.com/acme/backend-1.git\n" +
@@ -232,7 +237,8 @@ func TestTeardown_UpdateWhenPinsRemain(t *testing.T) {
 		"    repoURL: https://github.com/acme/front.git\n" +
 		"    branch: main\n" +
 		"    imageTag: sha-${ARGOCD_APP_REVISION_SHORT}\n" +
-		defaultChartYAML
+		defaultChartYAML +
+		"dependencies: []\n"
 	if reqs[0].content != wantBody {
 		t.Errorf("PUT content mismatch\n got:\n%s\nwant:\n%s", reqs[0].content, wantBody)
 	}

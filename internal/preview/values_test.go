@@ -592,8 +592,11 @@ func TestApplyHosts_YAML(t *testing.T) {
 			Name: "backend-2", RepoURL: "https://github.com/acme/backend-2.git", Branch: "develop",
 			ImageTag: "${ARGOCD_APP_REVISION}", Chart: valueFilesChart(),
 		},
-	}, Namespace: sampleNamespace()}
-	vals := preview.ApplyHosts(in, "feature-pricing", hostURLs())
+	}, Namespace: sampleNamespace(), GitopsRepoURL: "https://github.com/acme/gitops.git"}
+	in.Dependencies = sampleDependencies()
+	urls := hostURLs()
+	urls.Expose["mailpit"] = "/"
+	vals := preview.ApplyHosts(in, "feature-pricing", urls)
 
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
@@ -604,6 +607,7 @@ func TestApplyHosts_YAML(t *testing.T) {
 	_ = enc.Close()
 
 	want := "apiVersion: badil.dev/v1beta1\n" +
+		"gitopsRepoURL: https://github.com/acme/gitops.git\n" +
 		"namespace:\n" +
 		"  labels:\n" +
 		"    team: platform\n" +
@@ -637,9 +641,50 @@ func TestApplyHosts_YAML(t *testing.T) {
 		"      imageTagParam: app.image.tag\n" +
 		"      hostParam: app.ingress.host\n" +
 		"      valueFiles:\n" +
-		"        - values-preview.yaml\n"
+		"        - values-preview.yaml\n" +
+		"dependencies:\n" +
+		"  - name: postgres\n" +
+		"    chart:\n" +
+		"      repoURL: oci://registry-1.docker.io/bitnamicharts/postgresql\n" +
+		"      version: 16.4.2\n" +
+		"    values:\n" +
+		"      auth:\n" +
+		"        password: preview\n" +
+		"    valueFiles:\n" +
+		"      - deps/postgres.yaml\n" +
+		"  - name: mailpit\n" +
+		"    chart:\n" +
+		"      repoURL: https://jouve.github.io/charts\n" +
+		"      name: mailpit\n" +
+		"      version: 0.20.0\n" +
+		"    hostParam: ingress.hostname\n" +
+		"    host: mailpit-feature-pricing.127.0.0.1.nip.io\n"
 	if got := buf.String(); got != want {
 		t.Errorf("yaml mismatch\n got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// sampleDependencies returns postgres, an OCI chart with values, value files
+// and a hostParam, and mailpit, a chart of a Helm repository with a
+// hostParam, as parsed from badil.yaml.
+func sampleDependencies() []preview.DependencyEntry {
+	return []preview.DependencyEntry{
+		{
+			Name: "postgres",
+			Chart: preview.DependencyChart{
+				RepoURL: "oci://registry-1.docker.io/bitnamicharts/postgresql", Version: "16.4.2",
+			},
+			Values:     map[string]any{"auth": map[string]any{"password": "preview"}},
+			ValueFiles: []string{"deps/postgres.yaml"},
+			HostParam:  "postgresql.host",
+		},
+		{
+			Name: "mailpit",
+			Chart: preview.DependencyChart{
+				RepoURL: "https://jouve.github.io/charts", Name: "mailpit", Version: "0.20.0",
+			},
+			HostParam: "ingress.hostname",
+		},
 	}
 }
 

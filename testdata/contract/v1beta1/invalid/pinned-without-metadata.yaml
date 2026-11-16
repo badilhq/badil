@@ -1,5 +1,6 @@
 # want: at '/services/0': properties 'metadata' required, if 'commitSha' exists
 apiVersion: badil.dev/v1beta1
+gitopsRepoURL: https://github.com/acme/gitops.git
 services:
   - name: api
     repoURL: https://github.com/acme/platform.git
@@ -10,3 +11,4 @@ services:
       path: k8s/
       imageTagParam: app.image.tag
       hostParam: app.ingress.host
+dependencies: []

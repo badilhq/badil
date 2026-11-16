@@ -1,0 +1,19 @@
+# want: at '/dependencies/0': additional properties 'imageTag' not allowed
+apiVersion: badil.dev/v1beta1
+gitopsRepoURL: https://github.com/acme/gitops.git
+services:
+  - name: api
+    repoURL: https://github.com/acme/platform.git
+    branch: main
+    imageTag: ${ARGOCD_APP_REVISION}
+    chart:
+      path: k8s/
+      imageTagParam: app.image.tag
+      hostParam: app.ingress.host
+dependencies:
+  - name: mailpit
+    chart:
+      repoURL: https://jouve.github.io/charts
+      name: mailpit
+      version: 0.20.0
+    imageTag: ${ARGOCD_APP_REVISION}

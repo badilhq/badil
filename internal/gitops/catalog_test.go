@@ -815,3 +815,153 @@ func TestParseCatalog_MalformedRendererSettings(t *testing.T) {
 		})
 	}
 }
+
+func TestParseCatalog_Dependencies(t *testing.T) {
+	const raw = `services:
+  api: {repo: https://github.com/acme/api.git}
+dependencies:
+  postgres:
+    chart: oci://registry-1.docker.io/bitnamicharts/postgresql
+    version: 16.4.2
+    values:
+      auth: {password: preview}
+      replicas: 1.0
+      since: 2024-01-01
+    valueFiles: [deps/postgres.yaml]
+  mailpit:
+    repo: https://jouve.github.io/charts
+    chart: mailpit
+    version: "0.20"
+    hostParam: ingress.hostname
+    values: {}
+preview:
+  domain: example.com
+  expose: {api: {}, mailpit: {}}
+`
+	got, err := gitops.ParseCatalog([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseCatalog: %v", err)
+	}
+	want := []preview.DependencyEntry{
+		{
+			Name: "postgres",
+			Chart: preview.DependencyChart{
+				RepoURL: "oci://registry-1.docker.io/bitnamicharts/postgresql", Version: "16.4.2",
+			},
+			Values: map[string]any{
+				"auth": map[string]any{"password": "preview"}, "replicas": 1.0, "since": "2024-01-01",
+			},
+			ValueFiles: []string{"deps/postgres.yaml"},
+		},
+		{
+			Name: "mailpit",
+			Chart: preview.DependencyChart{
+				RepoURL: "https://jouve.github.io/charts",
+				Name:    "mailpit",
+				Version: "0.20",
+			},
+			HostParam: "ingress.hostname",
+		},
+	}
+	if !reflect.DeepEqual(got.Dependencies, want) {
+		t.Errorf("Dependencies = %#v, want %#v", got.Dependencies, want)
+	}
+	if want := []string{"api"}; !reflect.DeepEqual(got.Services, want) {
+		t.Errorf("Services = %v, want %v", got.Services, want)
+	}
+}
+
+func TestParseCatalog_NoDependencies(t *testing.T) {
+	for _, raw := range []string{catalogServices, catalogServices + "dependencies: {}\n"} {
+		got, err := gitops.ParseCatalog([]byte(raw))
+		if err != nil {
+			t.Fatalf("ParseCatalog: %v", err)
+		}
+		if got.Dependencies != nil {
+			t.Errorf("Dependencies = %#v, want nil", got.Dependencies)
+		}
+	}
+}
+
+func TestParseCatalog_MalformedDependencies(t *testing.T) {
+	const oci = "chart: oci://r/c, version: 1.0.0"
+	const helmRepo = "repo: https://charts.example.com, chart: c, version: 1.0.0"
+	tests := []struct {
+		name string
+		deps string
+		want string
+	}{
+		{"null", "dependencies:\n", "badil.yaml: dependencies must be a mapping"},
+		{"a list", "dependencies: [a]\n", "badil.yaml: dependencies must be a mapping"},
+		{"entry null", "dependencies: {db: ~}\n", "badil.yaml: dependencies.db must be a mapping"},
+		{
+			"name of a service",
+			"dependencies: {front: {" + oci + "}}\n",
+			`badil.yaml: dependencies.front: "front" is already a service`,
+		},
+		{
+			"duplicate name",
+			"dependencies:\n  db: {" + oci + "}\n  db: {" + oci + "}\n",
+			"badil.yaml: dependencies.db is defined more than once",
+		},
+		{
+			"repo with an oci chart",
+			"dependencies: {db: {" + oci + ", repo: https://charts.example.com}}\n",
+			"badil.yaml: dependencies.db: 'repo' must be absent when 'chart' is an oci:// reference",
+		},
+		{"missing chart", "dependencies: {db: {version: 1.0.0}}\n", "badil.yaml: dependencies.db: missing 'chart'"},
+		{
+			"missing version",
+			"dependencies: {db: {chart: oci://r/c}}\n",
+			"badil.yaml: dependencies.db: missing 'version'",
+		},
+		{
+			"version a number",
+			"dependencies: {db: {chart: oci://r/c, version: 1.0}}\n",
+			"badil.yaml: dependencies.db.version must be a non-empty string",
+		},
+		{
+			"missing repo",
+			"dependencies: {db: {chart: c, version: 1.0.0}}\n",
+			"badil.yaml: dependencies.db: missing 'repo' ('chart' is not an oci:// reference)",
+		},
+		{
+			"repo not https",
+			"dependencies: {db: {repo: http://charts.example.com, chart: c, version: 1.0.0}}\n",
+			"badil.yaml: dependencies.db.repo must be an https:// Helm repository URL",
+		},
+		{
+			"unknown key",
+			"dependencies: {db: {" + helmRepo + ", path: k8s/}}\n",
+			`badil.yaml: dependencies.db: unknown key "path"`,
+		},
+		{
+			"values a list",
+			"dependencies: {db: {" + oci + ", values: [a]}}\n",
+			"badil.yaml: dependencies.db.values must be a mapping",
+		},
+		{
+			"valueFiles empty",
+			"dependencies: {db: {" + oci + ", valueFiles: []}}\n",
+			"badil.yaml: dependencies.db.valueFiles must be a non-empty list of non-empty strings",
+		},
+		{
+			"hostParam empty",
+			"dependencies: {db: {" + oci + ", hostParam: \"\"}}\n",
+			"badil.yaml: dependencies.db.hostParam must be a non-empty string",
+		},
+		{
+			"exposed without hostParam",
+			"dependencies: {db: {" + oci + "}}\npreview: {domain: example.com, expose: {db: {}}}\n",
+			"badil.yaml: dependencies.db: missing 'hostParam' (required when preview.expose.db is set)",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := gitops.ParseCatalog([]byte(catalogServices + tt.deps))
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("err = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}

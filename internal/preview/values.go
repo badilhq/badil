@@ -1,11 +1,14 @@
 package preview
 
 import (
+	"bytes"
 	"cmp"
 	"maps"
 	"slices"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // BuildPreviewValues constructs a fresh PreviewValues for a slug given the
@@ -84,6 +87,11 @@ type Catalog struct {
 	Charts map[string]ChartSettings
 	// Namespace is the extra metadata of the preview Namespace; nil for none.
 	Namespace *NamespaceMetadata
+	// Dependencies are the upstream charts of badil.yaml, in order, as
+	// parsed: HostParam as written, Host empty.
+	Dependencies []DependencyEntry
+	// GitopsRepoURL is the git URL of the gitops repo.
+	GitopsRepoURL string
 }
 
 // chart returns the chart settings of name, its defaults applied.
@@ -106,7 +114,8 @@ func (c Catalog) imageTag(name string) string {
 }
 
 // ApplyCatalog returns vals projected on cat, never mutating vals:
-//   - apiVersion is APIVersion and namespace is cat.Namespace;
+//   - apiVersion is APIVersion, gitopsRepoURL is cat.GitopsRepoURL and
+//     namespace is cat.Namespace;
 //   - one entry per name of cat.Services, in that order: the existing entry of
 //     that name (keeping its commitSha, metadata and host) or a bare {name},
 //     with repoURL from cat.Repos, branch from cat.Branches (DefaultBranch
@@ -117,7 +126,11 @@ func (c Catalog) imageTag(name string) string {
 //     is pinned (commitSha set) and has a repoURL, unchanged (it keeps the
 //     chart and imageTag it was last written with);
 //   - a service listed twice keeps only its first entry;
-//   - every other entry is dropped.
+//   - every other entry is dropped;
+//   - dependencies are cat.Dependencies, in that order, except one named like
+//     a service entry of the result (a kept pinned entry of a service removed
+//     from the catalog), which is left out. Their host is ApplyHosts's to
+//     set.
 func ApplyCatalog(vals PreviewValues, cat Catalog) PreviewValues {
 	inCatalog := make(map[string]bool, len(cat.Services))
 	out := make([]ServiceEntry, 0, len(cat.Services)+len(vals.Services))
@@ -143,21 +156,36 @@ func ApplyCatalog(vals PreviewValues, cat Catalog) PreviewValues {
 	}
 	res := vals
 	res.APIVersion = APIVersion
+	res.GitopsRepoURL = cat.GitopsRepoURL
 	res.Namespace = cat.Namespace
 	res.Services = out
+	res.Dependencies = projectDependencies(cat.Dependencies, out)
 	return res
 }
 
-// Equal reports whether a and b have the same apiVersion and namespace and
-// hold the same entries, in the same order, every field compared (chart and
-// metadata by value).
+// projectDependencies returns a copy of deps without those named like an
+// entry of services.
+func projectDependencies(deps []DependencyEntry, services []ServiceEntry) []DependencyEntry {
+	out := make([]DependencyEntry, 0, len(deps))
+	for _, dep := range deps {
+		if slices.ContainsFunc(services, func(s ServiceEntry) bool { return s.Name == dep.Name }) {
+			continue
+		}
+		dep.ValueFiles = slices.Clone(dep.ValueFiles)
+		out = append(out, dep)
+	}
+	return out
+}
+
+// Equal reports whether a and b have the same apiVersion, gitopsRepoURL and
+// namespace and hold the same service and dependency entries, in the same
+// order, every field compared (chart, metadata and values by value).
 func Equal(a, b PreviewValues) bool {
 	return equalValues(a, b, "", false)
 }
 
-// EqualExceptUpdatedAt reports whether a and b have the same apiVersion and
-// namespace and hold the same entries, in the same order, ignoring only the
-// updated-at of serviceName's entry. Chart and metadata are compared by value.
+// EqualExceptUpdatedAt reports whether a and b are Equal, ignoring only the
+// updated-at of serviceName's entry.
 func EqualExceptUpdatedAt(a, b PreviewValues, serviceName string) bool {
 	return equalValues(a, b, serviceName, true)
 }
@@ -165,7 +193,9 @@ func EqualExceptUpdatedAt(a, b PreviewValues, serviceName string) bool {
 // equalValues compares a and b as Equal does, ignoring the updated-at of
 // serviceName's entry when ignoreUpdatedAt is set.
 func equalValues(a, b PreviewValues, serviceName string, ignoreUpdatedAt bool) bool {
-	if a.APIVersion != b.APIVersion || !equalNamespace(a.Namespace, b.Namespace) {
+	if a.APIVersion != b.APIVersion || a.GitopsRepoURL != b.GitopsRepoURL ||
+		!equalNamespace(a.Namespace, b.Namespace) ||
+		!slices.EqualFunc(a.Dependencies, b.Dependencies, equalDependency) {
 		return false
 	}
 	return slices.EqualFunc(a.Services, b.Services, func(x, y ServiceEntry) bool {
@@ -183,6 +213,26 @@ func equalValues(a, b PreviewValues, serviceName string, ignoreUpdatedAt bool) b
 		}
 		return mx == my
 	})
+}
+
+// equalDependency reports whether a and b hold the same fields. Values are
+// compared as YAML, so that a number decoded as a float equals the same
+// number read back as an integer; nil and empty ValueFiles or Values are
+// equal.
+func equalDependency(a, b DependencyEntry) bool {
+	return a.Name == b.Name && a.Chart == b.Chart && a.HostParam == b.HostParam && a.Host == b.Host &&
+		slices.Equal(a.ValueFiles, b.ValueFiles) && equalYAML(a.Values, b.Values)
+}
+
+// equalYAML reports whether a and b encode to the same YAML; empty maps are
+// equal whatever their encoding.
+func equalYAML(a, b map[string]any) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return len(a) == len(b)
+	}
+	x, errA := yaml.Marshal(a)
+	y, errB := yaml.Marshal(b)
+	return errA == nil && errB == nil && bytes.Equal(x, y)
 }
 
 // equalChart reports whether a and b hold the same settings; a nil and an
@@ -236,10 +286,12 @@ func UnpinPR(vals PreviewValues, owner, repo string, number int) (PreviewValues,
 	return out, removed, pinned
 }
 
-// ApplyHosts returns a copy of vals where every entry exposed by urls carries
-// its preview host (URLConfig.Host for slug) and every other entry has an
-// empty Host. When urls is not enabled, every Host is empty. The root fields
-// are kept. vals is never mutated.
+// ApplyHosts returns a copy of vals where every service entry exposed by urls
+// carries its preview host (URLConfig.Host for slug) and every other service
+// entry has an empty Host. A dependency exposed by urls with a HostParam
+// carries its host too; every other dependency has an empty Host and an
+// empty HostParam. When urls is not enabled, every Host is empty. The root
+// fields are kept. vals is never mutated.
 func ApplyHosts(vals PreviewValues, slug string, urls URLConfig) PreviewValues {
 	services := make([]ServiceEntry, len(vals.Services))
 	copy(services, vals.Services)
@@ -253,8 +305,19 @@ func ApplyHosts(vals PreviewValues, slug string, urls URLConfig) PreviewValues {
 			services[i].Host = urls.Host(services[i].Name, slug)
 		}
 	}
+	deps := make([]DependencyEntry, len(vals.Dependencies))
+	copy(deps, vals.Dependencies)
+	for i := range deps {
+		_, exposed := urls.Expose[deps[i].Name]
+		if urls.Enabled() && exposed && deps[i].HostParam != "" {
+			deps[i].Host = urls.Host(deps[i].Name, slug)
+			continue
+		}
+		deps[i].Host, deps[i].HostParam = "", ""
+	}
 	out := vals
 	out.Services = services
+	out.Dependencies = deps
 	return out
 }
 

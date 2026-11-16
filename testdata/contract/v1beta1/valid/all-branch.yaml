@@ -1,6 +1,7 @@
 # Every service tracks its branch: no commitSha, no host, no metadata. api's
 # image tag is a short SHA with a prefix, which Argo CD substitutes.
 apiVersion: badil.dev/v1beta1
+gitopsRepoURL: https://github.com/acme/gitops.git
 services:
   - name: api
     repoURL: https://github.com/acme/platform.git
@@ -18,3 +19,4 @@ services:
       path: k8s/
       imageTagParam: app.image.tag
       hostParam: app.ingress.host
+dependencies: []

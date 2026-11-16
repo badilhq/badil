@@ -1,0 +1,73 @@
+{{- range .Values.dependencies }}
+{{- $src := include "preview-env.dependencySource" . }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ $.Release.Name }}-{{ .name }}
+  namespace: {{ $.Values.argocdNamespace | quote }}
+  labels:
+    app.kubernetes.io/name: {{ .name }}
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+    app.kubernetes.io/part-of: preview-environments
+    app.kubernetes.io/managed-by: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+    preview.badil.dev/vcs.ref.revision: ""
+    preview.badil.dev/host: {{ .host | default "" | quote }}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: {{ $.Release.Name }}
+  {{- if .valueFiles }}
+  sources:
+    - {{ $src | indent 6 | trim }}
+    - repoURL: {{ $.Values.gitopsRepoURL | quote }}
+      targetRevision: HEAD
+      ref: values
+  {{- else }}
+  source:
+    {{- $src | nindent 4 }}
+  {{- end }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ $.Release.Name }}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+---
+{{- end }}
+
+{{- /*
+The chart source of a dependency: an OCI chart reference (path ".") or a
+chart of a Helm repository (chart), at its version. Its valueFiles are read
+from the gitops repo through the source of ref "values".
+*/}}
+{{- define "preview-env.dependencySource" -}}
+repoURL: {{ .chart.repoURL | quote }}
+targetRevision: {{ .chart.version | quote }}
+{{- if .chart.name }}
+chart: {{ .chart.name | quote }}
+{{- else }}
+path: "."
+{{- end }}
+helm:
+  releaseName: {{ .name }}
+  {{- with .valueFiles }}
+  valueFiles:
+    {{- range . }}
+    - {{ printf "$values/%s" . | quote }}
+    {{- end }}
+  {{- end }}
+  {{- with .values }}
+  valuesObject:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if .host }}
+  parameters:
+    - name: {{ .hostParam | quote }}
+      value: {{ .host | quote }}
+  {{- end }}
+{{- end }}

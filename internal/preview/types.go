@@ -1,5 +1,7 @@
 package preview
 
+import "strings"
+
 // APIVersion is the apiVersion of the preview values contract badil writes.
 const APIVersion = "badil.dev/v1beta1"
 
@@ -46,12 +48,53 @@ type ServiceEntry struct {
 }
 
 // PreviewValues is the root document persisted at previews/<slug>/values.yaml.
-// Namespace is the extra metadata of the preview Namespace, nil when
-// badil.yaml sets none.
+// GitopsRepoURL is the git URL of the gitops repo, from which a dependency
+// reads its valueFiles. Namespace is the extra metadata of the preview
+// Namespace, nil when badil.yaml sets none. Dependencies are the upstream
+// charts of badil.yaml, in its order.
 type PreviewValues struct {
-	APIVersion string             `yaml:"apiVersion"`
-	Namespace  *NamespaceMetadata `yaml:"namespace,omitempty"`
-	Services   []ServiceEntry     `yaml:"services"`
+	APIVersion    string             `yaml:"apiVersion"`
+	GitopsRepoURL string             `yaml:"gitopsRepoURL"`
+	Namespace     *NamespaceMetadata `yaml:"namespace,omitempty"`
+	Services      []ServiceEntry     `yaml:"services"`
+	Dependencies  []DependencyEntry  `yaml:"dependencies"`
+}
+
+// DependencyEntry is one item in PreviewValues.Dependencies: an upstream chart
+// deployed in every preview, never pinned and without an image tag. Values
+// are passed to the chart as an object and ValueFiles are paths in the gitops
+// repo. HostParam is the Helm parameter set to Host, the ingress host badil
+// computed for an exposed dependency: in a preview file both are set or both
+// are empty.
+type DependencyEntry struct {
+	Name       string          `yaml:"name"`
+	Chart      DependencyChart `yaml:"chart"`
+	Values     map[string]any  `yaml:"values,omitempty"`
+	ValueFiles []string        `yaml:"valueFiles,omitempty"`
+	HostParam  string          `yaml:"hostParam,omitempty"`
+	Host       string          `yaml:"host,omitempty"`
+}
+
+// DependencyChart is where a dependency's chart comes from: an OCI chart
+// reference (RepoURL starts with OCIScheme, Name is empty) or a chart Name in
+// the Helm repository at RepoURL, at Version.
+type DependencyChart struct {
+	RepoURL string `yaml:"repoURL"`
+	Name    string `yaml:"name,omitempty"`
+	Version string `yaml:"version"`
+}
+
+// OCIScheme starts the RepoURL of a dependency chart in an OCI registry.
+const OCIScheme = "oci://"
+
+// ChartName returns the name of the chart: Name, or the last path segment of
+// an OCI reference.
+func (c DependencyChart) ChartName() string {
+	if c.Name != "" {
+		return c.Name
+	}
+	ref := strings.TrimSuffix(c.RepoURL, "/")
+	return ref[strings.LastIndex(ref, "/")+1:]
 }
 
 // ChartSettings is how a service's chart is rendered: the chart path in the

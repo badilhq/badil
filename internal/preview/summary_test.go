@@ -362,3 +362,36 @@ func TestBuildPreviewLimitSummary(t *testing.T) {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+func TestBuildSummary_Dependencies(t *testing.T) {
+	urls := sharedURLFixture()
+	urls.Expose["mailpit"] = "/ui"
+	vals := preview.PreviewValues{Services: []preview.ServiceEntry{{Name: "front"}}}
+	vals.Dependencies = []preview.DependencyEntry{
+		{
+			Name: "postgres",
+			Chart: preview.DependencyChart{
+				RepoURL: "oci://registry-1.docker.io/bitnamicharts/postgresql", Version: "16.4.2",
+			},
+		},
+		{
+			Name: "mailpit",
+			Chart: preview.DependencyChart{
+				RepoURL: "https://jouve.github.io/charts", Name: "mailpit", Version: "0.20.0",
+			},
+			HostParam: "ingress.hostname",
+			Host:      "mailpit-slug.127.0.0.1.nip.io",
+		},
+	}
+
+	got := preview.BuildSummary("slug", vals, urls, nil, "m", "u")
+
+	want := "## 🚀 Preview: `slug`\n\n" +
+		"- **front** · 🔄 `main`\n" +
+		"- **postgres** · 📦 `postgresql` `16.4.2`\n" +
+		"- **mailpit** · 📦 `mailpit` `0.20.0` · [mailpit-slug.127.0.0.1.nip.io/ui](http://mailpit-slug.127.0.0.1.nip.io/ui)\n" +
+		"\n---\n🔗 [m](u)"
+	if got != want {
+		t.Errorf("summary mismatch\n got:\n%s\nwant:\n%s", got, want)
+	}
+}

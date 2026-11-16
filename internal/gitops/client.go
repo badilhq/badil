@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -282,11 +283,12 @@ type WriteResult struct {
 // commitSha, the rest tracking their branch).
 //
 // After every build or merge, preview.ApplyCatalog then preview.ApplyHosts
-// project the file on catalog: apiVersion and namespace, every catalog
-// service in catalog order (a missing one added as a branch-tracking entry)
-// with its repoURL, branch, chart, imageTag and host, then the pinned entries
-// of services no longer in it; their unpinned entries are dropped. The
-// written file follows the current catalog.
+// project the file on catalog: apiVersion, gitopsRepoURL and namespace, every
+// catalog service in catalog order (a missing one added as a branch-tracking
+// entry) with its repoURL, branch, chart, imageTag and host, then the pinned
+// entries of services no longer in it; their unpinned entries are dropped;
+// then the catalog dependencies with their hosts. The written file follows
+// the current catalog.
 //
 // With skipUnchanged, when the file exists and the values to write differ
 // from it only in serviceName's updated-at (preview.EqualExceptUpdatedAt),
@@ -319,20 +321,43 @@ func (c *Client) WritePreviewWithRetry(
 	return res, err
 }
 
-// applyCatalog returns vals projected on catalog: the namespace metadata,
-// every catalog service in catalog order with its repoURL, branch, chart and
-// imageTag, then the pinned entries of removed services
-// (preview.ApplyCatalog), then hosts (preview.ApplyHosts).
-func applyCatalog(vals preview.PreviewValues, slug string, catalog *ServiceCatalog) preview.PreviewValues {
+// gitopsRepoURL returns the git URL of the gitops repo (GITOPS_REPO):
+// https://github.com/<owner>/<repo>.git.
+func (c *Client) gitopsRepoURL() string {
+	return "https://github.com/" + c.owner + "/" + c.repo + ".git"
+}
+
+// applyCatalog returns vals projected on catalog: the gitops repo URL, the
+// namespace metadata, every catalog service in catalog order with its
+// repoURL, branch, chart and imageTag, then the pinned entries of removed
+// services, then the catalog dependencies (preview.ApplyCatalog), then hosts
+// (preview.ApplyHosts). A dependency left out because a kept pinned entry has
+// its name is logged as a warning.
+func (c *Client) applyCatalog(
+	ctx context.Context, vals preview.PreviewValues, slug string, catalog *ServiceCatalog,
+) preview.PreviewValues {
 	projected := preview.ApplyCatalog(vals, preview.Catalog{
-		Services:  catalog.Services,
-		Repos:     catalog.Repos,
-		Branches:  catalog.Branches,
-		ImageTag:  catalog.ImageTag,
-		ImageTags: catalog.ImageTags,
-		Charts:    catalog.Charts,
-		Namespace: catalog.Namespace,
+		Services:      catalog.Services,
+		Repos:         catalog.Repos,
+		Branches:      catalog.Branches,
+		ImageTag:      catalog.ImageTag,
+		ImageTags:     catalog.ImageTags,
+		Charts:        catalog.Charts,
+		Namespace:     catalog.Namespace,
+		Dependencies:  catalog.Dependencies,
+		GitopsRepoURL: c.gitopsRepoURL(),
 	})
+	for _, dep := range catalog.Dependencies {
+		if !slices.ContainsFunc(projected.Dependencies, func(d preview.DependencyEntry) bool {
+			return d.Name == dep.Name
+		}) {
+			//nolint:sloglint // gitops has no scoped logger yet
+			slog.WarnContext(ctx, "dependency left out: a pinned service has its name",
+				slog.String("slug", slug),
+				slog.String("name", dep.Name),
+			)
+		}
+	}
 	return preview.ApplyHosts(projected, slug, catalog.URLs)
 }
 
@@ -355,13 +380,16 @@ func (c *Client) writePreviewWithRetry(
 	var vals preview.PreviewValues
 	var message string
 	if exists {
-		vals = applyCatalog(preview.UpdatePreviewValues(*existing, serviceName, commitSha, inputs), slug, catalog)
+		updated := preview.UpdatePreviewValues(*existing, serviceName, commitSha, inputs)
+		vals = c.applyCatalog(ctx, updated, slug, catalog)
 		if skipUnchanged && preview.EqualExceptUpdatedAt(*existing, vals, serviceName) {
 			return &WriteResult{Values: *existing, Unchanged: true}, nil
 		}
 		message = updateMessage
 	} else {
-		vals = applyCatalog(preview.BuildPreviewValues(serviceName, commitSha, catalog.Services, inputs), slug, catalog)
+		vals = c.applyCatalog(
+			ctx, preview.BuildPreviewValues(serviceName, commitSha, catalog.Services, inputs), slug, catalog,
+		)
 		message = createMessage
 	}
 
@@ -380,7 +408,8 @@ func (c *Client) writePreviewWithRetry(
 			return nil, fmt.Errorf("conflict re-fetch: %w", getErr)
 		}
 		sha = latestSHA
-		vals = applyCatalog(preview.UpdatePreviewValues(*latest, serviceName, commitSha, inputs), slug, catalog)
+		updated := preview.UpdatePreviewValues(*latest, serviceName, commitSha, inputs)
+		vals = c.applyCatalog(ctx, updated, slug, catalog)
 		if skipUnchanged && preview.EqualExceptUpdatedAt(*latest, vals, serviceName) {
 			return &WriteResult{Values: *latest, Unchanged: true}, nil
 		}
@@ -453,7 +482,7 @@ func (c *Client) teardownPreviewWithRetry(
 					return nil, fmt.Errorf("teardown %s: %w", previewPath(slug), err)
 				}
 			}
-			vals = applyCatalog(vals, slug, catalog)
+			vals = c.applyCatalog(ctx, vals, slug, catalog)
 			result.Values = vals
 			result.CommitMessage = fmt.Sprintf("chore(preview): remove %s from %s", strings.Join(removed, ", "), slug)
 			result.CommitURL, writeErr = c.WritePreview(ctx, slug, vals, sha, result.CommitMessage)
@@ -484,8 +513,9 @@ func (c *Client) teardownPreviewWithRetry(
 
 // SyncResult is the outcome of SyncPreviewWithRetry. Changed is true when
 // the file was rewritten; Values, CommitURL and CommitMessage then describe
-// that write. Notify is true when the written file's ordered list of entry
-// names or any entry's host differs from the file it replaced.
+// that write. Notify is true when the written file's ordered list of service
+// or dependency names, or any entry's host, differs from the file it
+// replaced.
 type SyncResult struct {
 	Values        preview.PreviewValues
 	CommitURL     string
@@ -522,7 +552,7 @@ func (c *Client) syncPreviewWithRetry(ctx context.Context, slug string, catalog 
 
 	message := fmt.Sprintf("chore(preview): sync %s with badil.yaml", slug)
 	for attempt := 1; attempt <= MaxWriteRetries; attempt++ {
-		vals := applyCatalog(*existing, slug, catalog)
+		vals := c.applyCatalog(ctx, *existing, slug, catalog)
 		if preview.Equal(*existing, vals) {
 			return &SyncResult{}, nil
 		}
@@ -551,11 +581,13 @@ func (c *Client) syncPreviewWithRetry(ctx context.Context, slug string, catalog 
 	return nil, fmt.Errorf("sync %s: %d attempts exhausted", previewPath(slug), MaxWriteRetries)
 }
 
-// summaryChanged reports whether the ordered list of entry names or any
-// entry's host differs between a and b: the parts of the PR comment a sync
-// can change.
+// summaryChanged reports whether the ordered list of service names, the
+// ordered list of dependency names or any entry's host differs between a and
+// b: the parts of the PR comment a sync can change.
 func summaryChanged(a, b preview.PreviewValues) bool {
 	return !slices.EqualFunc(a.Services, b.Services, func(x, y preview.ServiceEntry) bool {
+		return x.Name == y.Name && x.Host == y.Host
+	}) || !slices.EqualFunc(a.Dependencies, b.Dependencies, func(x, y preview.DependencyEntry) bool {
 		return x.Name == y.Name && x.Host == y.Host
 	})
 }

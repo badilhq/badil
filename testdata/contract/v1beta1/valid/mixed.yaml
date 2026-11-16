@@ -3,6 +3,7 @@
 # host on a custom parameter; worker tracking its branch, without one. The
 # preview Namespace gets an extra label.
 apiVersion: badil.dev/v1beta1
+gitopsRepoURL: https://github.com/acme/gitops.git
 namespace:
   labels:
     team: platform
@@ -44,3 +45,4 @@ services:
       path: k8s/
       imageTagParam: app.image.tag
       hostParam: app.ingress.host
+dependencies: []

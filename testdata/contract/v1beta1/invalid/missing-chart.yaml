@@ -1,7 +1,9 @@
 # want: at '/services/0': missing property 'chart'
 apiVersion: badil.dev/v1beta1
+gitopsRepoURL: https://github.com/acme/gitops.git
 services:
   - name: api
     repoURL: https://github.com/acme/platform.git
     branch: main
     imageTag: ${ARGOCD_APP_REVISION}
+dependencies: []

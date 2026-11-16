@@ -44,6 +44,9 @@ type ServiceCatalog struct {
 	// Namespace is the root namespace block: the extra labels and annotations
 	// of the preview Namespace. It is nil when absent or empty.
 	Namespace *preview.NamespaceMetadata
+	// Dependencies are the upstream charts of the dependencies mapping, in
+	// file order, with no host. It is nil when the mapping is absent or empty.
+	Dependencies []preview.DependencyEntry
 }
 
 // DefaultLabel is the preview label when preview.label is absent.
@@ -90,15 +93,16 @@ const pairStride = 2
 const configFile = "badil.yaml"
 
 // badilFile is badil.yaml. Every key is known: decoding with KnownFields
-// rejects any other. Services stays a node to keep catalog order; its entries
-// are checked by parseServiceEntries, since yaml.Node.Decode ignores
-// KnownFields. ImageTag and Namespace stay nodes so that a null is rejected
-// rather than ignored.
+// rejects any other. Services and Dependencies stay nodes to keep file order;
+// their entries are checked by parseServiceEntries and parseDependencies,
+// since yaml.Node.Decode ignores KnownFields. ImageTag and Namespace stay
+// nodes so that a null is rejected rather than ignored.
 type badilFile struct {
-	Services  yaml.Node     `yaml:"services"`
-	Preview   *previewBlock `yaml:"preview"`
-	ImageTag  yaml.Node     `yaml:"imageTag"`
-	Namespace yaml.Node     `yaml:"namespace"`
+	Services     yaml.Node     `yaml:"services"`
+	Dependencies yaml.Node     `yaml:"dependencies"`
+	Preview      *previewBlock `yaml:"preview"`
+	ImageTag     yaml.Node     `yaml:"imageTag"`
+	Namespace    yaml.Node     `yaml:"namespace"`
 }
 
 type previewBlock struct {
@@ -193,6 +197,11 @@ func parseDocument(doc *badilFile) (*ServiceCatalog, error) {
 	if err := parseServiceEntries(&doc.Services, c); err != nil {
 		return nil, err
 	}
+	if doc.Dependencies.Kind != 0 {
+		if err := parseDependencies(&doc.Dependencies, c); err != nil {
+			return nil, err
+		}
+	}
 	if doc.ImageTag.Kind != 0 {
 		format, err := parseImageTag("imageTag", &doc.ImageTag)
 		if err != nil {
@@ -214,6 +223,9 @@ func parseDocument(doc *badilFile) (*ServiceCatalog, error) {
 		return nil, err
 	}
 	c.URLs = urls
+	if err = checkExposedDependencies(c); err != nil {
+		return nil, err
+	}
 	if doc.Preview != nil && doc.Preview.Label != nil {
 		c.Label = string(*doc.Preview.Label)
 	}
@@ -506,4 +518,132 @@ func previewURLs(p *previewBlock) (preview.URLConfig, error) {
 		expose[name] = path
 	}
 	return preview.URLConfig{Domain: string(p.Domain), TLS: p.TLS == nil || bool(*p.TLS), Expose: expose}, nil
+}
+
+// parseDependencies validates the dependencies mapping, in file order, and
+// sets c.Dependencies. A dependency name must be unique and must not be a
+// service of c.
+func parseDependencies(n *yaml.Node, c *ServiceCatalog) error {
+	n = resolveAlias(n)
+	if n.Kind != yaml.MappingNode {
+		return errors.New("dependencies must be a mapping")
+	}
+	return eachKey("dependencies", n, func(name string, val *yaml.Node) error {
+		if _, isService := c.Repos[name]; isService {
+			return fmt.Errorf("dependencies.%s: %q is already a service", name, name)
+		}
+		dep, err := dependencyEntry(name, val)
+		if err != nil {
+			return err
+		}
+		c.Dependencies = append(c.Dependencies, dep)
+		return nil
+	})
+}
+
+// dependencyEntry validates one dependencies entry. chart and version are
+// required. A chart starting with preview.OCIScheme is an OCI chart reference,
+// and repo must then be absent; any other chart is a chart name, and repo, an
+// https:// Helm repository URL, is then required. values (a mapping),
+// valueFiles and hostParam are optional. Any other key is an error.
+func dependencyEntry(name string, n *yaml.Node) (preview.DependencyEntry, error) {
+	prefix := "dependencies." + name
+	if n.Kind != yaml.MappingNode {
+		return preview.DependencyEntry{}, fmt.Errorf("%s must be a mapping", prefix)
+	}
+	dep := preview.DependencyEntry{Name: name}
+	var chart, repo string
+	var hasRepo bool
+	err := eachKey(prefix, n, func(key string, val *yaml.Node) error {
+		var err error
+		path := prefix + "." + key
+		switch key {
+		case "chart":
+			chart, err = requireString(path, val)
+		case "repo":
+			repo, err = requireString(path, val)
+			hasRepo = true
+		case "version":
+			dep.Chart.Version, err = requireString(path, val)
+		case "values":
+			if dep.Values, err = parseValues(path, val); len(dep.Values) == 0 {
+				dep.Values = nil
+			}
+		case "valueFiles":
+			dep.ValueFiles, err = parseValueFiles(path, val)
+		case "hostParam":
+			dep.HostParam, err = requireString(path, val)
+		default:
+			err = fmt.Errorf("%s: unknown key %q", prefix, key)
+		}
+		return err
+	})
+	if err != nil {
+		return preview.DependencyEntry{}, err
+	}
+	switch {
+	case chart == "":
+		return preview.DependencyEntry{}, fmt.Errorf("%s: missing 'chart'", prefix)
+	case dep.Chart.Version == "":
+		return preview.DependencyEntry{}, fmt.Errorf("%s: missing 'version'", prefix)
+	case strings.HasPrefix(chart, preview.OCIScheme):
+		if hasRepo {
+			return preview.DependencyEntry{}, fmt.Errorf(
+				"%s: 'repo' must be absent when 'chart' is an %s reference", prefix, preview.OCIScheme)
+		}
+		dep.Chart.RepoURL = chart
+	case !hasRepo:
+		return preview.DependencyEntry{}, fmt.Errorf(
+			"%s: missing 'repo' ('chart' is not an %s reference)", prefix, preview.OCIScheme)
+	case !strings.HasPrefix(repo, "https://"):
+		return preview.DependencyEntry{}, fmt.Errorf("%s.repo must be an https:// Helm repository URL", prefix)
+	default:
+		dep.Chart.RepoURL, dep.Chart.Name = repo, chart
+	}
+	return dep, nil
+}
+
+// parseValues validates a dependency's values, at path: a mapping, returned
+// as yaml.v3 decodes it into a map, with every timestamp kept as the string
+// written.
+func parseValues(path string, n *yaml.Node) (map[string]any, error) {
+	if n.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("%s must be a mapping", path)
+	}
+	timestampsAsStrings(n)
+	var values map[string]any
+	if err := n.Decode(&values); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return values, nil
+}
+
+// timestampsAsStrings retags every timestamp scalar under n as a string, so
+// that decoding keeps the text written rather than a time.Time, which yaml.v3
+// would encode in another form.
+func timestampsAsStrings(n *yaml.Node) {
+	if n.Kind == yaml.ScalarNode && n.Tag == "!!timestamp" {
+		n.Tag = strTag
+	}
+	if n.Kind == yaml.AliasNode && n.Alias != nil {
+		timestampsAsStrings(n.Alias)
+	}
+	for _, child := range n.Content {
+		timestampsAsStrings(child)
+	}
+}
+
+// checkExposedDependencies rejects a dependency named in preview.expose
+// without a hostParam: no Helm parameter is known to set its host.
+func checkExposedDependencies(c *ServiceCatalog) error {
+	if !c.URLs.Enabled() {
+		return nil
+	}
+	for _, dep := range c.Dependencies {
+		if _, exposed := c.URLs.Expose[dep.Name]; exposed && dep.HostParam == "" {
+			return fmt.Errorf("dependencies.%s: missing 'hostParam' (required when preview.expose.%s is set)",
+				dep.Name, dep.Name)
+		}
+	}
+	return nil
 }
