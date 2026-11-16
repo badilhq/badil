@@ -152,13 +152,16 @@ func TestRefusedByHolder_Exists(t *testing.T) {
 			captureLogs(t)
 			f := &reconcileFake{previews: tc.previews}
 			pr := fetchedPR("front", tc.open, "preview:pricing")
-			o, r, exists := lifecycle.RefusedByHolder(
+			o, r, vals := lifecycle.RefusedByHolder(
 				context.Background(), f, event("labeled", "front", "preview:pricing"), pr,
 				preview.Resolution{Slug: tc.slug}, []string{"front"}, gitops.DefaultLabel,
 			)
 
-			if o != "" || r != "" || exists != tc.exists {
-				t.Errorf("refusedByHolder = (%q, %q, %v), want (\"\", \"\", %v)", o, r, exists, tc.exists)
+			if exists := vals != nil; o != "" || r != "" || exists != tc.exists {
+				t.Errorf("refusedByHolder = (%q, %q, %v), want (\"\", \"\", values read %v)", o, r, vals, tc.exists)
+			}
+			if tc.exists && vals != tc.previews[tc.slug] {
+				t.Errorf("values = %+v, want the preview read", vals)
 			}
 			if !slices.Equal(f.calls, tc.calls) {
 				t.Errorf("calls = %v, want %v", f.calls, tc.calls)

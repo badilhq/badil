@@ -83,6 +83,33 @@ func unpinOnly(ctx context.Context, api TeardownAPI, tt Target, reason string) {
 // service or deleted the preview); a failed or no-op teardown removed nothing.
 func teardown(ctx context.Context, api TeardownAPI, tt Target, reason, trigger string, commentPR bool) bool {
 	result, err := api.TeardownPreviewWithRetry(ctx, tt.Slug, tt.Owner, tt.Repo, tt.Number)
+	return afterTeardown(ctx, api, tt, result, err, reason, trigger, commentPR)
+}
+
+// unpinServices unpins, in the preview tt.Slug, the entries of the PR tt for
+// services (gitops.Client.UnpinServicesWithRetry), which never deletes the
+// file, then handles the write as teardown does, with trigger webhook and
+// the PR's comment left alone. It reports whether it unpinned an entry, and
+// the write's error.
+func unpinServices(ctx context.Context, api ReconcileAPI, tt Target, services []string) (bool, error) {
+	result, err := api.UnpinServicesWithRetry(ctx, tt.Slug, tt.Owner, tt.Repo, tt.Number, services)
+	return afterTeardown(ctx, api, tt, result, err, "", triggerWebhook, false), err
+}
+
+// afterTeardown handles the outcome of a write removing the PR tt from its
+// preview: it records the teardown with trigger and logs it; when commentPR
+// is true, it edits the PR's comment, which states reason; when the preview
+// survives, it refreshes the remaining PRs' summaries. It reports whether the
+// PR was removed from the preview; a failed or no-op write removed nothing.
+func afterTeardown(
+	ctx context.Context,
+	api TeardownAPI,
+	tt Target,
+	result *gitops.TeardownResult,
+	err error,
+	reason, trigger string,
+	commentPR bool,
+) bool {
 	if err != nil {
 		api.Teardown(trigger, teardownError)
 		slog.ErrorContext(ctx, "preview teardown failed",

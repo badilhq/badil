@@ -16,6 +16,6 @@ func RefusedByHolder(
 	t preview.Resolution,
 	services []string,
 	label string,
-) (string, string, bool) {
+) (string, string, *preview.PreviewValues) {
 	return refusedByHolder(ctx, api, ev, pr, t, services, label)
 }

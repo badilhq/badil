@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/badilhq/badil/internal/gitops"
@@ -32,18 +33,23 @@ type deployCall struct {
 }
 
 // reconcileFake is an in-memory ReconcileAPI. The catalog is parsed from
-// reconcileServices unless catalogErr is set. teardownBySlug, when it has the
+// badil, or reconcileServices when it is empty, unless catalogErr is set. teardownBySlug, when it has the
 // slug, overrides teardown, and teardownErr fails every teardown. previews is
 // what GetPreview reads, unless previewErr is set; an unknown slug is
 // ErrNotFound. maxPreviews, when set, is the catalog's MaxPreviews. listed is
 // what ListPreviews returns, unless listErr is set. A write of a service in unchanged with skipUnchanged set
-// returns an Unchanged result and is logged in skipped, not in writes. calls
-// logs, in order, "teardown:<slug>", "get:<slug>", "list", "write:<slug>",
-// "unchanged:<slug>", "upsert" and "fanout". Metrics records the outcomes;
-// nil records nothing.
+// returns an Unchanged result and is logged in skipped, not in writes.
+// ListPullRequestFiles returns files, unless filesErr is set.
+// UnpinServicesWithRetry unpins the services from previews[slug]
+// (preview.UnpinPRServices) and returns that file, never deleted, unless
+// unpinErr is set; it is logged in unpins. calls logs, in order,
+// "teardown:<slug>", "files", "get:<slug>", "list", "unpin:<slug>",
+// "write:<slug>", "unchanged:<slug>", "upsert" and "fanout". Metrics records
+// the outcomes; nil records nothing.
 type reconcileFake struct {
 	*metrics.Metrics
 
+	badil          string
 	catalogErr     error
 	pr             *gitops.PullRequest
 	prErr          error
@@ -59,8 +65,12 @@ type reconcileFake struct {
 	maxPreviews    int
 	listed         []string
 	listErr        error
+	files          []gitops.ChangedFile
+	filesErr       error
+	unpinErr       error
 
 	prReads   int
+	unpins    []unpinCall
 	skipped   []deployCall
 	writes    []deployCall
 	fanOuts   []string
@@ -93,12 +103,64 @@ func (f *reconcileFake) FetchServiceCatalog(context.Context) (*gitops.ServiceCat
 	if f.catalogErr != nil {
 		return nil, f.catalogErr
 	}
-	catalog, err := gitops.ParseCatalog([]byte(reconcileServices))
+	catalog, err := gitops.ParseCatalog([]byte(f.badilYAML()))
 	if err != nil {
 		return nil, err
 	}
 	catalog.MaxPreviews = f.maxPreviews
 	return catalog, nil
+}
+
+// badilYAML returns badil, or reconcileServices when it is empty.
+func (f *reconcileFake) badilYAML() string {
+	if f.badil != "" {
+		return f.badil
+	}
+	return reconcileServices
+}
+
+func (f *reconcileFake) ListPullRequestFiles(context.Context, string, string, int) ([]gitops.ChangedFile, error) {
+	f.calls = append(f.calls, "files")
+	if f.filesErr != nil {
+		return nil, f.filesErr
+	}
+	return f.files, nil
+}
+
+// unpinCall is one UnpinServicesWithRetry call.
+type unpinCall struct {
+	slug, owner, repo string
+	number            int
+	services          []string
+}
+
+func (f *reconcileFake) UnpinServicesWithRetry(
+	_ context.Context,
+	slug, owner, repo string,
+	prNumber int,
+	services []string,
+) (*gitops.TeardownResult, error) {
+	f.calls = append(f.calls, "unpin:"+slug)
+	f.unpins = append(f.unpins, unpinCall{slug: slug, owner: owner, repo: repo, number: prNumber, services: services})
+	if f.unpinErr != nil {
+		return nil, f.unpinErr
+	}
+	vals, ok := f.previews[slug]
+	if !ok {
+		return &gitops.TeardownResult{}, nil
+	}
+	unpinned, removed, _ := preview.UnpinPRServices(*vals, owner, repo, prNumber, services)
+	if len(removed) == 0 {
+		return &gitops.TeardownResult{}, nil
+	}
+	catalog, _ := gitops.ParseCatalog([]byte(f.badilYAML()))
+	return &gitops.TeardownResult{
+		Values:        unpinned,
+		Catalog:       catalog,
+		Removed:       removed,
+		CommitURL:     sweepCommitURL,
+		CommitMessage: "chore(preview): remove " + strings.Join(removed, ", ") + " from " + slug,
+	}, nil
 }
 
 func (f *reconcileFake) GetPullRequest(context.Context, string, string, int) (*gitops.PullRequest, error) {
@@ -174,7 +236,7 @@ func (f *reconcileFake) TeardownPreviewWithRetry(
 	}
 	// Like the client, an update carries the catalog it was projected on.
 	withCatalog := *res
-	withCatalog.Catalog, _ = gitops.ParseCatalog([]byte(reconcileServices))
+	withCatalog.Catalog, _ = gitops.ParseCatalog([]byte(f.badilYAML()))
 	return &withCatalog, nil
 }
 
