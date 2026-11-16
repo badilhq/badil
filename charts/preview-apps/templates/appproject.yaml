@@ -14,10 +14,10 @@ metadata:
   name: {{ .Release.Name }}
   namespace: {{ .Values.argocdNamespace | quote }}
   labels:
-    {{- include "preview-env.labels" (dict "name" .Release.Name "instance" .Release.Name) | nindent 4 }}
+    {{- include "preview-apps.labels" (dict "name" .Release.Name "instance" .Release.Name) | nindent 4 }}
   annotations:
     argocd.argoproj.io/sync-wave: "-3"
-  {{- include "preview-env.finalizers" . | nindent 2 }}
+  {{- include "preview-apps.finalizers" . | nindent 2 }}
 spec:
   description: "Preview environment: {{ .Release.Name }}"
   sourceRepos:

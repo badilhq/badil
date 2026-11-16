@@ -1,7 +1,7 @@
 # Per-preview limits with Kyverno: a ResourceQuota, a LimitRange and an
 # ingress NetworkPolicy, all named preview-guardrails, generated in every
 # preview namespace (label app.kubernetes.io/part-of: preview-environments,
-# set by the preview-env chart). Existing previews get them when the policy is
+# set by the preview-apps chart). Existing previews get them when the policy is
 # applied; teardown deletes them with the preview namespace.
 #
 # - Requires Kyverno v1.19.0 or later.

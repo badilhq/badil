@@ -1,17 +1,17 @@
 {{- range .Values.dependencies }}
-{{- $src := include "preview-env.dependencySource" . }}
+{{- $src := include "preview-apps.dependencySource" . }}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: {{ $.Release.Name }}-{{ .name }}
   namespace: {{ $.Values.argocdNamespace | quote }}
   labels:
-    {{- include "preview-env.labels" (dict "name" .name "instance" $.Release.Name) | nindent 4 }}
+    {{- include "preview-apps.labels" (dict "name" .name "instance" $.Release.Name) | nindent 4 }}
   annotations:
     argocd.argoproj.io/sync-wave: "-1"
     preview.badil.dev/vcs.ref.revision: ""
     preview.badil.dev/host: {{ .host | default "" | quote }}
-  {{- include "preview-env.finalizers" . | nindent 2 }}
+  {{- include "preview-apps.finalizers" . | nindent 2 }}
 spec:
   project: {{ $.Release.Name }}
   {{- if .valueFiles }}
@@ -24,7 +24,7 @@ spec:
   source:
     {{- $src | nindent 4 }}
   {{- end }}
-  {{- include "preview-env.applicationSync" $.Release.Name | nindent 2 }}
+  {{- include "preview-apps.applicationSync" $.Release.Name | nindent 2 }}
 ---
 {{- end }}
 
@@ -33,7 +33,7 @@ The chart source of a dependency: an OCI chart reference (path ".") or a
 chart of a Helm repository (chart), at its version. Its valueFiles are read
 from the gitops repo through the source of ref "values".
 */}}
-{{- define "preview-env.dependencySource" -}}
+{{- define "preview-apps.dependencySource" -}}
 repoURL: {{ .chart.repoURL | quote }}
 targetRevision: {{ .chart.version | quote }}
 {{- if .chart.name }}

@@ -784,13 +784,13 @@ func TestParseCatalog_MalformedRendererSettings(t *testing.T) {
 		{
 			"namespace label reserved",
 			catalogServices + "namespace: {labels: {app.kubernetes.io/part-of: x}}\n",
-			"badil.yaml: namespace.labels.app.kubernetes.io/part-of is set by the preview-env chart " +
+			"badil.yaml: namespace.labels.app.kubernetes.io/part-of is set by the preview-apps chart " +
 				"and cannot be overridden",
 		},
 		{
 			"namespace annotation reserved",
 			catalogServices + "namespace: {annotations: {argocd.argoproj.io/sync-wave: \"0\"}}\n",
-			"badil.yaml: namespace.annotations.argocd.argoproj.io/sync-wave is set by the preview-env chart " +
+			"badil.yaml: namespace.annotations.argocd.argoproj.io/sync-wave is set by the preview-apps chart " +
 				"and cannot be overridden",
 		},
 		{

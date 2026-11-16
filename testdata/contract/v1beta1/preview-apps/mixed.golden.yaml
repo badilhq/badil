@@ -1,27 +1,28 @@
 ---
-# Source: preview-env/templates/namespace.yaml
+# Source: preview-apps/templates/namespace.yaml
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: dependencies
+  name: mixed
   labels:
-    app.kubernetes.io/name: dependencies
-    app.kubernetes.io/instance: dependencies
+    app.kubernetes.io/name: mixed
+    app.kubernetes.io/instance: mixed
     app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
+    "team": "platform"
   annotations:
     argocd.argoproj.io/sync-wave: "-2"
 
 ---
-# Source: preview-env/templates/appproject.yaml
+# Source: preview-apps/templates/appproject.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
-  name: dependencies
+  name: mixed
   namespace: "argocd"
   labels:
-    app.kubernetes.io/name: dependencies
-    app.kubernetes.io/instance: dependencies
+    app.kubernetes.io/name: mixed
+    app.kubernetes.io/instance: mixed
     app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
   annotations:
@@ -29,35 +30,33 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  description: "Preview environment: dependencies"
+  description: "Preview environment: mixed"
   sourceRepos:
     - "https://github.com/acme/platform.git"
-    - "oci://registry-1.docker.io/bitnamicharts/postgresql"
-    - "https://github.com/acme/gitops.git"
-    - "https://jouve.github.io/charts"
+    - "https://github.com/acme/front.git"
   destinations:
-    - namespace: dependencies
+    - namespace: mixed
       server: https://kubernetes.default.svc
   clusterResourceWhitelist:
     - group: ""
       kind: Namespace
 
 ---
-# Source: preview-env/templates/application.yaml
+# Source: preview-apps/templates/application.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: dependencies-api
+  name: mixed-api
   namespace: "argocd"
   labels:
     app.kubernetes.io/name: api
-    app.kubernetes.io/instance: dependencies
+    app.kubernetes.io/instance: mixed
     app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "0"
-    preview.badil.dev/vcs.ref.revision: "0123456789abcdef0123456789abcdef01234567"
-    preview.badil.dev/host: ""
+    preview.badil.dev/vcs.ref.revision: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+    preview.badil.dev/host: "api-feature-pricing.preview.example.com"
     preview.badil.dev/pr-author: "octocat"
     preview.badil.dev/pr-url: "https://github.com/acme/platform/pull/42"
     preview.badil.dev/pr-number: "42"
@@ -68,20 +67,24 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: dependencies
+  project: mixed
   source:
     repoURL: "https://github.com/acme/platform.git"
-    targetRevision: "0123456789abcdef0123456789abcdef01234567"
-    path: "k8s/"
+    targetRevision: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+    path: "deploy/chart"
     helm:
       releaseName: api
+      valueFiles:
+        - "values-preview.yaml"
       parameters:
         - name: "app.image.tag"
-          value: "0123456"
+          value: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
           forceString: true
+        - name: "app.ingress.host"
+          value: "api-feature-pricing.preview.example.com"
   destination:
     server: https://kubernetes.default.svc
-    namespace: dependencies
+    namespace: mixed
   syncPolicy:
     automated:
       prune: true
@@ -90,84 +93,80 @@ spec:
       - CreateNamespace=false
 
 ---
-# Source: preview-env/templates/dependencies.yaml
+# Source: preview-apps/templates/application.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: dependencies-postgres
+  name: mixed-front
   namespace: "argocd"
   labels:
-    app.kubernetes.io/name: postgres
-    app.kubernetes.io/instance: dependencies
+    app.kubernetes.io/name: front
+    app.kubernetes.io/instance: mixed
     app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "-1"
+    argocd.argoproj.io/sync-wave: "0"
+    preview.badil.dev/vcs.ref.revision: ""
+    preview.badil.dev/host: "front-feature-pricing.preview.example.com"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: mixed
+  source:
+    repoURL: "https://github.com/acme/front.git"
+    targetRevision: "main"
+    path: "k8s/"
+    helm:
+      releaseName: front
+      parameters:
+        - name: "image.tag"
+          value: "${ARGOCD_APP_REVISION}"
+          forceString: true
+        - name: "ingress.hostname"
+          value: "front-feature-pricing.preview.example.com"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: mixed
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+
+---
+# Source: preview-apps/templates/application.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mixed-worker
+  namespace: "argocd"
+  labels:
+    app.kubernetes.io/name: worker
+    app.kubernetes.io/instance: mixed
+    app.kubernetes.io/part-of: preview-environments
+    app.kubernetes.io/managed-by: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
     preview.badil.dev/vcs.ref.revision: ""
     preview.badil.dev/host: ""
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: dependencies
-  sources:
-    - repoURL: "oci://registry-1.docker.io/bitnamicharts/postgresql"
-      targetRevision: "16.4.2"
-      path: "."
-      helm:
-        releaseName: postgres
-        valueFiles:
-          - "$values/deps/postgres.yaml"
-        valuesObject:
-          auth:
-            password: preview
-          primary:
-            persistence:
-              enabled: false
-    - repoURL: "https://github.com/acme/gitops.git"
-      targetRevision: HEAD
-      ref: values
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: dependencies
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=false
-
----
-# Source: preview-env/templates/dependencies.yaml
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: dependencies-mailpit
-  namespace: "argocd"
-  labels:
-    app.kubernetes.io/name: mailpit
-    app.kubernetes.io/instance: dependencies
-    app.kubernetes.io/part-of: preview-environments
-    app.kubernetes.io/managed-by: argocd
-  annotations:
-    argocd.argoproj.io/sync-wave: "-1"
-    preview.badil.dev/vcs.ref.revision: ""
-    preview.badil.dev/host: "mailpit-dependencies.preview.example.com"
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
-spec:
-  project: dependencies
+  project: mixed
   source:
-    repoURL: "https://jouve.github.io/charts"
-    targetRevision: "0.20.0"
-    chart: "mailpit"
+    repoURL: "https://github.com/acme/platform.git"
+    targetRevision: "develop"
+    path: "k8s/"
     helm:
-      releaseName: mailpit
+      releaseName: worker
       parameters:
-        - name: "ingress.hostname"
-          value: "mailpit-dependencies.preview.example.com"
+        - name: "app.image.tag"
+          value: "${ARGOCD_APP_REVISION}"
+          forceString: true
   destination:
     server: https://kubernetes.default.svc
-    namespace: dependencies
+    namespace: mixed
   syncPolicy:
     automated:
       prune: true

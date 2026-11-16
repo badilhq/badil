@@ -30,7 +30,7 @@ func (ChartSettings) JSONSchemaExtend(s *jsonschema.Schema) {
 }
 
 // JSONSchemaExtend makes both fields optional and rejects, in each, the keys
-// the preview-env chart sets on the Namespace (ReservedNamespaceLabels,
+// the preview-apps chart sets on the Namespace (ReservedNamespaceLabels,
 // ReservedNamespaceAnnotations). A reserved key maps to the false schema
 // rather than to a propertyNames rule, whose failure Helm reports at a random
 // location.

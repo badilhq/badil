@@ -4,10 +4,10 @@ From an empty cluster to a first preview. Contract details live in [ARCHITECTURE
 
 ## 1. Prerequisites
 
-- A Kubernetes cluster with Argo CD 3.1 or later (OCI chart source, Beta since v3.1.0), in any namespace. The `preview-env` chart creates its AppProject and Applications in the namespace set by its `argocdNamespace` value (default `argocd`, `preview-env` 0.7.0 or later). When Argo CD runs elsewhere, set that namespace in the places [Adapt to your org](../examples/argocd/README.md#adapt-to-your-org) lists, and read `-n argocd` in the commands of this guide as your Argo CD namespace.
+- A Kubernetes cluster with Argo CD 3.1 or later (OCI chart source, Beta since v3.1.0), in any namespace. The `preview-apps` chart creates its AppProject and Applications in the namespace set by its `argocdNamespace` value (default `argocd`). When Argo CD runs elsewhere, set that namespace in the places [Adapt to your org](../examples/argocd/README.md#adapt-to-your-org) lists, and read `-n argocd` in the commands of this guide as your Argo CD namespace.
 - An ingress controller with TLS for the badil webhook URL (GitHub calls it over https), plus wildcard DNS when preview URLs are used.
 - A GitHub gitops repo, and service repos whose CI pushes images tagged as the `imageTag` format of `badil.yaml` renders the commit SHA (the full SHA by default), all under the one account (user or org) the App is installed on. `/v1/deploy` must send the full SHA: see [`imageTag`](ARCHITECTURE.md#gitops-repo-contract).
-- Service images pullable from the preview namespaces: `preview-env` creates each namespace fresh, with no `imagePullSecrets`. Use public images, node-level registry credentials, or pull secrets set by the service chart.
+- Service images pullable from the preview namespaces: `preview-apps` creates each namespace fresh, with no `imagePullSecrets`. Use public images, node-level registry credentials, or pull secrets set by the service chart.
 - `kubectl`, Helm 3.8+ and Go 1.26+ (for the `badil` CLI).
 
 ## 2. Gitops repo
@@ -21,7 +21,7 @@ From an empty cluster to a first preview. Contract details live in [ARCHITECTURE
 - If the gitops repo or any service repo is private, register it in Argo CD first (repository credentials; see Argo CD [Private Repositories](https://argo-cd.readthedocs.io/en/stable/user-guide/private-repositories/)). The public `oci://ghcr.io/badilhq/charts` needs no credentials.
 - A dependency from a private OCI registry or Helm repository needs a credential too: see ARCHITECTURE [Dependencies](ARCHITECTURE.md#dependencies).
 - Copy [`examples/argocd/appproject-previews.yaml`](../examples/argocd/appproject-previews.yaml) and [`applicationset-previews.yaml`](../examples/argocd/applicationset-previews.yaml), and adapt both as listed in [Adapt to your org](../examples/argocd/README.md#adapt-to-your-org).
-- Take the files from the badil release tag you install (`https://github.com/badilhq/badil/tree/vX.Y.Z/examples/argocd`): they carry the matching `preview-env` `targetRevision`. For the latest chart, use the latest release tag: `main` can be ahead of it.
+- Take the files from the badil release tag you install (`https://github.com/badilhq/badil/tree/vX.Y.Z/examples/argocd`): they carry the matching `preview-apps` `targetRevision`. For the latest chart, use the latest release tag: `main` can be ahead of it.
 - Apply both:
 
   ```bash
@@ -153,7 +153,7 @@ Without Helm, see the file's comments. To remove the setup later, revert the Arg
 
 ### Preview deployments on GitHub (optional)
 
-To show each pinned preview service on its PR as a GitHub deployment (with a "View deployment" button, and a `deployment_status` event for anything that waits on it), Argo CD's notifications controller posts GitHub Deployments when the service's Application is synced and Healthy, Degraded, or fails to sync. Argo CD decides health, not badil. It requires [Spin-up time](#spin-up-time-optional) and `preview-env` 0.6.0 or later.
+To show each pinned preview service on its PR as a GitHub deployment (with a "View deployment" button, and a `deployment_status` event for anything that waits on it), Argo CD's notifications controller posts GitHub Deployments when the service's Application is synced and Healthy, Degraded, or fails to sync. Argo CD decides health, not badil. It requires [Spin-up time](#spin-up-time-optional).
 
 Create a second GitHub App, for Argo CD:
 
@@ -257,7 +257,7 @@ Set `preview.domain` in `badil.yaml`, create a wildcard DNS record `*.<domain>` 
    helm get values badil -n badil -o yaml > badil-values.yaml
    helm upgrade badil oci://ghcr.io/badilhq/charts/badil -n badil --version X.Y.Z -f badil-values.yaml
    ```
-2. Set the ApplicationSet's `preview-env` `targetRevision` and `valueFiles` to the ones in the new tag's [`examples/argocd/applicationset-previews.yaml`](../examples/argocd/applicationset-previews.yaml), and re-apply it: Argo CD does not manage the ApplicationSet.
+2. Set the ApplicationSet's `preview-apps` `targetRevision` and `valueFiles` to the ones in the new tag's [`examples/argocd/applicationset-previews.yaml`](../examples/argocd/applicationset-previews.yaml), and re-apply it: Argo CD does not manage the ApplicationSet.
 
 ## 11. Troubleshooting
 

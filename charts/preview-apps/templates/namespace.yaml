@@ -4,7 +4,7 @@ kind: Namespace
 metadata:
   name: {{ .Release.Name }}
   labels:
-    {{- include "preview-env.labels" (dict "name" .Release.Name "instance" .Release.Name) | nindent 4 }}
+    {{- include "preview-apps.labels" (dict "name" .Release.Name "instance" .Release.Name) | nindent 4 }}
     {{- range $k, $v := ($pn.labels | default dict) }}
     {{ $k | quote }}: {{ $v | quote }}
     {{- end }}

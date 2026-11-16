@@ -23,8 +23,8 @@ spec:
         - repoURL: https://github.com/badilhq/demo-gitops.git
           targetRevision: HEAD
           ref: values
-        - repoURL: oci://ghcr.io/badilhq/charts/preview-env
-          targetRevision: 0.12.1
+        - repoURL: oci://ghcr.io/badilhq/charts/preview-apps
+          targetRevision: 0.13.0
           path: "."
           helm:
             releaseName: "{{ .path.basename }}"
