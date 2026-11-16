@@ -33,8 +33,26 @@ services:
   front:
     repo: "https://github.com/badilhq/demo-front.git"
 
-# Per-preview URLs (optional): each exposed service gets the ingress host
-# <service>-<slug>.<domain> and a link in the PR comment.
+# Upstream charts deployed in every preview (optional), in this order, each as
+# an Argo CD Application created before the services. Never pinned, no image
+# tag. A name must not be a service name. The chart may render only namespaced
+# resources in the preview namespace: the per-preview AppProject refuses
+# cluster-scoped kinds (ClusterRole, CRD) and other namespaces. A private
+# registry or repository needs an Argo CD repository credential.
+# dependencies:
+#   postgres:
+#     chart: oci://registry-1.docker.io/bitnamicharts/postgresql   # an oci:// chart reference: no repo
+#     version: 16.4.2             # required; quote one YAML reads as a number ("1.0")
+#     values: {auth: {password: preview}}   # optional: any mapping, the chart's values
+#     valueFiles: [deps/postgres.yaml]      # optional: paths from the gitops repo root
+#   mailpit:
+#     repo: https://jouve.github.io/charts  # required when chart is not oci://: an https:// Helm repository
+#     chart: mailpit              # the chart name in repo
+#     version: 0.20.0
+#     hostParam: ingress.hostname # required when exposed: Helm parameter set to the preview host
+
+# Per-preview URLs (optional): each exposed service or dependency gets the
+# ingress host <name>-<slug>.<domain> and a link in the PR comment.
 # preview:
 #   label: preview                # optional, default "preview": the PR label that creates the preview; "preview:<name>" picks its name
 #   maxPreviews: 10               # optional, default no cap: a deploy that would create a preview past it is refused

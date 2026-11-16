@@ -1,5 +1,6 @@
 # want: at '/services/0/metadata': missing property 'pr-url'
 apiVersion: badil.dev/v1beta1
+gitopsRepoURL: https://github.com/acme/gitops.git
 services:
   - name: api
     repoURL: https://github.com/acme/platform.git
@@ -17,3 +18,4 @@ services:
       updated-at: "2026-05-26T11:30:00Z"
       vcs.ref.name: feature/pricing
       cicd.pipeline.run.url: https://github.com/acme/platform/actions/runs/1001
+dependencies: []

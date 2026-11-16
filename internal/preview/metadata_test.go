@@ -14,6 +14,7 @@ import (
 // singleQuotedValues is a values file whose metadata is single-quoted, as a
 // hand edit or another YAML writer may leave it, so it must still decode.
 const singleQuotedValues = `apiVersion: badil.dev/v1beta1
+gitopsRepoURL: https://github.com/acme/gitops.git
 services:
   - name: backend-1
     repoURL: https://github.com/acme/backend-1.git
@@ -50,6 +51,7 @@ services:
       hostParam: app.ingress.host
       valueFiles:
         - values-preview.yaml
+dependencies: []
 `
 
 func encodeValues(t *testing.T, v any) []byte {

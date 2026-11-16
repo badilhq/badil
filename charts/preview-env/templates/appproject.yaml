@@ -2,6 +2,12 @@
 {{- range .Values.services }}
 {{- $repos = append $repos .repoURL }}
 {{- end }}
+{{- range .Values.dependencies }}
+{{- $repos = append $repos .chart.repoURL }}
+{{- if .valueFiles }}
+{{- $repos = append $repos $.Values.gitopsRepoURL }}
+{{- end }}
+{{- end }}
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:

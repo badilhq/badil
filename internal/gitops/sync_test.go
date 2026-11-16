@@ -70,6 +70,43 @@ func TestSyncPreviewWithRetry(t *testing.T) {
 			},
 		},
 		{
+			name: "added dependencies", files: []string{pinnedFile()},
+			catalog:     withDependencies,
+			wantChanged: true, wantNotify: true, wantGets: 1, wantPuts: 1,
+			wantWritten: []string{"dependencies:\n" + dependenciesYAML},
+		},
+		{
+			name: "dependencies match", files: []string{withDependenciesFile()},
+			catalog: withDependencies, wantGets: 1,
+		},
+		{
+			name: "removed dependency", files: []string{withDependenciesFile()},
+			catalog: func(c *gitops.ServiceCatalog) {
+				withDependencies(c)
+				c.Dependencies = c.Dependencies[1:]
+			},
+			wantChanged: true, wantNotify: true, wantGets: 1, wantPuts: 1,
+			wantWritten: []string{"dependencies:\n  - name: mailpit\n"},
+		},
+		{
+			name: "dependency version change", files: []string{withDependenciesFile()},
+			catalog: func(c *gitops.ServiceCatalog) {
+				withDependencies(c)
+				c.Dependencies[1].Chart.Version = "0.21.0"
+			},
+			wantChanged: true, wantGets: 1, wantPuts: 1,
+			wantWritten: []string{"      version: 0.21.0\n"},
+		},
+		{
+			name: "dependency no longer exposed", files: []string{withDependenciesFile()},
+			catalog: func(c *gitops.ServiceCatalog) {
+				withDependencies(c)
+				delete(c.URLs.Expose, "mailpit")
+			},
+			wantChanged: true, wantNotify: true, wantGets: 1, wantPuts: 1,
+			wantWritten: []string{"      version: 0.20.0\n"},
+		},
+		{
 			name:  "namespace change",
 			files: []string{pinnedFile()},
 			catalog: func(c *gitops.ServiceCatalog) {
@@ -79,7 +116,7 @@ func TestSyncPreviewWithRetry(t *testing.T) {
 			wantGets:    1,
 			wantPuts:    1,
 			wantWritten: []string{
-				"apiVersion: badil.dev/v1beta1\nnamespace:\n  labels:\n    team: platform\nservices:\n",
+				"apiVersion: badil.dev/v1beta1\ngitopsRepoURL: https://github.com/acme/gitops.git\nnamespace:\n  labels:\n    team: platform\nservices:\n",
 			},
 		},
 		{
@@ -100,13 +137,13 @@ func TestSyncPreviewWithRetry(t *testing.T) {
 		{
 			name: "file without apiVersion", files: []string{pinnedFile("apiVersion: badil.dev/v1beta1\n", "")},
 			wantChanged: true, wantGets: 1, wantPuts: 1,
-			wantWritten: []string{"apiVersion: badil.dev/v1beta1\nservices:\n"},
+			wantWritten: []string{"apiVersion: badil.dev/v1beta1\ngitopsRepoURL: https://github.com/acme/gitops.git\nservices:\n"},
 		},
 		{
 			name:        "badil.dev/v1 file",
 			files:       []string{pinnedFile("apiVersion: badil.dev/v1beta1\n", "apiVersion: badil.dev/v1\n")},
 			wantChanged: true, wantGets: 1, wantPuts: 1,
-			wantWritten: []string{"apiVersion: badil.dev/v1beta1\nservices:\n"},
+			wantWritten: []string{"apiVersion: badil.dev/v1beta1\ngitopsRepoURL: https://github.com/acme/gitops.git\nservices:\n"},
 		},
 		{
 			name:      "changed after a 409 re-fetch",

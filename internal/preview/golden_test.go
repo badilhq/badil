@@ -46,9 +46,10 @@ func TestGoldenYAML(t *testing.T) {
 	vals := preview.ApplyCatalog(
 		preview.BuildPreviewValues(in.ServiceName, in.CommitSha, goldenServices, in),
 		preview.Catalog{
-			Services: goldenServices,
-			Repos:    goldenRepos(),
-			Branches: map[string]string{"backend-2": "develop"},
+			Services:      goldenServices,
+			Repos:         goldenRepos(),
+			GitopsRepoURL: "https://github.com/acme/gitops.git",
+			Branches:      map[string]string{"backend-2": "develop"},
 			Charts: map[string]preview.ChartSettings{
 				"front": {Path: "deploy/chart", ValueFiles: []string{"values-preview.yaml"}},
 			},

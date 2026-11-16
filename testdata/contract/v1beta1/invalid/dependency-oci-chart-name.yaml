@@ -1,0 +1,18 @@
+# want: at '/dependencies/0/chart/name': false schema
+apiVersion: badil.dev/v1beta1
+gitopsRepoURL: https://github.com/acme/gitops.git
+services:
+  - name: api
+    repoURL: https://github.com/acme/platform.git
+    branch: main
+    imageTag: ${ARGOCD_APP_REVISION}
+    chart:
+      path: k8s/
+      imageTagParam: app.image.tag
+      hostParam: app.ingress.host
+dependencies:
+  - name: postgres
+    chart:
+      repoURL: oci://registry-1.docker.io/bitnamicharts/postgresql
+      name: postgresql
+      version: 16.4.2

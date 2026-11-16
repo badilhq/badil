@@ -367,7 +367,7 @@ func TestWritePreviewWithRetry_ConflictThenSuccess(t *testing.T) {
 	// write must carry the catalog's facts.
 	written, _ := capturedBody.Load().(string)
 	for _, expect := range []string{
-		"apiVersion: badil.dev/v1beta1\nservices:\n",
+		"apiVersion: badil.dev/v1beta1\ngitopsRepoURL: https://github.com/acme/gitops.git\nservices:\n",
 		"  - name: backend-1\n    repoURL: https://github.com/acme/backend-1.git\n    branch: main\n",
 		"  - name: backend-2\n    repoURL: https://github.com/acme/backend-2.git\n    branch: develop\n",
 	} {
@@ -462,7 +462,7 @@ func TestWritePreviewWithRetry_FreshCreateUsesCatalog(t *testing.T) {
 	}
 	written, _ := capturedBody.Load().(string)
 	for _, expect := range []string{
-		"apiVersion: badil.dev/v1beta1\nservices:\n",
+		"apiVersion: badil.dev/v1beta1\ngitopsRepoURL: https://github.com/acme/gitops.git\nservices:\n",
 		"  - name: backend-1\n    repoURL: https://github.com/acme/backend-1.git\n    branch: main\n",
 		"  - name: backend-2\n    repoURL: https://github.com/acme/backend-2.git\n    branch: develop\n",
 		"  - name: front\n    repoURL: https://github.com/acme/front\n    branch: main\n",
@@ -545,6 +545,7 @@ const defaultChartYAML = "    chart:\n" +
 // arguments are applied to it.
 func pinnedFile(replace ...string) string {
 	const file = `apiVersion: badil.dev/v1beta1
+gitopsRepoURL: https://github.com/acme/gitops.git
 services:
   - name: backend-1
     repoURL: https://github.com/acme/backend-1.git
@@ -572,6 +573,7 @@ services:
       path: k8s/
       imageTagParam: app.image.tag
       hostParam: app.ingress.host
+dependencies: []
 `
 	return strings.NewReplacer(replace...).Replace(file)
 }
@@ -846,6 +848,7 @@ func TestWritePreviewWithRetry_FollowsCatalog(t *testing.T) {
 		t.Fatal("Unchanged = true, want a write")
 	}
 	want := "apiVersion: badil.dev/v1beta1\n" +
+		"gitopsRepoURL: https://github.com/acme/gitops.git\n" +
 		"services:\n" +
 		"  - name: backend-1\n" +
 		"    repoURL: https://github.com/acme/backend-1.git\n" +
@@ -883,7 +886,8 @@ func TestWritePreviewWithRetry_FollowsCatalog(t *testing.T) {
 		"      created-at: \"2026-05-25T10:00:00Z\"\n" +
 		"      updated-at: \"2026-05-25T11:00:00Z\"\n" +
 		"      vcs.ref.name: feature/gone\n" +
-		"      cicd.pipeline.run.url: https://github.com/acme/gone-pinned/actions/runs/9\n"
+		"      cicd.pipeline.run.url: https://github.com/acme/gone-pinned/actions/runs/9\n" +
+		"dependencies: []\n"
 	if got, _ := s.written.Load().(string); got != want {
 		t.Errorf("written content mismatch\n got:\n%s\nwant:\n%s", got, want)
 	}
@@ -970,7 +974,7 @@ func TestWritePreviewWithRetry_RendererSettings(t *testing.T) {
 	}
 	written, _ := s.written.Load().(string)
 	for _, want := range []string{
-		"apiVersion: badil.dev/v1beta1\nnamespace:\n  labels:\n    team: platform\nservices:\n",
+		"apiVersion: badil.dev/v1beta1\ngitopsRepoURL: https://github.com/acme/gitops.git\nnamespace:\n  labels:\n    team: platform\nservices:\n",
 		"    commitSha: " + sha + "\n    imageTag: sha-f913b6c\n    chart:\n      path: deploy/helm\n" +
 			"      imageTagParam: image.tag\n      hostParam: app.ingress.host\n" +
 			"      valueFiles:\n        - values-preview.yaml\n",

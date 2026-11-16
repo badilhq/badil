@@ -54,15 +54,62 @@ func (Metadata) JSONSchemaExtend(s *jsonschema.Schema) {
 	}
 }
 
-// JSONSchemaExtend requires apiVersion and services, rejects other root keys
-// and fixes apiVersion to APIVersion: the published contract of a preview
-// values file.
+// JSONSchemaExtend requires apiVersion, gitopsRepoURL, services and
+// dependencies, rejects other root keys, fixes apiVersion to APIVersion and
+// makes gitopsRepoURL non-empty: the published contract of a preview values
+// file.
 func (PreviewValues) JSONSchemaExtend(s *jsonschema.Schema) {
-	s.Required = []string{"apiVersion", "services"}
+	s.Required = []string{"apiVersion", "gitopsRepoURL", "services", "dependencies"}
 	s.AdditionalProperties = jsonschema.FalseSchema
 	if p, ok := s.Properties.Get("apiVersion"); ok {
 		p.Const = APIVersion
 	}
+	if p, ok := s.Properties.Get("gitopsRepoURL"); ok {
+		p.MinLength = nonEmpty()
+	}
+}
+
+// JSONSchemaExtend requires name and chart, makes every string non-empty and
+// valueFiles, when present, a non-empty list, and requires host and
+// hostParam together. values stays a free-form object.
+func (DependencyEntry) JSONSchemaExtend(s *jsonschema.Schema) {
+	s.Required = []string{"name", "chart"}
+	const host, hostParam = "host", "hostParam"
+	s.DependentRequired = map[string][]string{
+		host:      {hostParam},
+		hostParam: {host},
+	}
+	for _, name := range []string{"name", hostParam, host} {
+		if p, ok := s.Properties.Get(name); ok {
+			p.MinLength = nonEmpty()
+		}
+	}
+	if p, ok := s.Properties.Get("valueFiles"); ok && p.Items != nil {
+		p.MinItems = nonEmpty()
+		p.Items.MinLength = nonEmpty()
+	}
+}
+
+// JSONSchemaExtend requires repoURL and version, non-empty, with repoURL an
+// oci:// or https:// URL. name is rejected with an OCIScheme repoURL and
+// required otherwise.
+func (DependencyChart) JSONSchemaExtend(s *jsonschema.Schema) {
+	s.Required = []string{"repoURL", "version"}
+	for _, name := range []string{"repoURL", "name", "version"} {
+		if p, ok := s.Properties.Get(name); ok {
+			p.MinLength = nonEmpty()
+		}
+	}
+	if p, ok := s.Properties.Get("repoURL"); ok {
+		p.Pattern = "^(oci|https)://"
+	}
+	oci := jsonschema.NewProperties()
+	oci.Set("repoURL", &jsonschema.Schema{Pattern: "^" + OCIScheme})
+	noName := jsonschema.NewProperties()
+	noName.Set("name", jsonschema.FalseSchema)
+	s.If = &jsonschema.Schema{Properties: oci}
+	s.Then = &jsonschema.Schema{Properties: noName}
+	s.Else = &jsonschema.Schema{Required: []string{"name"}}
 }
 
 // reserve maps each of keys to the false schema in the properties of s, so

@@ -29,8 +29,9 @@ const pinnedImageNote = "> ⏳ A pinned service starts once CI has pushed the im
 // BuildSummary renders the markdown summary that badil posts back as a PR
 // comment. Each service line shows the pinned commit (with a link if
 // derivable) or a 🔄 badge naming the branch an unpinned entry tracks,
-// followed by a link to the entry's written host, if any. When at least one
-// service is pinned, a note follows the list saying a pinned service starts
+// followed by a link to the entry's written host, if any. One line per
+// dependency follows, with its chart name and version and the link to its
+// written host, if any. When at least one service is pinned, a note follows the list saying a pinned service starts
 // once CI has pushed its image. The trailing line links to the gitops commit
 // that recorded the change.
 func BuildSummary(
@@ -66,6 +67,13 @@ func BuildSummary(
 			fmt.Fprintf(&b, "- **%s** · 🔄 `%s`", svc.Name, branch)
 		}
 		if text, url, ok := urls.Link(svc.Name, svc.Host); ok {
+			fmt.Fprintf(&b, " · [%s](%s)", text, url)
+		}
+		b.WriteString("\n")
+	}
+	for _, dep := range values.Dependencies {
+		fmt.Fprintf(&b, "- **%s** · 📦 `%s` `%s`", dep.Name, dep.Chart.ChartName(), dep.Chart.Version)
+		if text, url, ok := urls.Link(dep.Name, dep.Host); ok {
 			fmt.Fprintf(&b, " · [%s](%s)", text, url)
 		}
 		b.WriteString("\n")

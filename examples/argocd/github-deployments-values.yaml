@@ -102,15 +102,19 @@ notifications:
     # Fires once per pinned SHA when the Application is Degraded at that SHA
     # (for a Deployment, after its progressDeadlineSeconds). The sync guard
     # keeps the previous SHA's health from posting on the new SHA's deployment.
+    # The revision annotation is tested first: a dependency Application has
+    # it empty and may have spec.sources instead of spec.source, which the
+    # other tests read.
     trigger.on-preview-degraded: |
-      - when: app.status?.health?.status == 'Degraded' and app.status?.sync?.status == 'Synced' and app.status?.sync?.revision == app.spec.source.targetRevision and app.metadata.annotations['preview.badil.dev/vcs.ref.revision'] != ''
+      - when: app.metadata.annotations['preview.badil.dev/vcs.ref.revision'] != '' and app.status?.health?.status == 'Degraded' and app.status?.sync?.status == 'Synced' and app.status?.sync?.revision == app.spec.source.targetRevision
         oncePer: app.spec.source.targetRevision
         send: [badil-preview-failed]
     # Fires once per pinned SHA when the sync at that SHA ends in Error or
     # Failed, or the comparison at that SHA is Unknown (the chart fails to
     # render). One condition, so oncePer sends at most one `error` per SHA.
+    # The revision annotation is tested first, as for on-preview-degraded.
     trigger.on-preview-sync-error: |
-      - when: ((app.status?.operationState?.phase in ['Error', 'Failed'] and app.status?.operationState?.syncResult?.revision == app.spec.source.targetRevision) or (app.status?.sync?.status == 'Unknown' and app.status?.sync?.comparedTo?.source?.targetRevision == app.spec.source.targetRevision)) and app.metadata.annotations['preview.badil.dev/vcs.ref.revision'] != ''
+      - when: app.metadata.annotations['preview.badil.dev/vcs.ref.revision'] != '' and ((app.status?.operationState?.phase in ['Error', 'Failed'] and app.status?.operationState?.syncResult?.revision == app.spec.source.targetRevision) or (app.status?.sync?.status == 'Unknown' and app.status?.sync?.comparedTo?.source?.targetRevision == app.spec.source.targetRevision))
         oncePer: app.spec.source.targetRevision
         send: [badil-preview-errored]
     # Best effort: fires only if the controller sees the deletion before the

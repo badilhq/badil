@@ -1,0 +1,41 @@
+# Expected results of the triggers in ../../github-deployments-values.yaml.
+# A dependency Application with valueFiles: spec.sources and no spec.source,
+# and an empty revision annotation. Degraded with a failed sync, it still
+# triggers nothing.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: feature-x-postgres
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: feature-x
+  annotations:
+    preview.badil.dev/vcs.ref.revision: ""
+    preview.badil.dev/host: ""
+    test.badil.dev/on-preview-degraded: "false"
+    test.badil.dev/on-preview-sync-error: "false"
+spec:
+  project: feature-x
+  sources:
+    - repoURL: oci://registry-1.docker.io/bitnamicharts/postgresql
+      targetRevision: "16.4.2"
+      path: "."
+      helm:
+        releaseName: postgres
+        valueFiles: ["$values/deps/postgres.yaml"]
+    - repoURL: https://github.com/acme/gitops.git
+      targetRevision: HEAD
+      ref: values
+status:
+  health: {status: Degraded}
+  sync:
+    status: Synced
+    revisions: ["16.4.2", "0123456789abcdef0123456789abcdef01234567"]
+    comparedTo:
+      sources:
+        - {repoURL: oci://registry-1.docker.io/bitnamicharts/postgresql, targetRevision: "16.4.2"}
+        - {repoURL: https://github.com/acme/gitops.git, targetRevision: HEAD}
+  operationState:
+    phase: Failed
+    syncResult: {revisions: ["16.4.2", "0123456789abcdef0123456789abcdef01234567"]}

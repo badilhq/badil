@@ -1,4 +1,5 @@
 apiVersion: badil.dev/v1beta1
+gitopsRepoURL: https://github.com/acme/gitops.git
 services:
   - name: backend-1
     repoURL: https://github.com/acme/backend-1.git
@@ -35,3 +36,4 @@ services:
       hostParam: app.ingress.host
       valueFiles:
         - values-preview.yaml
+dependencies: []

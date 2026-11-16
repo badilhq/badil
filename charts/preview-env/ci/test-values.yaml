@@ -1,4 +1,5 @@
 apiVersion: badil.dev/v1beta1
+gitopsRepoURL: https://github.com/acme/gitops.git
 services:
   - name: backend-1
     repoURL: "https://github.com/acme/backend-1.git"
@@ -18,3 +19,4 @@ services:
       updated-at: "2026-05-26T10:00:00Z"
       vcs.ref.name: feature/x
       cicd.pipeline.run.url: ""
+dependencies: []

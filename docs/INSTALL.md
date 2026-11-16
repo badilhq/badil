@@ -12,9 +12,10 @@ From an empty cluster to a first preview. Contract details live in [ARCHITECTURE
 
 ## 2. Gitops repo
 
-- Commit at the root a `badil.yaml`, starting from [`examples/argocd/badil.yaml`](../examples/argocd/badil.yaml) (`services` required; `imageTag`, `namespace`, `preview` and each service's `branch`, `imageTag` and `chart` optional). It is the only preview config: badil writes the chart settings and image tags into each preview file.
+- Commit at the root a `badil.yaml`, starting from [`examples/argocd/badil.yaml`](../examples/argocd/badil.yaml) (`services` required; `imageTag`, `namespace`, `dependencies`, `preview` and each service's `branch`, `imageTag` and `chart` optional). It is the only preview config: badil writes the chart settings and image tags into each preview file.
 - `imageTag` (optional, default `"{sha}"`) is the image tag format CI tags images with, for example `"sha-{sha7}"`; a service can override it.
 - `namespace` (optional) adds labels and annotations to every preview Namespace, for example a Pod Security level (`pod-security.kubernetes.io/enforce: baseline`) or cost-allocation labels. Values must be strings; badil rejects a key the chart already sets.
+- `dependencies` (optional) deploys upstream charts in every preview, next to the services: an `oci://` chart reference, or a Helm repository (`repo`) and chart name, at a `version`, with optional `values` and `valueFiles` (paths in the gitops repo). They need no git repo of their own and get no image tag. A dependency renders under the per-preview AppProject, which allows only the preview namespace and no cluster-scoped kind but `Namespace`: Argo CD refuses a chart that renders a ClusterRole, a CRD or anything in another namespace. Details: ARCHITECTURE [Dependencies](ARCHITECTURE.md#dependencies).
 - Each `services.<name>.repo` URL in `badil.yaml` must be `https://github.com/<owner>/<repo>` (with or without `.git`), or the label flow never matches it.
 - Contract: ARCHITECTURE [Gitops repo contract](ARCHITECTURE.md#gitops-repo-contract).
 - badil creates `previews/` itself; a missing directory reads as no previews.
@@ -23,6 +24,7 @@ From an empty cluster to a first preview. Contract details live in [ARCHITECTURE
 ## 3. Argo CD wiring
 
 - If the gitops repo or any service repo is private, register it in Argo CD first (repository credentials; see Argo CD [Private Repositories](https://argo-cd.readthedocs.io/en/stable/user-guide/private-repositories/)). The public `oci://ghcr.io/badilhq/charts` needs no credentials.
+- A dependency from a private OCI registry or Helm repository needs an Argo CD repository credential too, which you set up: badil passes none.
 - Copy [`examples/argocd/appproject-previews.yaml`](../examples/argocd/appproject-previews.yaml) and [`applicationset-previews.yaml`](../examples/argocd/applicationset-previews.yaml), and adapt both as listed in [Adapt to your org](../examples/argocd/README.md#adapt-to-your-org).
 - Take the files from the badil release tag you install (`https://github.com/badilhq/badil/tree/vX.Y.Z/examples/argocd`): they carry the matching `preview-env` `targetRevision`. For the latest chart, use the latest release tag: `main` can be ahead of it.
 - Apply both:
@@ -242,7 +244,7 @@ badil sets no quota or network policy on previews. To cap each preview's resourc
 1. Label a PR `preview`.
 2. Expect:
    - within seconds, a badil comment on the PR and `previews/<slug>/values.yaml` in the gitops repo;
-   - within the ApplicationSet poll (3 minutes by default), one Argo CD Application per service.
+   - within the ApplicationSet poll (3 minutes by default), one Argo CD Application per service and per dependency.
 3. With preview URLs, the comment links each exposed service.
 4. Removing the label or closing the PR tears the preview down.
 5. PRs from forks never get a preview.
