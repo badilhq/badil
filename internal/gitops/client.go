@@ -287,8 +287,9 @@ type WriteResult struct {
 // catalog service in catalog order (a missing one added as a branch-tracking
 // entry) with its repoURL, branch, chart, imageTag and host, then the pinned
 // entries of services no longer in it; their unpinned entries are dropped;
-// then the catalog dependencies with their hosts. The written file follows
-// the current catalog.
+// then the catalog dependencies with their hosts. When badil.yaml declares
+// needs, only the pinned entries and the services and dependencies they need
+// are kept. The written file follows the current catalog.
 //
 // With skipUnchanged, when the file exists and the values to write differ
 // from it only in serviceName's updated-at (preview.EqualExceptUpdatedAt),
@@ -330,26 +331,17 @@ func (c *Client) gitopsRepoURL() string {
 // applyCatalog returns vals projected on catalog: the gitops repo URL, the
 // namespace metadata, every catalog service in catalog order with its
 // repoURL, branch, chart and imageTag, then the pinned entries of removed
-// services, then the catalog dependencies (preview.ApplyCatalog), then hosts
-// (preview.ApplyHosts). A dependency left out because a kept pinned entry has
-// its name is logged as a warning.
+// services, then the catalog dependencies (preview.ApplyCatalog), only the
+// pinned entries and what they need when badil.yaml declares needs, then
+// hosts (preview.ApplyHosts). A dependency left out because a kept pinned
+// entry has its name is logged as a warning.
 func (c *Client) applyCatalog(
 	ctx context.Context, vals preview.PreviewValues, slug string, catalog *ServiceCatalog,
 ) preview.PreviewValues {
-	projected := preview.ApplyCatalog(vals, preview.Catalog{
-		Services:      catalog.Services,
-		Repos:         catalog.Repos,
-		Branches:      catalog.Branches,
-		ImageTag:      catalog.ImageTag,
-		ImageTags:     catalog.ImageTags,
-		Charts:        catalog.Charts,
-		Namespace:     catalog.Namespace,
-		Dependencies:  catalog.Dependencies,
-		GitopsRepoURL: c.gitopsRepoURL(),
-	})
+	projected := preview.ApplyCatalog(vals, catalog.previewCatalog(c.gitopsRepoURL()))
 	for _, dep := range catalog.Dependencies {
-		if !slices.ContainsFunc(projected.Dependencies, func(d preview.DependencyEntry) bool {
-			return d.Name == dep.Name
+		if slices.ContainsFunc(projected.Services, func(s preview.ServiceEntry) bool {
+			return s.Name == dep.Name
 		}) {
 			//nolint:sloglint // gitops has no scoped logger yet
 			slog.WarnContext(ctx, "dependency left out: a pinned service has its name",

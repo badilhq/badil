@@ -88,7 +88,7 @@ dependencies:
 | `namespace` | object | when `badil.yaml` sets `namespace` labels or annotations | extra metadata of the preview namespace |
 | `namespace.labels` | map of strings | | extra labels; never one of `app.kubernetes.io/name`, `app.kubernetes.io/instance`, `app.kubernetes.io/part-of`, `app.kubernetes.io/managed-by` |
 | `namespace.annotations` | map of strings | | extra annotations; never `argocd.argoproj.io/sync-wave` |
-| `services` | list | always | every service of `badil.yaml`, in catalog order, then the pinned entries of services removed from it, in file order, as of the file's last write. A file written before a catalog change keeps its old entries until the next write (deploy or sweep) |
+| `services` | list | always | every service of `badil.yaml` (only the pinned ones and what they need when `badil.yaml` declares `needs`), in catalog order, then the pinned entries of services removed from it, in file order, as of the file's last write. A file written before a catalog change keeps its old entries until the next write (deploy or sweep) |
 | `services[].name` | string | always | the service name, the key of `services` in `badil.yaml`; a kept pinned entry of a removed service keeps its last name |
 | `services[].repoURL` | string | always | the service's git URL, `services.<name>.repo` of `badil.yaml` as written; a kept pinned entry of a removed service keeps its last `repoURL` |
 | `services[].branch` | string | always | the branch the service tracks when not pinned: `services.<name>.branch` of `badil.yaml`, else `main`; a kept pinned entry of a removed service keeps its last `branch` |
@@ -108,7 +108,7 @@ dependencies:
 | `metadata.updated-at` | string | | RFC 3339 time of the entry's last deploy; the sweep expires a preview by it |
 | `metadata.vcs.ref.name` | string | | head branch of the PR |
 | `metadata.cicd.pipeline.run.url` | string | | CI run that called `/v1/deploy`; `""` for label deploys |
-| `dependencies` | list | always, may be empty | every dependency of `badil.yaml`, in its order, except one named like a kept pinned entry of a removed service, left out until that entry is dropped |
+| `dependencies` | list | always, may be empty | every dependency of `badil.yaml` (only those the pinned services need when `badil.yaml` declares `needs`), in its order, except one named like a kept pinned entry of a removed service, left out until that entry is dropped |
 | `dependencies[].name` | string | always | the dependency name, the key of `dependencies` in `badil.yaml`; never the name of a service entry of the file |
 | `dependencies[].chart` | object | always | where the chart comes from |
 | `chart.repoURL` | string | always | an `oci://` chart reference, or an `https://` Helm repository |

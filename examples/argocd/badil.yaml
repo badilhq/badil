@@ -28,10 +28,13 @@ services:
     #   hostParam: ingress.hostname   # default "app.ingress.host": Helm parameter set to the preview host
     #   valueFiles:               # default none: extra values files; relative to path, "/" from the repo root, URLs fetched remotely
     #     - values-preview.yaml
+    # needs: [postgres]           # optional: services and dependencies it calls; once any entry sets needs,
+    #                             # a preview runs only its pinned services and what they need
   backend-2:
     repo: "https://github.com/badilhq/demo-backend-2.git"
   front:
     repo: "https://github.com/badilhq/demo-front.git"
+    # needs: [backend-1, backend-2]
 
 # Upstream charts deployed in every preview (optional), in this order, each as
 # an Argo CD Application created before the services. Never pinned, no image
@@ -50,6 +53,7 @@ services:
 #     chart: mailpit              # the chart name in repo
 #     version: 0.20.0
 #     hostParam: ingress.hostname # required when exposed: Helm parameter set to the preview host
+#     needs: [postgres]           # optional: a dependency can need others too
 
 # Per-preview URLs (optional): each exposed service or dependency gets the
 # ingress host <name>-<slug>.<domain> and a link in the PR comment.

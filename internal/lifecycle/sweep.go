@@ -165,7 +165,10 @@ func syncPreview(ctx context.Context, api SweepAPI, slug string, catalog *gitops
 	if !res.Notify {
 		return nil
 	}
-	body := preview.BuildSummary(slug, res.Values, catalog.URLs, catalog.Branches, res.CommitMessage, res.CommitURL)
+	body := preview.BuildSummary(
+		slug, res.Values, catalog.URLs, catalog.Branches, res.CommitMessage, res.CommitURL,
+		catalog.Excluded(res.Values)...,
+	)
 	if fanErr := api.FanOutPRComments(ctx, res.Values, body); fanErr != nil {
 		slog.WarnContext(ctx, "preview sync comment failed", //nolint:sloglint // lifecycle has no scoped logger yet
 			slog.String("slug", slug),

@@ -17,7 +17,7 @@ When code is written at machine speed, the bottleneck is validating and integrat
 ## How it works
 
 1. CI in a service repo builds and pushes the image.
-2. Adding the `preview` label to the PR makes badil write `previews/<slug>/values.yaml` (every catalog service, the PR's at its head SHA) and comment on the PR; a push to the labeled PR updates it. The slug is the PR's branch, slugified; a `preview:<name>` label picks the preview name instead.
+2. Adding the `preview` label to the PR makes badil write `previews/<slug>/values.yaml` (every catalog service, the PR's at its head SHA; with `needs` in `badil.yaml`, only the preview's pinned services and what they need) and comment on the PR; a push to the labeled PR updates it. The slug is the PR's branch, slugified; a `preview:<name>` label picks the preview name instead.
 3. An ArgoCD ApplicationSet picks up `previews/*` and deploys one namespace per preview, one Application per service, and one per dependency: an upstream chart from an OCI registry or a Helm repository (postgres, redis) declared in `badil.yaml`, with no git repo of its own.
 4. Removing the label or closing the PR unpins its service, or deletes the file when no PR remains, and ArgoCD prunes the preview.
 5. `badil cleanup` (in the server on an interval, or an hourly CronJob) sweeps every preview: it deletes previews with no pinned service, or with no deploy within `CLEANUP_TTL` when set, and tears down the pins of closed PRs that step 4 missed, and of open PRs whose label moved, conflicts or is gone. It then rewrites each preview it keeps to match `badil.yaml`. ArgoCD prunes what it removes.

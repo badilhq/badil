@@ -31,11 +31,14 @@ const pinnedImageNote = "> ⏳ A pinned service starts once CI has pushed the im
 // derivable) or a 🔄 badge naming the branch an unpinned entry tracks,
 // followed by a link to the entry's written host, if any. One line per
 // dependency follows, with its chart name and version and the link to its
-// written host, if any. When at least one service is pinned, a note follows the list saying a pinned service starts
-// once CI has pushed its image. The trailing line links to the gitops commit
-// that recorded the change.
+// written host, if any. When excluded is not empty, a line after the lists
+// names the catalog services and dependencies left out of the preview
+// (Catalog.Excluded). When at least one service is pinned, a note follows
+// saying a pinned service starts once CI has pushed its image. The trailing
+// line links to the gitops commit that recorded the change.
 func BuildSummary(
 	slug string, values PreviewValues, urls URLConfig, branches map[string]string, commitMessage, commitURL string,
+	excluded ...string,
 ) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## 🚀 Preview: `%s`\n\n", slug)
@@ -77,6 +80,13 @@ func BuildSummary(
 			fmt.Fprintf(&b, " · [%s](%s)", text, url)
 		}
 		b.WriteString("\n")
+	}
+	if len(excluded) > 0 {
+		names := make([]string, 0, len(excluded))
+		for _, name := range excluded {
+			names = append(names, "`"+name+"`")
+		}
+		b.WriteString("\nNot in this preview: " + strings.Join(names, ", ") + "\n")
 	}
 	if pinned {
 		b.WriteString("\n" + pinnedImageNote + "\n")
