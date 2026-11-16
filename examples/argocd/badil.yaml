@@ -1,5 +1,19 @@
-# badil's configuration, at the root of the gitops repo. badil reads it; the
-# preview-env chart does not. Unknown keys are rejected at every level.
+# badil's configuration, at the root of the gitops repo: the only preview
+# config. badil reads it and writes the chart settings, image tags and
+# namespace metadata into each preview file; the preview-env chart reads only
+# the preview file. Unknown keys and nulls are rejected at every level.
+
+# Image tag format CI tags images with (optional, default "{sha}", the full
+# commit SHA): an optional prefix, one of {sha}, {sha7} or {sha8}, an optional
+# suffix. Quote it: an unquoted {sha} is a YAML mapping.
+# imageTag: "sha-{sha7}"
+
+# Extra preview Namespace labels and annotations (optional): string values; a
+# key the preview-env chart already sets is rejected.
+# namespace:
+#   labels:
+#     pod-security.kubernetes.io/enforce: baseline
+#   annotations: {}
 
 # Service catalog (required, at least one service). The order is the catalog
 # order of every preview.
@@ -7,6 +21,13 @@ services:
   backend-1:
     repo: "https://github.com/badilhq/demo-backend-1.git"  # required: the service's git URL
     # branch: main                # optional, default "main": branch of unpinned services
+    # imageTag: "{sha8}-amd64"    # optional: overrides the root imageTag
+    # chart:                      # optional, every key optional
+    #   path: deploy/helm         # default "k8s/": chart path in the service repo
+    #   imageTagParam: image.tag  # default "app.image.tag": Helm parameter set to the image tag
+    #   hostParam: ingress.hostname   # default "app.ingress.host": Helm parameter set to the preview host
+    #   valueFiles:               # default none: extra values files; relative to path, "/" from the repo root, URLs fetched remotely
+    #     - values-preview.yaml
   backend-2:
     repo: "https://github.com/badilhq/demo-backend-2.git"
   front:
