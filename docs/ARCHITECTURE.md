@@ -35,7 +35,7 @@ Self-hosted, single-tenant. Everything runs in the user's cluster; badil talks t
 ## Gitops repo contract
 
 ```
-badil.yaml                       # read by badil only: services, their chart settings and image tag format, dependencies, needs, namespace metadata, optional preview block
+badil.yaml                       # read by badil only: services, their chart settings, image tag format and paths, dependencies, needs, namespace metadata, optional preview block
 previews/<slug>/values.yaml      # written by badil, read by preview-apps: apiVersion badil.dev/v1beta1, self-contained
 ```
 
@@ -60,6 +60,7 @@ services:                       # required, non-empty: the service catalog, in c
       valueFiles:               # default none: extra values files, applied in order
         - values-preview.yaml
     needs: [postgres]           # optional: the services and dependencies it calls (see Needs)
+    paths: ["api/**", "libs/common/**"]   # optional: globs of the files of its repo that belong to it (see Path filters)
   front:
     repo: https://github.com/acme/front.git
     needs: [backend-1]
@@ -103,6 +104,7 @@ badil reads `badil.yaml` on every deploy, reconcile, teardown that keeps the pre
 - `services.<name>.chart` keys are all optional: badil writes each into the preview file with its default applied. `path`, `imageTagParam` and `hostParam` must be non-empty strings, and `valueFiles` a non-empty list of non-empty strings. A null `chart` or a null key is rejected; omit it to use the defaults.
 - `dependencies.<name>` needs `chart` and `version`, non-empty strings (quote a version YAML reads as a number, such as `"1.0"`). A `chart` starting with `oci://` is an OCI chart reference, with a host, and `repo` must be absent; any other `chart` is a chart name and `repo`, an `https://` Helm repository URL with a host, is required. `values` is any mapping, `valueFiles` a non-empty list of non-empty strings and `hostParam` a non-empty string; an exposed dependency without `hostParam` is rejected, as no Helm parameter is known to set its host. A dependency name must be unique and must not be a service name: both become `<slug>-<name>` Applications. See [Dependencies](#dependencies).
 - `services.<name>.needs` and `dependencies.<name>.needs` are non-empty lists of names of services or dependencies of `badil.yaml`. An unknown name, a repeated name, the entry's own name and an empty list are rejected, with the key's path (for example `badil.yaml: services.front.needs: "cache" is neither a service nor a dependency`). Cycles are allowed. See [Needs](#needs).
+- `services.<name>.paths` is a non-empty list of glob patterns, relative to the service's repo root, matched against the paths of the files a PR changes, with `/` separators, by [doublestar](https://github.com/bmatcuk/doublestar) v4: `*` matches within a path segment, `**` across segments (`api/**` is every file under `api/`), and `?`, `[...]` and `{a,b}` work as in a shell. A null, a value that is not a list, an empty list, an empty string or an item that is not a string is rejected with `badil.yaml: services.<name>.paths must be a non-empty list of non-empty strings`, and a malformed pattern with `badil.yaml: services.<name>.paths[<i>]: invalid pattern "<p>"` (`<i>` counted from 0). See [Path filters](#path-filters).
 - `namespace.labels` and `namespace.annotations` are added to every preview Namespace, after the chart's own (`app.kubernetes.io/name`, `app.kubernetes.io/instance`, `app.kubernetes.io/part-of`, `app.kubernetes.io/managed-by`, and the annotation `argocd.argoproj.io/sync-wave`). Keys and values are strings (an empty value is allowed); a null, a number or a boolean is rejected, as is a key the chart sets. An empty block writes nothing.
 - `preview.label` must be a non-empty string; it is matched case-insensitively, like GitHub label names. `<label>:<name>` labels name the preview (see the label flow below).
 - `preview.maxPreviews` must be a YAML integer of at least 1; a string (`"3"`), `0`, a negative number or a float is rejected, and a null or empty value means unset. It does not need `preview.domain`. See Preview cap in the [HTTP API](#http-api) section.
@@ -236,6 +238,34 @@ dependencies:
 - **PR comment.** After the service and dependency lists, separated by a blank line, a line names the catalog services then the dependencies left out, in `badil.yaml` order, only when there is at least one. With only `front` pinned in the example: ``Not in this preview: `payments`, `search`, `kafka`, `elasticsearch` ``. It comes before the pinned-image note.
 - **Staleness.** The line is derived from `badil.yaml` minus the included set, and is refreshed only by a deploy, or by a write that changes the ordered service or dependency names or a host. A `badil.yaml` change that alters only the left-out set (a new service or dependency that no pinned part needs) leaves the preview file unchanged: the sweep writes nothing and existing comments keep the old line until the PR's next deploy.
 
+## Path filters
+
+`paths` lets a monorepo PR pin only the services it changes. Without it, a labelled PR pins every catalog service of its repo. A service of `badil.yaml` may list the files of its repo that belong to it:
+
+```yaml
+services:
+  api:    {repo: https://github.com/acme/platform.git, paths: ["api/**", "libs/common/**", "go.mod"]}
+  web:    {repo: https://github.com/acme/platform.git, paths: ["web/**"]}
+  worker: {repo: https://github.com/acme/platform.git, paths: ["worker/**", "libs/common/**"]}
+```
+
+- **Touched services.** On every reconcile that deploys (an open PR with a target, whatever the action, `unlabeled` included), when a service of the PR's repo declares `paths`, badil lists the files the PR changes against its base (`GET /repos/{owner}/{repo}/pulls/{number}/files`, every page of 100). A service without `paths` is always touched; a service with `paths` is touched when a changed file matches one of its patterns. With the example, `web/src/app.tsx` alone touches `web`; adding `libs/common/auth.go` also touches `api` and `worker`; `docs/README.md` alone touches no service. Only the touched services are deployed, in catalog order, at the PR's head SHA, and only they are checked for a holder (see One PR per service in [HTTP API](#http-api)).
+- **Renames.** A renamed file touches a service when its new path or its previous path matches: moving `api/x.go` to `tools/x.go` touches `api`.
+- **More than 3,000 files.** GitHub lists at most 3,000 files of a PR. When the PR's `changed_files` exceeds 3,000, every service of its repo is touched and no file is listed.
+- **Failed listing.** A listing that fails, on any page, logs `preview reconcile failed` and deploys nothing, whatever the action, `closed` included; it never falls back to every service.
+- **Later pushes.** Before deploying, the PR's entries in the target preview for services of its repo that it no longer touches are unpinned, in one commit `chore(preview): remove <names> from <slug>`, projected on `badil.yaml` like a teardown that keeps the preview, and the comments of the PRs still pinned there are refreshed. Pins the PR made through `/v1/deploy` for services of other repos stay. This write never deletes the preview, even when it unpins the PR's last pin: the deploy that follows pins at least one touched service. It counts in `badil_teardowns_total` with trigger `webhook`; when it fails, the reconcile logs `preview reconcile failed` and deploys nothing. After it, the deploy always writes and comments, so the PR's comment shows the current pins. A PR refused by a holder or the preview cap keeps its pins until an event where it deploys.
+- **No touched service.** A PR that touches no service is torn down from its target preview (all its pins there, deleting the preview when no pin is left), without the teardown comment. Its comment is replaced by
+
+  ```
+  ## ⏭️ Preview: `<slug>`
+
+  This PR changes no service of the preview (`paths` in badil.yaml), so nothing is deployed.
+  ```
+
+  even when there was no preview, and the reconcile logs `preview reconcile skipped` with reason `no service changed`. Neither the holder nor the preview cap check runs. A failed teardown is logged and counted as for any teardown, and the comment and outcome stay the same.
+- **User responsibility.** badil does not infer `paths`: a shared file missing from a service's `paths` (a library, a lockfile) does not pin it. The PR comment shows which services are pinned.
+- **Sweep and `/v1/deploy`.** Only PR events apply path filters: the cleanup sweep does not re-check them, and `/v1/deploy` names its service.
+
 ## Service repo contract
 
 The `preview-apps` chart ([`application.yaml`](../charts/preview-apps/templates/application.yaml)) renders one Argo CD Application per entry of the preview file, from the entry's `repoURL` and `branch`, and expects each service repo to provide:
@@ -308,7 +338,7 @@ Label flow: CI only builds and pushes images; the `preview` label (`preview.labe
 3. Otherwise badil re-reads the PR from GitHub and acts on its current state, labels and head SHA, never the payload's, so late or out-of-order deliveries, `closed` included, converge on the current truth: a `closed` delivery running after the PR was reopened and labeled deploys it. Fork PRs (head repo different from the base repo) are skipped: CI can't push a fork's image; a closed fork PR is still torn down.
 4. The PR's labels resolve its target preview (see Target preview below).
 5. The PR is torn down from every other preview it may still be pinned in (the cleanup set below), before anything is deployed.
-6. An open PR with a target deploys every catalog service of its repo, in catalog order, at the PR's head SHA, to the target slug, through the manual flow's write and comment fan-out, unless another PR holds one of its services there (see One PR per service below), or the target does not exist and the preview cap is reached (see Preview cap below). A failed service is logged and the next one still deploys. A service whose write would change nothing but its `updated-at` (same SHA, host and PR metadata, on the first read and after a 409 re-fetch) writes no commit and posts no comment, and logs `preview deploy unchanged`, unless step 5 removed the PR from another preview; when every service is unchanged, the reconcile is skipped with reason `already deployed`. A PR comment that failed to post, or that a failed teardown left stale, is therefore not repaired by a later label event at the same head SHA: the next push to the PR or a manual `/v1/deploy` repairs it. The deploy fan-out is the last write to the PR's comment, so a PR that moved shows its new preview.
+6. An open PR with a target deploys every catalog service of its repo, or, when its services declare `paths`, the services it touches, after unpinning there its entries for the ones it no longer touches (see [Path filters](#path-filters)), in catalog order, at the PR's head SHA, to the target slug, through the manual flow's write and comment fan-out, unless another PR holds one of its services there (see One PR per service below), or the target does not exist and the preview cap is reached (see Preview cap below). A failed service is logged and the next one still deploys. A service whose write would change nothing but its `updated-at` (same SHA, host and PR metadata, on the first read and after a 409 re-fetch) writes no commit and posts no comment, and logs `preview deploy unchanged`, unless step 5 removed the PR from another preview; when every service is unchanged, the reconcile is skipped with reason `already deployed`. A PR comment that failed to post, or that a failed teardown left stale, is therefore not repaired by a later label event at the same head SHA: the next push to the PR or a manual `/v1/deploy` repairs it. The deploy fan-out is the last write to the PR's comment, so a PR that moved shows its new preview.
 7. An open PR with conflicting named labels gets no preview. Its comment is replaced last by:
 
    ```
@@ -338,7 +368,7 @@ A slug where the PR has no pin costs one read and is otherwise a no-op, with no 
 
 A renamed or deleted label triggers nothing until the PR's next event or the next sweep, which unpins without redeploying. In that missed-event case the PR's comment can stay stale until its next event.
 
-One PR per service: a preview holds one PR per service. Before deploying, a reconcile reads the target's `values.yaml` (a missing file means no holder). An entry for one of the PR's services is held when it is pinned (`commitSha` set), has metadata, and its `pr-url` names another PR. Any held entry refuses the whole PR, for every target, branch or named, since two PRs can also share a head branch. The first held service is reported in the PR's comment:
+One PR per service: a preview holds one PR per service. Before deploying, a reconcile reads the target's `values.yaml` (a missing file means no holder). An entry for one of the PR's services (the services it touches, with [path filters](#path-filters)) is held when it is pinned (`commitSha` set), has metadata, and its `pr-url` names another PR. Any held entry refuses the whole PR, for every target, branch or named, since two PRs can also share a head branch. The first held service is reported in the PR's comment:
 
 ```
 ## ⚠️ Preview: `<slug>`
@@ -367,7 +397,7 @@ The cap is soft: the check and the write are not atomic, and `/v1/deploy` runs o
 
 badil does not check the registry: an image not pushed yet leaves the pod in `ImagePullBackOff` until CI pushes it (kubelet back-off capped at 300s).
 
-Background reconciles run one at a time, in no guaranteed order; a reconcile reads the PR only once it runs. A reconcile has a 20s budget, counted from when it starts running and shared by its cleanup teardowns, the holder check, the preview cap check, then its services; a service not reached in time is logged as failed. Shutdown waits up to 25s for queued and running jobs; jobs still queued then are dropped, and the cleanup sweeper catches missed teardowns of closed PRs.
+Background reconciles run one at a time, in no guaranteed order; a reconcile reads the PR only once it runs. A reconcile has a 20s budget, counted from when it starts running and shared, in order, by its cleanup teardowns, the files listing of [path filters](#path-filters), the holder check, the preview cap check, the unpin of untouched services, then its services; a service not reached in time is logged as failed. Shutdown waits up to 25s for queued and running jobs; jobs still queued then are dropped, and the cleanup sweeper catches missed teardowns of closed PRs.
 
 A labeled PR with no push for longer than `CLEANUP_TTL` is expired by the sweeper and not recreated while the label stays: push, or remove and re-add the label, to recreate it. A missed `unlabeled` of a named label, or a label that moved, is unpinned by the sweeper; a missed `unlabeled` of the plain label at the branch slug still waits for close or TTL.
 
@@ -439,8 +469,8 @@ Every label has a closed set of values. Go runtime (`go_*`) and process (`proces
 | Metric | Type | Labels | |
 |---|---|---|---|
 | `badil_webhook_deliveries_total` | counter | `event`, `status` | Webhook deliveries. `event` is `ping`, `installation`, `installation_repositories`, `pull_request`, `push` or `other` once the signature is verified, `unverified` before. `status` is the HTTP status: `200`, `401` or `403`. |
-| `badil_reconciles_total` | counter | `outcome` | One per pull request reconcile: `failed` (catalog, PR or preview read error, preview list error, or no service write succeeded and at least one failed), else `skipped`, else `deployed` (a service write succeeded), else `torn_down`. |
-| `badil_reconcile_skips_total` | counter | `reason` | Skipped reconciles by reason: `other label`, `not labeled`, `repo not in catalog`, `fork pr`, `service held by another pr`, `preview limit reached`, `conflicting preview labels`, `already deployed`. |
+| `badil_reconciles_total` | counter | `outcome` | One per pull request reconcile: `failed` (catalog, PR or preview read error, preview list error, PR files list error, failed unpin of untouched services, or no service write succeeded and at least one failed), else `skipped`, else `deployed` (a service write succeeded), else `torn_down`. |
+| `badil_reconcile_skips_total` | counter | `reason` | Skipped reconciles by reason: `other label`, `not labeled`, `repo not in catalog`, `fork pr`, `service held by another pr`, `preview limit reached`, `conflicting preview labels`, `already deployed`, `no service changed`. |
 | `badil_teardowns_total` | counter | `trigger`, `result` | Teardowns of a PR from a preview. `trigger` is `webhook` or `sweep`; `result` is `deleted`, `unpinned`, `noop` (nothing pinned) or `error`. |
 | `badil_gitops_operation_duration_seconds` | histogram | `op`, `result` | Duration of gitops `write`, `teardown` and `sync` operations, 409 retries included; `result` is `ok` or `error`. |
 | `badil_sweep_runs_total` | counter | `result` | In-server sweep runs, `ok` or `error`. A run cancelled by shutdown is not counted. |

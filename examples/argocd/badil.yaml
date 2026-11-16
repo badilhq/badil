@@ -30,6 +30,8 @@ services:
     #     - values-preview.yaml
     # needs: [postgres]           # optional: services and dependencies it calls; once any entry sets needs,
     #                             # a preview runs only its pinned services and what they need
+    # paths: ["api/**", "libs/common/**"]   # optional: globs of the files of its repo that belong to it;
+    #                             # a labelled PR pins it only when it changes one of them
   backend-2:
     repo: "https://github.com/badilhq/demo-backend-2.git"
   front:
