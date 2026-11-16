@@ -243,13 +243,30 @@ func withoutUpdatedAt(vals PreviewValues, serviceName string) PreviewValues {
 // then gives an unpinned entry its branch-tracking imageTag. vals is never
 // mutated.
 func UnpinPR(vals PreviewValues, owner, repo string, number int) (PreviewValues, []string, bool) {
+	return unpin(vals, func(entry ServiceEntry) bool { return belongsToPR(entry, owner, repo, number) })
+}
+
+// UnpinPRServices is UnpinPR restricted to the entries whose name is in
+// services: the PR's entries for other services stay pinned.
+func UnpinPRServices(
+	vals PreviewValues, owner, repo string, number int, services []string,
+) (PreviewValues, []string, bool) {
+	return unpin(vals, func(entry ServiceEntry) bool {
+		return slices.Contains(services, entry.Name) && belongsToPR(entry, owner, repo, number)
+	})
+}
+
+// unpin returns a copy of vals where every entry for which match holds is
+// reset to a bare branch-tracking entry, the names of those entries in file
+// order, and whether any entry is still pinned to a commit.
+func unpin(vals PreviewValues, match func(ServiceEntry) bool) (PreviewValues, []string, bool) {
 	services := make([]ServiceEntry, len(vals.Services))
 	copy(services, vals.Services)
 
 	var removed []string
 	pinned := false
 	for i := range services {
-		if belongsToPR(services[i], owner, repo, number) {
+		if match(services[i]) {
 			services[i].CommitSha = ""
 			services[i].Metadata = nil
 			removed = append(removed, services[i].Name)

@@ -3,6 +3,7 @@ module github.com/badilhq/badil
 go 1.26.0
 
 require (
+	github.com/bmatcuk/doublestar/v4 v4.10.4
 	github.com/bradleyfalzon/ghinstallation/v2 v2.17.0
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/google/go-github/v71 v71.0.0

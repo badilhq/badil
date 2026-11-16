@@ -151,6 +151,14 @@ func BuildServiceHeldSummary(slug, service, holderURL, base string) string {
 		slug, service, holderURL, base)
 }
 
+// BuildNoServiceSummary renders the comment badil leaves on a labelled PR
+// that changes no service of the preview slug: no file it changes matches the
+// paths of its repository's services, so nothing is deployed.
+func BuildNoServiceSummary(slug string) string {
+	return fmt.Sprintf("## ⏭️ Preview: `%s`\n\n"+
+		"This PR changes no service of the preview (`paths` in badil.yaml), so nothing is deployed.", slug)
+}
+
 // BuildPreviewLimitSummary renders the comment badil leaves on a PR it
 // refused to deploy because creating its preview slug would exceed the
 // preview cap of limit previews.

@@ -59,7 +59,7 @@ func TestGetPullRequest(t *testing.T) {
 	const (
 		head = `"head":{"ref":"feature/pricing","sha":"abc123","repo":{"full_name":"%s"}}`
 		base = `"base":{"repo":{"full_name":"acme/backend-1"}}`
-		rest = `"user":{"login":"octocat"},"html_url":"https://github.com/acme/backend-1/pull/42"`
+		rest = `"user":{"login":"octocat"},"html_url":"https://github.com/acme/backend-1/pull/42","changed_files":3`
 	)
 	pr := func(open bool, headFullName string, labels ...string) *gitops.PullRequest {
 		if labels == nil {
@@ -74,6 +74,7 @@ func TestGetPullRequest(t *testing.T) {
 			Labels:       labels,
 			FullName:     "acme/backend-1",
 			HeadFullName: headFullName,
+			ChangedFiles: 3,
 		}
 	}
 	cases := []struct {
@@ -365,5 +366,81 @@ func TestFanOutPRComments_StateError(t *testing.T) {
 	}
 	if want := []string{"backend-1/issues/42/comments"}; !slices.Equal(g.writes, want) {
 		t.Errorf("comment writes = %v, want %v", g.writes, want)
+	}
+}
+
+// filesPages serves GET /repos/acme/platform/pulls/42/files, one page per
+// entry of pages, linking each page to the next. A page that is "" answers
+// 500.
+func filesPages(t *testing.T, pages ...string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/repos/acme/platform/pulls/42/files" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if got := r.URL.Query().Get("per_page"); got != "100" {
+			t.Errorf("per_page = %q, want 100", got)
+		}
+		page := 1
+		if p := r.URL.Query().Get("page"); p != "" {
+			_, _ = fmt.Sscan(p, &page)
+		}
+		if page < 1 || page > len(pages) || pages[page-1] == "" {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, `{"message":"boom"}`)
+			return
+		}
+		if page < len(pages) {
+			w.Header().Set("Link", fmt.Sprintf(`<%s%s?per_page=100&page=%d>; rel="next"`,
+				"http://"+r.Host, r.URL.Path, page+1))
+		}
+		_, _ = io.WriteString(w, pages[page-1])
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestListPullRequestFiles(t *testing.T) {
+	srv := filesPages(t,
+		`[{"filename":"web/src/app.tsx","status":"modified"},`+
+			`{"filename":"tools/x.go","status":"renamed","previous_filename":"api/x.go"}]`,
+		`[{"filename":"docs/README.md","status":"added"}]`,
+	)
+	got, err := newClient(t, srv).ListPullRequestFiles(context.Background(), "acme", "platform", 42)
+	if err != nil {
+		t.Fatalf("ListPullRequestFiles: %v", err)
+	}
+	want := []gitops.ChangedFile{
+		{Filename: "web/src/app.tsx"},
+		{Filename: "tools/x.go", PreviousFilename: "api/x.go"},
+		{Filename: "docs/README.md"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ListPullRequestFiles = %+v, want %+v", got, want)
+	}
+}
+
+func TestListPullRequestFiles_FailingLaterPage(t *testing.T) {
+	srv := filesPages(t, `[{"filename":"web/src/app.tsx"}]`, "")
+	got, err := newClient(t, srv).ListPullRequestFiles(context.Background(), "acme", "platform", 42)
+	if err == nil {
+		t.Fatalf("ListPullRequestFiles = %+v, nil; want an error", got)
+	}
+	if got != nil {
+		t.Errorf("files = %+v, want nil", got)
+	}
+}
+
+func TestListPullRequestFiles_NotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, `{"message":"Not Found"}`)
+	}))
+	t.Cleanup(srv.Close)
+	_, err := newClient(t, srv).ListPullRequestFiles(context.Background(), "acme", "platform", 42)
+	if !errors.Is(err, gitops.ErrNotFound) {
+		t.Fatalf("err = %v, want %v", err, gitops.ErrNotFound)
 	}
 }

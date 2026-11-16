@@ -1184,3 +1184,64 @@ func TestParseCatalog_MalformedNeeds(t *testing.T) {
 		})
 	}
 }
+
+func TestParseCatalog_Paths(t *testing.T) {
+	const raw = `services:
+  api:
+    repo: https://github.com/acme/platform.git
+    paths: ["api/**", "libs/common/**", "go.mod"]
+  web: {repo: https://github.com/acme/platform.git, paths: ["web/**"]}
+  docs: {repo: https://github.com/acme/platform.git}
+`
+	got, err := gitops.ParseCatalog([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseCatalog: %v", err)
+	}
+	want := map[string][]string{
+		"api": {"api/**", "libs/common/**", "go.mod"},
+		"web": {"web/**"},
+	}
+	if !reflect.DeepEqual(got.Paths, want) {
+		t.Errorf("Paths = %v, want %v", got.Paths, want)
+	}
+}
+
+func TestParseCatalog_NoPaths(t *testing.T) {
+	got, err := gitops.ParseCatalog([]byte(catalogServices))
+	if err != nil {
+		t.Fatalf("ParseCatalog: %v", err)
+	}
+	if got.Paths != nil {
+		t.Errorf("Paths = %v, want nil", got.Paths)
+	}
+}
+
+func TestParseCatalog_MalformedPaths(t *testing.T) {
+	const list = "badil.yaml: services.api.paths must be a non-empty list of non-empty strings"
+	svc := func(paths string) string {
+		return "services:\n  api: {repo: r, paths: " + paths + "}\n"
+	}
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"null", svc("null"), list},
+		{"not a list", svc(`"api/**"`), list},
+		{"mapping", svc("{a: b}"), list},
+		{"empty list", svc("[]"), list},
+		{"empty string", svc(`["api/**", ""]`), list},
+		{"non-string item", svc("[api/**, 42]"), list},
+		{"list item", svc("[[api/**]]"), list},
+		{"invalid pattern", svc(`["api/**", "api/["]`), `badil.yaml: services.api.paths[1]: invalid pattern "api/["`},
+		{"invalid first pattern", svc(`["{a,b"]`), `badil.yaml: services.api.paths[0]: invalid pattern "{a,b"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := gitops.ParseCatalog([]byte(tt.raw))
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("err = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}

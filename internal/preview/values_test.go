@@ -993,3 +993,67 @@ func TestApplyCatalog_KeepsAPIVersion(t *testing.T) {
 		t.Errorf("APIVersion = %q, want %q", got.APIVersion, preview.APIVersion)
 	}
 }
+
+func TestUnpinPRServices(t *testing.T) {
+	const (
+		pr42 = "https://github.com/acme/platform/pull/42"
+		pr7  = "https://github.com/acme/platform/pull/7"
+		dep  = "https://github.com/acme/other/pull/42"
+	)
+	in := preview.PreviewValues{Services: []preview.ServiceEntry{
+		pinned("api", "a", pr42),
+		pinned("web", "b", pr42),
+		pinned("worker", "c", pr7),
+		pinned("billing", "d", dep),
+		{Name: "front"},
+	}}
+	cases := []struct {
+		name        string
+		services    []string
+		wantRemoved []string
+		wantPinned  bool
+	}{
+		{name: "one service of the PR", services: []string{"web"}, wantRemoved: []string{"web"}, wantPinned: true},
+		{
+			name:        "file order",
+			services:    []string{"web", "api"},
+			wantRemoved: []string{"api", "web"},
+			wantPinned:  true,
+		},
+		{name: "another PR's entry", services: []string{"worker"}, wantPinned: true},
+		{name: "unpinned entry", services: []string{"front"}, wantPinned: true},
+		{name: "no service", wantPinned: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, removed, stillPinned := preview.UnpinPRServices(in, "acme", "platform", 42, tc.services)
+			if !reflect.DeepEqual(removed, tc.wantRemoved) {
+				t.Errorf("removed = %v, want %v", removed, tc.wantRemoved)
+			}
+			if stillPinned != tc.wantPinned {
+				t.Errorf("pinned = %v, want %v", stillPinned, tc.wantPinned)
+			}
+			want := slices.Clone(in.Services)
+			for i := range want {
+				if slices.Contains(tc.wantRemoved, want[i].Name) {
+					want[i] = preview.ServiceEntry{Name: want[i].Name}
+				}
+			}
+			if !reflect.DeepEqual(got.Services, want) {
+				t.Errorf("services = %+v, want %+v", got.Services, want)
+			}
+		})
+	}
+}
+
+func TestUnpinPRServices_LastPin(t *testing.T) {
+	const pr42 = "https://github.com/acme/platform/pull/42"
+	in := preview.PreviewValues{Services: []preview.ServiceEntry{pinned("api", "a", pr42), {Name: "web"}}}
+	got, removed, stillPinned := preview.UnpinPRServices(in, "acme", "platform", 42, []string{"api", "web"})
+	if !reflect.DeepEqual(removed, []string{"api"}) || stillPinned {
+		t.Errorf("removed = %v, pinned = %v; want [api], false", removed, stillPinned)
+	}
+	if got.Services[0].CommitSha != "" || in.Services[0].CommitSha != "a" {
+		t.Errorf("got %+v from %+v; want api unpinned in a copy", got.Services[0], in.Services[0])
+	}
+}

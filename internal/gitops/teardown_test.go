@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -550,5 +551,205 @@ func TestUpsertPRComment_CreatesWithMarker(t *testing.T) {
 	}
 	if want := gitops.PRCommentMarker + "\n## gone"; body != want {
 		t.Errorf("comment body = %q, want %q", body, want)
+	}
+}
+
+func runUnpin(t *testing.T, g *teardownGitHub, services ...string) (*gitops.TeardownResult, error) {
+	t.Helper()
+	g.t = t
+	srv := httptest.NewServer(g)
+	t.Cleanup(srv.Close)
+	return newClient(t, srv).UnpinServicesWithRetry(
+		context.Background(), "feature-x", "acme", "backend-1", 42, services,
+	)
+}
+
+// pr42TwoServices is a preview where acme/backend-1#42 pins backend-1 and
+// backend-2 (a monorepo PR) and acme/front#9 pins front.
+const pr42TwoServices = `apiVersion: badil.dev/v1beta1
+gitopsRepoURL: https://github.com/acme/gitops.git
+services:
+  - name: backend-1
+    repoURL: https://github.com/acme/backend-1.git
+    branch: release
+    commitSha: aaaaaaaaaa
+    metadata:
+      pr-url: https://github.com/acme/backend-1/pull/42
+  - name: backend-2
+    repoURL: https://github.com/acme/backend-2.git
+    branch: main
+    commitSha: aaaaaaaaaa
+    metadata:
+      pr-url: https://github.com/acme/backend-1/pull/42
+  - name: front
+    repoURL: https://github.com/acme/front.git
+    branch: main
+    commitSha: cccccccccc
+    metadata:
+      pr-url: https://github.com/acme/front/pull/9
+dependencies: []
+`
+
+func TestUnpinServices_OnlyTheGivenServices(t *testing.T) {
+	g := &teardownGitHub{gets: []fileState{{sha: "blob-1", body: pr42TwoServices}}, badil: teardownBadil}
+	result, err := runUnpin(t, g, "backend-2", "front")
+	if err != nil {
+		t.Fatalf("UnpinServicesWithRetry: %v", err)
+	}
+	reqs := g.requests()
+	if len(reqs) != 1 || reqs[0].method != http.MethodPut || reqs[0].sha != "blob-1" {
+		t.Fatalf("requests = %+v, want one PUT at blob-1", reqs)
+	}
+	const wantMsg = "chore(preview): remove backend-2 from feature-x"
+	if reqs[0].message != wantMsg {
+		t.Errorf("PUT message = %q, want %q", reqs[0].message, wantMsg)
+	}
+	got := decode(t, reqs[0].content)
+	pins := map[string]string{}
+	for _, svc := range got.Services {
+		pins[svc.Name] = svc.CommitSha
+	}
+	// backend-1 stays pinned by the PR; front is another PR's pin.
+	want := map[string]string{"backend-1": "aaaaaaaaaa", "backend-2": "", "front": "cccccccccc"}
+	if !maps.Equal(pins, want) {
+		t.Errorf("pins = %v, want %v", pins, want)
+	}
+	if got.Services[1].ImageTag != "sha-${ARGOCD_APP_REVISION_SHORT}" {
+		t.Errorf("backend-2 imageTag = %q, want the branch-tracking tag of the projection", got.Services[1].ImageTag)
+	}
+	if result.Deleted || !slices.Equal(result.Removed, []string{"backend-2"}) {
+		t.Errorf("result = %+v, want Removed [backend-2], Deleted false", result)
+	}
+	if !preview.Equal(result.Values, got) {
+		t.Errorf("result.Values = %+v, want the written file", result.Values)
+	}
+	if result.Catalog == nil || !slices.Equal(result.Catalog.Services, []string{"backend-1", "backend-2", "front"}) {
+		t.Errorf("Catalog = %+v, want the badil.yaml read for the projection", result.Catalog)
+	}
+	if result.Excluded != nil {
+		t.Errorf("Excluded = %v, want nil", result.Excluded)
+	}
+	if result.CommitMessage != wantMsg || !strings.HasSuffix(result.CommitURL, "/c0ffee") {
+		t.Errorf("result message/url = %q/%q", result.CommitMessage, result.CommitURL)
+	}
+}
+
+func TestUnpinServices_KeepsFileWithNoPinLeft(t *testing.T) {
+	g := &teardownGitHub{gets: []fileState{{sha: "blob-1", body: onlyPR42}}, badil: teardownBadil}
+	result, err := runUnpin(t, g, "backend-1")
+	if err != nil {
+		t.Fatalf("UnpinServicesWithRetry: %v", err)
+	}
+	reqs := g.requests()
+	if len(reqs) != 1 || reqs[0].method != http.MethodPut {
+		t.Fatalf("requests = %+v, want one PUT, never a DELETE", reqs)
+	}
+	for _, svc := range decode(t, reqs[0].content).Services {
+		if svc.CommitSha != "" {
+			t.Errorf("%s still pinned at %s", svc.Name, svc.CommitSha)
+		}
+	}
+	if result.Deleted || !slices.Equal(result.Removed, []string{"backend-1"}) || result.Catalog == nil {
+		t.Errorf("result = %+v, want Removed [backend-1], Deleted false, Catalog set", result)
+	}
+	if result.CommitMessage != "chore(preview): remove backend-1 from feature-x" {
+		t.Errorf("CommitMessage = %q", result.CommitMessage)
+	}
+}
+
+func TestUnpinServices_ExcludedFromProjection(t *testing.T) {
+	g := &teardownGitHub{t: t, gets: []fileState{{sha: "blob-1", body: frontAndPayments}}, badil: needsBadil}
+	srv := httptest.NewServer(g)
+	t.Cleanup(srv.Close)
+	result, err := newClient(t, srv).UnpinServicesWithRetry(
+		context.Background(), "feature-x", "acme", "payments", 42, []string{"payments"},
+	)
+	if err != nil {
+		t.Fatalf("UnpinServicesWithRetry: %v", err)
+	}
+	if want := []string{"payments", "search", "kafka", "elasticsearch"}; !slices.Equal(result.Excluded, want) {
+		t.Errorf("Excluded = %v, want %v", result.Excluded, want)
+	}
+}
+
+func TestUnpinServices_UnreadableBadilYAML(t *testing.T) {
+	g := &teardownGitHub{gets: []fileState{{sha: "blob-1", body: pr42TwoServices}}}
+	result, err := runUnpin(t, g, "backend-2")
+	const want = "unpin previews/feature-x/values.yaml: gitops: not found"
+	if err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Fatalf("err = %v, want prefix %q", err, want)
+	}
+	if result != nil {
+		t.Errorf("result = %+v, want nil", result)
+	}
+	if reqs := g.requests(); len(reqs) != 0 {
+		t.Errorf("requests = %+v, want no write", reqs)
+	}
+}
+
+func TestUnpinServices_ConflictRetry(t *testing.T) {
+	// The re-fetch shows front pinned by acme/front#9 too: the retry keeps it.
+	g := &teardownGitHub{
+		gets:   []fileState{{sha: "blob-1", body: onlyPR42}, {sha: "blob-2", body: pr42TwoServices}},
+		writes: []int{http.StatusConflict},
+		badil:  teardownBadil,
+	}
+	result, err := runUnpin(t, g, "backend-1")
+	if err != nil {
+		t.Fatalf("UnpinServicesWithRetry: %v", err)
+	}
+	reqs := g.requests()
+	if len(reqs) != 2 || reqs[1].method != http.MethodPut || reqs[1].sha != "blob-2" {
+		t.Fatalf("requests = %+v, want two PUTs, the retry at blob-2", reqs)
+	}
+	if !strings.Contains(reqs[1].content, "commitSha: cccccccccc") {
+		t.Errorf("retry dropped front's pin:\n%s", reqs[1].content)
+	}
+	if !slices.Equal(result.Removed, []string{"backend-1"}) || g.catalogReads() != 1 {
+		t.Errorf("result = %+v, badil.yaml reads = %d; want Removed [backend-1], 1 read", result, g.catalogReads())
+	}
+}
+
+func TestUnpinServices_ConflictsExhausted(t *testing.T) {
+	g := &teardownGitHub{
+		gets:   []fileState{{sha: "blob-1", body: onlyPR42}},
+		writes: slices.Repeat([]int{http.StatusConflict}, gitops.MaxWriteRetries),
+		badil:  teardownBadil,
+	}
+	_, err := runUnpin(t, g, "backend-1")
+	const want = "unpin previews/feature-x/values.yaml: 3 attempts exhausted"
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %q", err, want)
+	}
+}
+
+func TestUnpinServices_NoOps(t *testing.T) {
+	cases := []struct {
+		name     string
+		gets     []fileState
+		services []string
+	}{
+		{name: "file missing", gets: []fileState{{}}, services: []string{"backend-1"}},
+		{
+			name:     "service not pinned by the PR",
+			gets:     []fileState{{sha: "blob-1", body: pr42TwoServices}},
+			services: []string{"front"},
+		},
+		{name: "no service", gets: []fileState{{sha: "blob-1", body: pr42TwoServices}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g := &teardownGitHub{gets: tc.gets, badil: teardownBadil}
+			result, err := runUnpin(t, g, tc.services...)
+			if err != nil {
+				t.Fatalf("UnpinServicesWithRetry: %v", err)
+			}
+			if result == nil || len(result.Removed) != 0 || result.Deleted || result.CommitURL != "" {
+				t.Errorf("result = %+v, want empty no-op result", result)
+			}
+			if reqs := g.requests(); len(reqs) != 0 {
+				t.Errorf("requests = %+v, want no write", reqs)
+			}
+		})
 	}
 }
