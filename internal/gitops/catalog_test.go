@@ -537,3 +537,281 @@ func TestServicesForRepo(t *testing.T) {
 		})
 	}
 }
+
+func TestParseCatalog_RendererSettings(t *testing.T) {
+	const raw = `imageTag: "sha-{sha7}"
+namespace:
+  labels: {pod-security.kubernetes.io/enforce: baseline, team: ""}
+  annotations: {owner: platform}
+services:
+  backend:
+    repo: https://github.com/acme/backend.git
+    imageTag: "{sha8}-amd64"
+    chart:
+      path: deploy/helm
+      imageTagParam: image.tag
+      hostParam: ingress.hostname
+      valueFiles: [values-preview.yaml, /shared/values.yaml]
+  front:
+    repo: https://github.com/acme/front.git
+    chart: {}
+  worker:
+    repo: https://github.com/acme/worker.git
+    chart: {hostParam: ingress.host}
+`
+	got, err := gitops.ParseCatalog([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseCatalog: %v", err)
+	}
+	if got.ImageTag != "sha-{sha7}" {
+		t.Errorf("ImageTag = %q, want sha-{sha7}", got.ImageTag)
+	}
+	if want := map[string]string{"backend": "{sha8}-amd64"}; !reflect.DeepEqual(got.ImageTags, want) {
+		t.Errorf("ImageTags = %#v, want %#v", got.ImageTags, want)
+	}
+	wantCharts := map[string]preview.ChartSettings{
+		"backend": {
+			Path: "deploy/helm", ImageTagParam: "image.tag", HostParam: "ingress.hostname",
+			ValueFiles: []string{"values-preview.yaml", "/shared/values.yaml"},
+		},
+		"front":  {},
+		"worker": {HostParam: "ingress.host"},
+	}
+	if !reflect.DeepEqual(got.Charts, wantCharts) {
+		t.Errorf("Charts = %#v, want %#v", got.Charts, wantCharts)
+	}
+	wantNS := &preview.NamespaceMetadata{
+		Labels:      map[string]string{"pod-security.kubernetes.io/enforce": "baseline", "team": ""},
+		Annotations: map[string]string{"owner": "platform"},
+	}
+	if !reflect.DeepEqual(got.Namespace, wantNS) {
+		t.Errorf("Namespace = %#v, want %#v", got.Namespace, wantNS)
+	}
+}
+
+func TestParseCatalog_RendererDefaults(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{name: "absent", raw: catalogServices},
+		{name: "empty namespace", raw: catalogServices + "namespace: {}\n"},
+		{name: "empty labels and annotations", raw: catalogServices + "namespace: {labels: {}, annotations: {}}\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := gitops.ParseCatalog([]byte(tt.raw))
+			if err != nil {
+				t.Fatalf("ParseCatalog: %v", err)
+			}
+			if got.ImageTag != preview.DefaultImageTag || got.ImageTags != nil || got.Charts != nil ||
+				got.Namespace != nil {
+				t.Errorf("ImageTag, ImageTags, Charts, Namespace = %q, %v, %v, %v; want %q, nil, nil, nil",
+					got.ImageTag, got.ImageTags, got.Charts, got.Namespace, preview.DefaultImageTag)
+			}
+		})
+	}
+}
+
+func TestParseCatalog_ImageTagFormats(t *testing.T) {
+	long := strings.Repeat("a", preview.MaxImageTagFormatLen-len("{sha}")) + "{sha}"
+	for _, format := range []string{
+		"{sha}", "{sha7}", "{sha8}", "sha-{sha7}", "{sha8}-amd64", "v1.2_{sha}.x-y", "_{sha}", "{sha}.", long,
+	} {
+		t.Run(format, func(t *testing.T) {
+			raw := "imageTag: \"" + format + "\"\nservices:\n  front: {repo: r, imageTag: \"" + format + "\"}\n"
+			got, err := gitops.ParseCatalog([]byte(raw))
+			if err != nil {
+				t.Fatalf("ParseCatalog: %v", err)
+			}
+			if got.ImageTag != format || got.ImageTags["front"] != format {
+				t.Errorf("ImageTag, ImageTags[front] = %q, %q; want %q", got.ImageTag, got.ImageTags["front"], format)
+			}
+		})
+	}
+}
+
+func TestParseCatalog_MalformedRendererSettings(t *testing.T) {
+	const badTag = " must be a quoted string made of an optional prefix, one of {sha}, {sha7} or {sha8}, " +
+		"and an optional suffix ([a-zA-Z0-9_.-], the prefix not starting with . or -), at most 93 characters"
+	tooLong := strings.Repeat("a", preview.MaxImageTagFormatLen-len("{sha}")+1) + "{sha}"
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"root imageTag null", catalogServices + "imageTag:\n", "badil.yaml: imageTag" + badTag},
+		{"root imageTag empty", catalogServices + "imageTag: \"\"\n", "badil.yaml: imageTag" + badTag},
+		{"root imageTag unquoted", catalogServices + "imageTag: {sha}\n", "badil.yaml: imageTag" + badTag},
+		{"root imageTag a number", catalogServices + "imageTag: 1\n", "badil.yaml: imageTag" + badTag},
+		{"root imageTag no placeholder", catalogServices + "imageTag: latest\n", "badil.yaml: imageTag" + badTag},
+		{
+			"root imageTag two placeholders",
+			catalogServices + "imageTag: \"{sha}-{sha7}\"\n",
+			"badil.yaml: imageTag" + badTag,
+		},
+		{
+			"root imageTag unknown placeholder",
+			catalogServices + "imageTag: \"{sha9}\"\n",
+			"badil.yaml: imageTag" + badTag,
+		},
+		{
+			"root imageTag prefix starts with -",
+			catalogServices + "imageTag: \"-{sha}\"\n",
+			"badil.yaml: imageTag" + badTag,
+		},
+		{
+			"root imageTag prefix starts with .",
+			catalogServices + "imageTag: \".{sha}\"\n",
+			"badil.yaml: imageTag" + badTag,
+		},
+		{"root imageTag slash", catalogServices + "imageTag: \"a/{sha}\"\n", "badil.yaml: imageTag" + badTag},
+		{
+			"root imageTag too long",
+			catalogServices + "imageTag: \"" + tooLong + "\"\n",
+			"badil.yaml: imageTag" + badTag,
+		},
+		{
+			"service imageTag bad",
+			"services:\n  front: {repo: r, imageTag: \"x:{sha}\"}\n",
+			"badil.yaml: services.front.imageTag" + badTag,
+		},
+		{
+			"service imageTag null",
+			"services:\n  front: {repo: r, imageTag: ~}\n",
+			"badil.yaml: services.front.imageTag" + badTag,
+		},
+		{"namespace null", catalogServices + "namespace:\n", "badil.yaml: namespace must be a mapping"},
+		{"namespace a list", catalogServices + "namespace: [a]\n", "badil.yaml: namespace must be a mapping"},
+		{
+			"namespace unknown key",
+			catalogServices + "namespace: {label: {a: b}}\n",
+			`badil.yaml: namespace: unknown key "label"`,
+		},
+		{
+			"namespace labels null",
+			catalogServices + "namespace: {labels: ~}\n",
+			"badil.yaml: namespace.labels must be a mapping",
+		},
+		{
+			"namespace annotations a list",
+			catalogServices + "namespace: {annotations: [a]}\n",
+			"badil.yaml: namespace.annotations must be a mapping",
+		},
+		{
+			"namespace label reserved",
+			catalogServices + "namespace: {labels: {app.kubernetes.io/part-of: x}}\n",
+			"badil.yaml: namespace.labels.app.kubernetes.io/part-of is set by the preview-env chart " +
+				"and cannot be overridden",
+		},
+		{
+			"namespace annotation reserved",
+			catalogServices + "namespace: {annotations: {argocd.argoproj.io/sync-wave: \"0\"}}\n",
+			"badil.yaml: namespace.annotations.argocd.argoproj.io/sync-wave is set by the preview-env chart " +
+				"and cannot be overridden",
+		},
+		{
+			"namespace label a boolean",
+			catalogServices + "namespace: {labels: {enabled: true}}\n",
+			"badil.yaml: namespace.labels.enabled must be a string",
+		},
+		{
+			"namespace label null",
+			catalogServices + "namespace: {labels: {team: ~}}\n",
+			"badil.yaml: namespace.labels.team must be a string",
+		},
+		{
+			"namespace annotation a list",
+			catalogServices + "namespace: {annotations: {owner: [a]}}\n",
+			"badil.yaml: namespace.annotations.owner must be a string",
+		},
+		{
+			"namespace label empty key",
+			catalogServices + "namespace: {labels: {\"\": a}}\n",
+			"badil.yaml: namespace.labels: keys must be non-empty strings",
+		},
+		{
+			"namespace label duplicate",
+			catalogServices + "namespace:\n  labels:\n    team: a\n    team: b\n",
+			"badil.yaml: namespace.labels.team is defined more than once",
+		},
+		{
+			"namespace duplicate key",
+			catalogServices + "namespace:\n  labels: {}\n  labels: {}\n",
+			"badil.yaml: namespace.labels is defined more than once",
+		},
+		{
+			"chart null",
+			"services:\n  front: {repo: r, chart: ~}\n",
+			"badil.yaml: services.front.chart must be a mapping",
+		},
+		{
+			"chart a string",
+			"services:\n  front: {repo: r, chart: k8s/}\n",
+			"badil.yaml: services.front.chart must be a mapping",
+		},
+		{
+			"chart unknown key",
+			"services:\n  front: {repo: r, chart: {branch: main}}\n",
+			`badil.yaml: services.front.chart: unknown key "branch"`,
+		},
+		{
+			"chart path empty",
+			"services:\n  front: {repo: r, chart: {path: \"\"}}\n",
+			"badil.yaml: services.front.chart.path must be a non-empty string",
+		},
+		{
+			"chart path null",
+			"services:\n  front: {repo: r, chart: {path: ~}}\n",
+			"badil.yaml: services.front.chart.path must be a non-empty string",
+		},
+		{
+			"chart imageTagParam a number",
+			"services:\n  front: {repo: r, chart: {imageTagParam: 1}}\n",
+			"badil.yaml: services.front.chart.imageTagParam must be a non-empty string",
+		},
+		{
+			"chart hostParam a boolean",
+			"services:\n  front: {repo: r, chart: {hostParam: false}}\n",
+			"badil.yaml: services.front.chart.hostParam must be a non-empty string",
+		},
+		{
+			"chart valueFiles empty",
+			"services:\n  front: {repo: r, chart: {valueFiles: []}}\n",
+			"badil.yaml: services.front.chart.valueFiles must be a non-empty list of non-empty strings",
+		},
+		{
+			"chart valueFiles null",
+			"services:\n  front: {repo: r, chart: {valueFiles: ~}}\n",
+			"badil.yaml: services.front.chart.valueFiles must be a non-empty list of non-empty strings",
+		},
+		{
+			"chart valueFiles a string",
+			"services:\n  front: {repo: r, chart: {valueFiles: values.yaml}}\n",
+			"badil.yaml: services.front.chart.valueFiles must be a non-empty list of non-empty strings",
+		},
+		{
+			"chart valueFiles empty item",
+			"services:\n  front: {repo: r, chart: {valueFiles: [a, \"\"]}}\n",
+			"badil.yaml: services.front.chart.valueFiles must be a non-empty list of non-empty strings",
+		},
+		{
+			"chart valueFiles null item",
+			"services:\n  front: {repo: r, chart: {valueFiles: [~]}}\n",
+			"badil.yaml: services.front.chart.valueFiles must be a non-empty list of non-empty strings",
+		},
+		{
+			"chart duplicate key",
+			"services:\n  front: {repo: r, chart: {path: a, path: b}}\n",
+			"badil.yaml: services.front.chart.path is defined more than once",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := gitops.ParseCatalog([]byte(tt.raw))
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("err = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}

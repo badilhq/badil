@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -30,6 +31,19 @@ type ServiceCatalog struct {
 	// MaxPreviews is preview.maxPreviews, the most previews that may exist
 	// before a deploy that would create a new one is refused. 0 means no cap.
 	MaxPreviews int
+	// ImageTag is the root imageTag: the image tag format of every service
+	// whose entry sets none (preview.DefaultImageTag when absent).
+	ImageTag string
+	// ImageTags maps each service whose entry sets imageTag to that format.
+	// It is nil when no entry sets one.
+	ImageTags map[string]string
+	// Charts maps each service whose entry sets chart to its settings as
+	// written: an absent key is empty and takes its default when projected.
+	// It is nil when no entry sets one.
+	Charts map[string]preview.ChartSettings
+	// Namespace is the root namespace block: the extra labels and annotations
+	// of the preview Namespace. It is nil when absent or empty.
+	Namespace *preview.NamespaceMetadata
 }
 
 // DefaultLabel is the preview label when preview.label is absent.
@@ -78,10 +92,13 @@ const configFile = "badil.yaml"
 // badilFile is badil.yaml. Every key is known: decoding with KnownFields
 // rejects any other. Services stays a node to keep catalog order; its entries
 // are checked by parseServiceEntries, since yaml.Node.Decode ignores
-// KnownFields.
+// KnownFields. ImageTag and Namespace stay nodes so that a null is rejected
+// rather than ignored.
 type badilFile struct {
-	Services yaml.Node     `yaml:"services"`
-	Preview  *previewBlock `yaml:"preview"`
+	Services  yaml.Node     `yaml:"services"`
+	Preview   *previewBlock `yaml:"preview"`
+	ImageTag  yaml.Node     `yaml:"imageTag"`
+	Namespace yaml.Node     `yaml:"namespace"`
 }
 
 type previewBlock struct {
@@ -163,111 +180,290 @@ func ParseCatalog(raw []byte) (*ServiceCatalog, error) {
 	if err := dec.Decode(&doc); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("%s: %w", configFile, err)
 	}
-	services, repos, branches, err := parseServiceEntries(&doc.Services)
+	c, err := parseDocument(&doc)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", configFile, err)
+	}
+	return c, nil
+}
+
+// parseDocument validates the decoded badil.yaml and returns its catalog.
+func parseDocument(doc *badilFile) (*ServiceCatalog, error) {
+	c := &ServiceCatalog{Label: DefaultLabel, ImageTag: preview.DefaultImageTag}
+	if err := parseServiceEntries(&doc.Services, c); err != nil {
+		return nil, err
+	}
+	if doc.ImageTag.Kind != 0 {
+		format, err := parseImageTag("imageTag", &doc.ImageTag)
+		if err != nil {
+			return nil, err
+		}
+		c.ImageTag = format
+	}
+	if doc.Namespace.Kind != 0 {
+		ns, err := parseNamespace(&doc.Namespace)
+		if err != nil {
+			return nil, err
+		}
+		if len(ns.Labels) > 0 || len(ns.Annotations) > 0 {
+			c.Namespace = &ns
+		}
 	}
 	urls, err := previewURLs(doc.Preview)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", configFile, err)
+		return nil, err
 	}
-	label := DefaultLabel
+	c.URLs = urls
 	if doc.Preview != nil && doc.Preview.Label != nil {
-		label = string(*doc.Preview.Label)
+		c.Label = string(*doc.Preview.Label)
 	}
-	maxPrev := 0
 	if doc.Preview != nil && doc.Preview.MaxPreviews != nil {
-		maxPrev = int(*doc.Preview.MaxPreviews)
+		c.MaxPreviews = int(*doc.Preview.MaxPreviews)
 	}
-	return &ServiceCatalog{
-		Services: services, URLs: urls, Label: label, Repos: repos, Branches: branches,
-		MaxPreviews: maxPrev,
-	}, nil
+	return c, nil
 }
 
-// parseServiceEntries validates the services mapping, in file order, and
-// returns the service names, the repo of each, and the branch of each entry
-// that sets one (nil when none does).
-func parseServiceEntries(n *yaml.Node) ([]string, map[string]string, map[string]string, error) {
+// parseServiceEntries validates the services mapping, in file order, and sets
+// the services of c: their names, the repo of each, and the branch, image tag
+// format and chart settings of each entry that sets them.
+func parseServiceEntries(n *yaml.Node, c *ServiceCatalog) error {
 	n = resolveAlias(n)
 	switch {
 	case n.Kind == 0 || n.Tag == "!!null":
-		return nil, nil, nil, errors.New("missing 'services' mapping")
+		return errors.New("missing 'services' mapping")
 	case n.Kind != yaml.MappingNode:
-		return nil, nil, nil, errors.New("'services' must be a mapping")
+		return errors.New("'services' must be a mapping")
 	}
 	if len(n.Content) == 0 {
-		return nil, nil, nil, errors.New("'services' must not be empty")
+		return errors.New("'services' must not be empty")
 	}
-	services := make([]string, 0, len(n.Content)/pairStride)
-	repos := make(map[string]string, len(n.Content)/pairStride)
-	var branches map[string]string
+	c.Services = make([]string, 0, len(n.Content)/pairStride)
+	c.Repos = make(map[string]string, len(n.Content)/pairStride)
 	for i := 0; i+1 < len(n.Content); i += pairStride {
 		name := n.Content[i].Value
-		if _, dup := repos[name]; dup {
-			return nil, nil, nil, fmt.Errorf("services.%s is defined more than once", name)
+		if _, dup := c.Repos[name]; dup {
+			return fmt.Errorf("services.%s is defined more than once", name)
 		}
-		repo, branch, err := serviceEntry(name, resolveAlias(n.Content[i+1]))
+		spec, err := serviceEntry(name, resolveAlias(n.Content[i+1]))
 		if err != nil {
-			return nil, nil, nil, err
+			return err
 		}
-		services = append(services, name)
-		repos[name] = repo
-		if branch == "" {
-			continue
+		c.Services = append(c.Services, name)
+		c.Repos[name] = spec.repo
+		if spec.branch != "" {
+			c.Branches = setKey(c.Branches, name, spec.branch)
 		}
-		if branches == nil {
-			branches = make(map[string]string)
+		if spec.imageTag != "" {
+			c.ImageTags = setKey(c.ImageTags, name, spec.imageTag)
 		}
-		branches[name] = branch
+		if spec.chart != nil {
+			c.Charts = setKey(c.Charts, name, *spec.chart)
+		}
 	}
-	return services, repos, branches, nil
+	return nil
 }
 
-// serviceEntry validates one services entry and returns its repo and its
-// branch ("" when absent). Each key is checked on the node: repo is required,
-// branch optional, any other key or a repeated key an error (decoding into a
-// yaml.Node does not detect duplicate keys).
-func serviceEntry(name string, n *yaml.Node) (string, string, error) {
-	if n.Kind != yaml.MappingNode {
-		return "", "", fmt.Errorf("services.%s must be a mapping", name)
+// setKey sets m[key] to v, allocating m when nil, and returns m.
+func setKey[V any](m map[string]V, key string, v V) map[string]V {
+	if m == nil {
+		m = make(map[string]V)
 	}
-	var repo, branch string
+	m[key] = v
+	return m
+}
+
+// serviceSpec is one validated services entry. Every field but repo is empty
+// (chart nil) when the entry does not set it.
+type serviceSpec struct {
+	repo, branch, imageTag string
+	chart                  *preview.ChartSettings
+}
+
+// serviceEntry validates one services entry: repo is required; branch,
+// imageTag and chart are optional; any other key or a repeated key is an
+// error (decoding into a yaml.Node does not detect duplicate keys).
+func serviceEntry(name string, n *yaml.Node) (serviceSpec, error) {
+	prefix := "services." + name
+	if n.Kind != yaml.MappingNode {
+		return serviceSpec{}, fmt.Errorf("%s must be a mapping", prefix)
+	}
+	var spec serviceSpec
 	var hasRepo bool
-	seen := make(map[string]bool, len(n.Content)/pairStride)
-	for i := 0; i+1 < len(n.Content); i += pairStride {
-		key, val := n.Content[i].Value, resolveAlias(n.Content[i+1])
-		if seen[key] {
-			return "", "", fmt.Errorf("services.%s.%s is defined more than once", name, key)
-		}
-		seen[key] = true
+	err := eachKey(prefix, n, func(key string, val *yaml.Node) error {
+		var err error
+		path := prefix + "." + key
 		switch key {
 		case "repo":
-			if !nonEmptyString(val) {
-				return "", "", fmt.Errorf("services.%s.repo must be a non-empty string", name)
-			}
-			repo, hasRepo = val.Value, true
+			spec.repo, err = requireString(path, val)
+			hasRepo = true
 		case "branch":
-			if !nonEmptyString(val) {
-				return "", "", fmt.Errorf("services.%s.branch must be a non-empty string", name)
-			}
-			branch = val.Value
+			spec.branch, err = requireString(path, val)
+		case "imageTag":
+			spec.imageTag, err = parseImageTag(path, val)
+		case "chart":
+			var chart preview.ChartSettings
+			chart, err = parseChart(path, val)
+			spec.chart = &chart
 		default:
-			return "", "", fmt.Errorf("services.%s: unknown key %q", name, key)
+			err = fmt.Errorf("%s: unknown key %q", prefix, key)
 		}
+		return err
+	})
+	if err != nil {
+		return serviceSpec{}, err
 	}
 	if !hasRepo {
-		return "", "", fmt.Errorf("services.%s: missing 'repo'", name)
+		return serviceSpec{}, fmt.Errorf("%s: missing 'repo'", prefix)
 	}
-	return repo, branch, nil
+	return spec, nil
 }
 
-// nonEmptyString reports whether n is a non-empty scalar usable as a string.
-// Any scalar counts (yaml.v3 tags `yes` or `on` !!str, `2024-01-01`
-// !!timestamp) except one tagged !!int, !!float, !!bool or !!null; a mapping
-// or a sequence does not.
+// parseChart validates services.<name>.chart, at path: a mapping whose keys
+// are all optional. path, imageTagParam and hostParam are non-empty strings;
+// valueFiles is a non-empty list of non-empty strings. An absent key is left
+// empty.
+func parseChart(path string, n *yaml.Node) (preview.ChartSettings, error) {
+	if n.Kind != yaml.MappingNode {
+		return preview.ChartSettings{}, fmt.Errorf("%s must be a mapping", path)
+	}
+	var chart preview.ChartSettings
+	err := eachKey(path, n, func(key string, val *yaml.Node) error {
+		var err error
+		keyPath := path + "." + key
+		switch key {
+		case "path":
+			chart.Path, err = requireString(keyPath, val)
+		case "imageTagParam":
+			chart.ImageTagParam, err = requireString(keyPath, val)
+		case "hostParam":
+			chart.HostParam, err = requireString(keyPath, val)
+		case "valueFiles":
+			chart.ValueFiles, err = parseValueFiles(keyPath, val)
+		default:
+			err = fmt.Errorf("%s: unknown key %q", path, key)
+		}
+		return err
+	})
+	return chart, err
+}
+
+// parseValueFiles validates a valueFiles list, at path: a non-empty sequence
+// of non-empty strings.
+func parseValueFiles(path string, n *yaml.Node) ([]string, error) {
+	if n.Kind != yaml.SequenceNode || len(n.Content) == 0 {
+		return nil, fmt.Errorf("%s must be a non-empty list of non-empty strings", path)
+	}
+	files := make([]string, 0, len(n.Content))
+	for _, item := range n.Content {
+		item = resolveAlias(item)
+		if !nonEmptyString(item) {
+			return nil, fmt.Errorf("%s must be a non-empty list of non-empty strings", path)
+		}
+		files = append(files, item.Value)
+	}
+	return files, nil
+}
+
+// parseImageTag validates an image tag format, at path (imageTag or
+// services.<name>.imageTag): preview.ValidImageTagFormat.
+func parseImageTag(path string, n *yaml.Node) (string, error) {
+	n = resolveAlias(n)
+	if !nonEmptyString(n) || !preview.ValidImageTagFormat(n.Value) {
+		return "", fmt.Errorf(
+			"%s must be a quoted string made of an optional prefix, one of {sha}, {sha7} or {sha8}, "+
+				"and an optional suffix ([a-zA-Z0-9_.-], the prefix not starting with . or -), "+
+				"at most %d characters", path, preview.MaxImageTagFormatLen)
+	}
+	return n.Value, nil
+}
+
+// parseNamespace validates the root namespace block: a mapping with the
+// optional keys labels and annotations.
+func parseNamespace(n *yaml.Node) (preview.NamespaceMetadata, error) {
+	n = resolveAlias(n)
+	if n.Kind != yaml.MappingNode {
+		return preview.NamespaceMetadata{}, errors.New("namespace must be a mapping")
+	}
+	var ns preview.NamespaceMetadata
+	err := eachKey("namespace", n, func(key string, val *yaml.Node) error {
+		var err error
+		switch key {
+		case "labels":
+			ns.Labels, err = parseStringMap("namespace.labels", val, preview.ReservedNamespaceLabels())
+		case "annotations":
+			ns.Annotations, err = parseStringMap("namespace.annotations", val, preview.ReservedNamespaceAnnotations())
+		default:
+			err = fmt.Errorf("namespace: unknown key %q", key)
+		}
+		return err
+	})
+	return ns, err
+}
+
+// parseStringMap validates a mapping of non-empty string keys to string
+// values, at path, none of whose keys is in reserved.
+func parseStringMap(path string, n *yaml.Node, reserved []string) (map[string]string, error) {
+	n = resolveAlias(n)
+	if n.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("%s must be a mapping", path)
+	}
+	out := make(map[string]string, len(n.Content)/pairStride)
+	err := eachKey(path, n, func(key string, val *yaml.Node) error {
+		keyPath := path + "." + key
+		switch {
+		case key == "":
+			return fmt.Errorf("%s: keys must be non-empty strings", path)
+		case slices.Contains(reserved, key):
+			return fmt.Errorf("%s is set by the preview-env chart and cannot be overridden", keyPath)
+		case !stringScalar(val):
+			return fmt.Errorf("%s must be a string", keyPath)
+		}
+		out[key] = val.Value
+		return nil
+	})
+	return out, err
+}
+
+// requireString returns the value of n, a non-empty string at path.
+func requireString(path string, n *yaml.Node) (string, error) {
+	if !nonEmptyString(n) {
+		return "", fmt.Errorf("%s must be a non-empty string", path)
+	}
+	return n.Value, nil
+}
+
+// eachKey calls fn with each key of the mapping n, at path, and its value
+// (aliases resolved), in file order, stopping at the first error. A key that
+// is not a string or is repeated is an error.
+func eachKey(path string, n *yaml.Node, fn func(key string, val *yaml.Node) error) error {
+	seen := make(map[string]bool, len(n.Content)/pairStride)
+	for i := 0; i+1 < len(n.Content); i += pairStride {
+		k := resolveAlias(n.Content[i])
+		if !stringScalar(k) {
+			return fmt.Errorf("%s: keys must be strings, got %q", path, k.Value)
+		}
+		if seen[k.Value] {
+			return fmt.Errorf("%s.%s is defined more than once", path, k.Value)
+		}
+		seen[k.Value] = true
+		if err := fn(k.Value, resolveAlias(n.Content[i+1])); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// nonEmptyString reports whether n is a non-empty stringScalar.
 func nonEmptyString(n *yaml.Node) bool {
-	if n.Kind != yaml.ScalarNode || n.Value == "" {
+	return stringScalar(n) && n.Value != ""
+}
+
+// stringScalar reports whether n is a scalar usable as a string. Any scalar
+// counts (yaml.v3 tags `yes` or `on` !!str, `2024-01-01` !!timestamp) except
+// one tagged !!int, !!float, !!bool or !!null; a mapping or a sequence does
+// not.
+func stringScalar(n *yaml.Node) bool {
+	if n.Kind != yaml.ScalarNode {
 		return false
 	}
 	switch n.Tag {

@@ -39,3 +39,37 @@ type PreviewValues struct {
 	APIVersion string         `yaml:"apiVersion"`
 	Services   []ServiceEntry `yaml:"services"`
 }
+
+// ChartSettings is how a service's chart is rendered: the chart path in the
+// service repo, the Helm parameters set to the image tag and to the preview
+// host, and extra values files applied in order.
+type ChartSettings struct {
+	Path          string   `yaml:"path"`
+	ImageTagParam string   `yaml:"imageTagParam"`
+	HostParam     string   `yaml:"hostParam"`
+	ValueFiles    []string `yaml:"valueFiles,omitempty"`
+}
+
+// NamespaceMetadata is the extra labels and annotations of the preview
+// Namespace.
+type NamespaceMetadata struct {
+	Labels      map[string]string `yaml:"labels,omitempty"`
+	Annotations map[string]string `yaml:"annotations,omitempty"`
+}
+
+// ReservedNamespaceLabels returns the preview Namespace labels the
+// preview-env chart sets, which NamespaceMetadata.Labels cannot hold.
+func ReservedNamespaceLabels() []string {
+	return []string{
+		"app.kubernetes.io/name",
+		"app.kubernetes.io/instance",
+		"app.kubernetes.io/part-of",
+		"app.kubernetes.io/managed-by",
+	}
+}
+
+// ReservedNamespaceAnnotations returns the preview Namespace annotations the
+// preview-env chart sets, which NamespaceMetadata.Annotations cannot hold.
+func ReservedNamespaceAnnotations() []string {
+	return []string{"argocd.argoproj.io/sync-wave"}
+}
