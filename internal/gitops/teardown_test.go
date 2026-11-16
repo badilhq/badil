@@ -304,6 +304,96 @@ func TestTeardown_ReadsBadilYAMLOnceAcrossConflicts(t *testing.T) {
 	}
 }
 
+// frontAndPayments is a preview of needsBadil pinned by acme/front#1 and
+// acme/payments#42: front, payments and what they need.
+const frontAndPayments = `apiVersion: badil.dev/v1beta1
+gitopsRepoURL: https://github.com/acme/gitops.git
+services:
+  - name: front
+    repoURL: https://github.com/acme/front.git
+    branch: main
+    commitSha: aaaaaaaaaa
+    imageTag: aaaaaaaaaa
+    chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
+    metadata:
+      pr-url: https://github.com/acme/front/pull/1
+  - name: backend
+    repoURL: https://github.com/acme/backend.git
+    branch: main
+    imageTag: ${ARGOCD_APP_REVISION}
+    chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
+  - name: payments
+    repoURL: https://github.com/acme/payments.git
+    branch: main
+    commitSha: bbbbbbbbbb
+    imageTag: bbbbbbbbbb
+    chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
+    metadata:
+      pr-url: https://github.com/acme/payments/pull/42
+dependencies:
+  - {name: postgres, chart: {repoURL: oci://r/postgresql, version: 1.0.0}}
+  - {name: redis, chart: {repoURL: oci://r/redis, version: 1.0.0}}
+  - {name: kafka, chart: {repoURL: oci://r/kafka, version: 1.0.0}}
+`
+
+// TestTeardown_DropsPartsOnlyThePRNeeded checks that closing a PR removes,
+// in the teardown commit, the services and dependencies only its pinned
+// services needed.
+func TestTeardown_DropsPartsOnlyThePRNeeded(t *testing.T) {
+	g := &teardownGitHub{t: t, gets: []fileState{{sha: "blob-1", body: frontAndPayments}}, badil: needsBadil}
+	srv := httptest.NewServer(g)
+	t.Cleanup(srv.Close)
+	result, err := newClient(t, srv).TeardownPreviewWithRetry(context.Background(), "feature-x", "acme", "payments", 42)
+	if err != nil {
+		t.Fatalf("TeardownPreviewWithRetry: %v", err)
+	}
+	reqs := g.requests()
+	if len(reqs) != 1 || reqs[0].method != http.MethodPut {
+		t.Fatalf("requests = %+v, want one PUT", reqs)
+	}
+	const wantMsg = "chore(preview): remove payments from feature-x"
+	if reqs[0].message != wantMsg {
+		t.Errorf("PUT message = %q, want %q", reqs[0].message, wantMsg)
+	}
+	wantBody := "apiVersion: badil.dev/v1beta1\n" +
+		"gitopsRepoURL: https://github.com/acme/gitops.git\n" +
+		"services:\n" +
+		"  - name: front\n" +
+		"    repoURL: https://github.com/acme/front.git\n" +
+		"    branch: main\n" +
+		"    commitSha: aaaaaaaaaa\n" +
+		"    imageTag: aaaaaaaaaa\n" +
+		defaultChartYAML +
+		"    metadata:\n" +
+		"      pr-author: \"\"\n" +
+		"      pr-url: https://github.com/acme/front/pull/1\n" +
+		"      pr-number: \"\"\n" +
+		"      created-at: \"\"\n" +
+		"      updated-at: \"\"\n" +
+		"      vcs.ref.name: \"\"\n" +
+		"      cicd.pipeline.run.url: \"\"\n" +
+		"  - name: backend\n" +
+		"    repoURL: https://github.com/acme/backend.git\n" +
+		"    branch: main\n" +
+		"    imageTag: ${ARGOCD_APP_REVISION}\n" +
+		defaultChartYAML +
+		"dependencies:\n" +
+		"  - name: postgres\n" +
+		"    chart:\n" +
+		"      repoURL: oci://r/postgresql\n" +
+		"      version: 1.0.0\n" +
+		"  - name: redis\n" +
+		"    chart:\n" +
+		"      repoURL: oci://r/redis\n" +
+		"      version: 1.0.0\n"
+	if reqs[0].content != wantBody {
+		t.Errorf("PUT content mismatch\n got:\n%s\nwant:\n%s", reqs[0].content, wantBody)
+	}
+	if result.Deleted || !slices.Equal(result.Removed, []string{"payments"}) {
+		t.Errorf("result = %+v, want Removed [payments], Deleted false", result)
+	}
+}
+
 func TestTeardown_DeleteWhenNoPinRemains(t *testing.T) {
 	g := &teardownGitHub{gets: []fileState{{sha: "blob-1", body: onlyPR42}}}
 	result, err := runTeardown(t, g)

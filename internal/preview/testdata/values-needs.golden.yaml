@@ -1,0 +1,37 @@
+apiVersion: badil.dev/v1beta1
+gitopsRepoURL: https://github.com/acme/gitops.git
+services:
+  - name: front
+    repoURL: https://github.com/acme/front.git
+    branch: main
+    commitSha: abc1234567890
+    imageTag: abc1234567890
+    chart:
+      path: k8s/
+      imageTagParam: app.image.tag
+      hostParam: app.ingress.host
+    metadata:
+      pr-author: octocat
+      pr-url: https://github.com/acme/front/pull/42
+      pr-number: "42"
+      created-at: "2026-05-26T10:00:00Z"
+      updated-at: "2026-05-26T10:00:00Z"
+      vcs.ref.name: feature/add-pricing
+      cicd.pipeline.run.url: https://github.com/acme/backend-1/actions/runs/1
+  - name: backend
+    repoURL: https://github.com/acme/backend.git
+    branch: main
+    imageTag: ${ARGOCD_APP_REVISION}
+    chart:
+      path: k8s/
+      imageTagParam: app.image.tag
+      hostParam: app.ingress.host
+dependencies:
+  - name: postgres
+    chart:
+      repoURL: oci://r/postgres
+      version: 1.0.0
+  - name: redis
+    chart:
+      repoURL: oci://r/redis
+      version: 1.0.0

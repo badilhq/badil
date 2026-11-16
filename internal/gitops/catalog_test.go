@@ -965,3 +965,143 @@ func TestParseCatalog_MalformedDependencies(t *testing.T) {
 		})
 	}
 }
+
+// needsBadil is a badil.yaml whose services declare needs.
+const needsBadil = `services:
+  front: {repo: https://github.com/acme/front.git, needs: [backend]}
+  backend: {repo: https://github.com/acme/backend.git, needs: [postgres, redis]}
+  payments: {repo: https://github.com/acme/payments.git, needs: [backend, kafka, postgres]}
+  search: {repo: https://github.com/acme/search.git, needs: [elasticsearch]}
+dependencies:
+  postgres: {chart: oci://r/postgresql, version: 1.0.0}
+  redis: {chart: oci://r/redis, version: 1.0.0}
+  kafka: {chart: oci://r/kafka, version: 1.0.0}
+  elasticsearch: {chart: oci://r/elasticsearch, version: 1.0.0}
+`
+
+func TestParseCatalog_Needs(t *testing.T) {
+	raw := strings.Replace(
+		needsBadil,
+		"version: 1.0.0}\n  elasticsearch",
+		"version: 1.0.0, needs: [zookeeper]}\n  zookeeper: {chart: oci://r/zookeeper, version: 1.0.0}\n  elasticsearch",
+		1,
+	)
+	got, err := gitops.ParseCatalog([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseCatalog: %v", err)
+	}
+	want := map[string][]string{
+		"front":    {"backend"},
+		"backend":  {"postgres", "redis"},
+		"payments": {"backend", "kafka", "postgres"},
+		"search":   {"elasticsearch"},
+		"kafka":    {"zookeeper"},
+	}
+	if !reflect.DeepEqual(got.Needs, want) {
+		t.Errorf("Needs = %v, want %v", got.Needs, want)
+	}
+}
+
+func TestParseCatalog_NeedsCycle(t *testing.T) {
+	const raw = `services:
+  a: {repo: r, needs: [b]}
+  b: {repo: s, needs: [a]}
+`
+	got, err := gitops.ParseCatalog([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseCatalog: %v", err)
+	}
+	if want := map[string][]string{"a": {"b"}, "b": {"a"}}; !reflect.DeepEqual(got.Needs, want) {
+		t.Errorf("Needs = %v, want %v", got.Needs, want)
+	}
+}
+
+func TestParseCatalog_NoNeeds(t *testing.T) {
+	got, err := gitops.ParseCatalog(
+		[]byte(catalogServices + "dependencies: {db: {chart: oci://r/c, version: 1.0.0}}\n"),
+	)
+	if err != nil {
+		t.Fatalf("ParseCatalog: %v", err)
+	}
+	if got.Needs != nil {
+		t.Errorf("Needs = %v, want nil", got.Needs)
+	}
+}
+
+func TestParseCatalog_MalformedNeeds(t *testing.T) {
+	const db = "dependencies: {db: {chart: oci://r/c, version: 1.0.0, needs: %s}}\n"
+	svc := func(needs string) string {
+		return "services:\n  front: {repo: r, needs: " + needs + "}\n  api: {repo: s}\n" +
+			"dependencies: {db: {chart: oci://r/c, version: 1.0.0}}\n"
+	}
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			"unknown name",
+			svc("[api, cache]"),
+			`badil.yaml: services.front.needs: "cache" is neither a service nor a dependency`,
+		},
+		{"self", svc("[api, front]"), `badil.yaml: services.front.needs: "front" cannot need itself`},
+		{"duplicate", svc("[db, api, db]"), `badil.yaml: services.front.needs: "db" is listed more than once`},
+		{
+			"empty list",
+			svc("[]"),
+			"badil.yaml: services.front.needs must be a non-empty list of service or dependency names",
+		},
+		{
+			"not a list",
+			svc("api"),
+			"badil.yaml: services.front.needs must be a non-empty list of service or dependency names",
+		},
+		{
+			"empty name",
+			svc(`[""]`),
+			"badil.yaml: services.front.needs must be a non-empty list of service or dependency names",
+		},
+		{
+			"dependency unknown name",
+			catalogServices + strings.Replace(db, "%s", "[cache]", 1),
+			`badil.yaml: dependencies.db.needs: "cache" is neither a service nor a dependency`,
+		},
+		{
+			"dependency self",
+			catalogServices + strings.Replace(db, "%s", "[db]", 1),
+			`badil.yaml: dependencies.db.needs: "db" cannot need itself`,
+		},
+		{
+			"dependency duplicate",
+			catalogServices + strings.Replace(db, "%s", "[front, front]", 1),
+			`badil.yaml: dependencies.db.needs: "front" is listed more than once`,
+		},
+		{
+			"dependency empty list",
+			catalogServices + strings.Replace(db, "%s", "[]", 1),
+			"badil.yaml: dependencies.db.needs must be a non-empty list of service or dependency names",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := gitops.ParseCatalog([]byte(tt.raw))
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("err = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestServiceCatalog_Excluded(t *testing.T) {
+	c, err := gitops.ParseCatalog([]byte(needsBadil))
+	if err != nil {
+		t.Fatalf("ParseCatalog: %v", err)
+	}
+	vals := preview.PreviewValues{Services: []preview.ServiceEntry{
+		{Name: "front", CommitSha: "abc"}, {Name: "backend"},
+	}}
+	want := []string{"payments", "search", "kafka", "elasticsearch"}
+	if got := c.Excluded(vals); !reflect.DeepEqual(got, want) {
+		t.Errorf("Excluded = %v, want %v", got, want)
+	}
+}

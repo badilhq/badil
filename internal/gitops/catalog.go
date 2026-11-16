@@ -47,6 +47,34 @@ type ServiceCatalog struct {
 	// Dependencies are the upstream charts of the dependencies mapping, in
 	// file order, with no host. It is nil when the mapping is absent or empty.
 	Dependencies []preview.DependencyEntry
+	// Needs maps each service or dependency whose entry sets needs to the
+	// services and dependencies it lists, in order. It is nil when no entry
+	// sets needs: a preview then runs every service and dependency.
+	Needs map[string][]string
+}
+
+// previewCatalog returns c as the catalog preview.ApplyCatalog projects a
+// preview file on, with gitopsRepoURL as the gitops repo URL.
+func (c *ServiceCatalog) previewCatalog(gitopsRepoURL string) preview.Catalog {
+	return preview.Catalog{
+		Services:      c.Services,
+		Repos:         c.Repos,
+		Branches:      c.Branches,
+		ImageTag:      c.ImageTag,
+		ImageTags:     c.ImageTags,
+		Charts:        c.Charts,
+		Namespace:     c.Namespace,
+		Dependencies:  c.Dependencies,
+		Needs:         c.Needs,
+		GitopsRepoURL: gitopsRepoURL,
+	}
+}
+
+// Excluded returns the services then the dependencies of c, in badil.yaml
+// order, that the preview file vals leaves out because no pinned service needs
+// them (preview.Catalog.Excluded). It is nil when no entry sets needs.
+func (c *ServiceCatalog) Excluded(vals preview.PreviewValues) []string {
+	return c.previewCatalog("").Excluded(vals)
 }
 
 // DefaultLabel is the preview label when preview.label is absent.
@@ -202,6 +230,9 @@ func parseDocument(doc *badilFile) (*ServiceCatalog, error) {
 			return nil, err
 		}
 	}
+	if err := checkNeeds(c); err != nil {
+		return nil, err
+	}
 	if doc.ImageTag.Kind != 0 {
 		format, err := parseImageTag("imageTag", &doc.ImageTag)
 		if err != nil {
@@ -271,6 +302,9 @@ func parseServiceEntries(n *yaml.Node, c *ServiceCatalog) error {
 		if spec.chart != nil {
 			c.Charts = setKey(c.Charts, name, *spec.chart)
 		}
+		if spec.needs != nil {
+			c.Needs = setKey(c.Needs, name, spec.needs)
+		}
 	}
 	return nil
 }
@@ -285,14 +319,15 @@ func setKey[V any](m map[string]V, key string, v V) map[string]V {
 }
 
 // serviceSpec is one validated services entry. Every field but repo is empty
-// (chart nil) when the entry does not set it.
+// (chart and needs nil) when the entry does not set it.
 type serviceSpec struct {
 	repo, branch, imageTag string
 	chart                  *preview.ChartSettings
+	needs                  []string
 }
 
 // serviceEntry validates one services entry: repo is required; branch,
-// imageTag and chart are optional; any other key or a repeated key is an
+// imageTag, chart and needs are optional; any other key or a repeated key is an
 // error (decoding into a yaml.Node does not detect duplicate keys).
 func serviceEntry(name string, n *yaml.Node) (serviceSpec, error) {
 	prefix := "services." + name
@@ -316,6 +351,8 @@ func serviceEntry(name string, n *yaml.Node) (serviceSpec, error) {
 			var chart preview.ChartSettings
 			chart, err = parseChart(path, val)
 			spec.chart = &chart
+		case "needs":
+			spec.needs, err = parseNeeds(path, name, val)
 		default:
 			err = fmt.Errorf("%s: unknown key %q", prefix, key)
 		}
@@ -374,6 +411,60 @@ func parseValueFiles(path string, n *yaml.Node) ([]string, error) {
 		files = append(files, item.Value)
 	}
 	return files, nil
+}
+
+// parseNeeds validates the needs of the entry name, at path: a non-empty
+// sequence of non-empty strings, none repeated and none equal to name. Whether
+// each names a service or a dependency is checked by checkNeeds.
+func parseNeeds(path, name string, n *yaml.Node) ([]string, error) {
+	if n.Kind != yaml.SequenceNode || len(n.Content) == 0 {
+		return nil, fmt.Errorf("%s must be a non-empty list of service or dependency names", path)
+	}
+	needs := make([]string, 0, len(n.Content))
+	for _, item := range n.Content {
+		item = resolveAlias(item)
+		switch {
+		case !nonEmptyString(item):
+			return nil, fmt.Errorf("%s must be a non-empty list of service or dependency names", path)
+		case item.Value == name:
+			return nil, fmt.Errorf("%s: %q cannot need itself", path, name)
+		case slices.Contains(needs, item.Value):
+			return nil, fmt.Errorf("%s: %q is listed more than once", path, item.Value)
+		}
+		needs = append(needs, item.Value)
+	}
+	return needs, nil
+}
+
+// checkNeeds rejects a needs entry, services first then dependencies in file
+// order, that names neither a service nor a dependency of c.
+func checkNeeds(c *ServiceCatalog) error {
+	known := make(map[string]bool, len(c.Services)+len(c.Dependencies))
+	for _, name := range c.Services {
+		known[name] = true
+	}
+	for _, dep := range c.Dependencies {
+		known[dep.Name] = true
+	}
+	check := func(kind, name string) error {
+		for _, need := range c.Needs[name] {
+			if !known[need] {
+				return fmt.Errorf("%s.%s.needs: %q is neither a service nor a dependency", kind, name, need)
+			}
+		}
+		return nil
+	}
+	for _, name := range c.Services {
+		if err := check("services", name); err != nil {
+			return err
+		}
+	}
+	for _, dep := range c.Dependencies {
+		if err := check("dependencies", dep.Name); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // parseImageTag validates an image tag format, at path (imageTag or
@@ -532,11 +623,14 @@ func parseDependencies(n *yaml.Node, c *ServiceCatalog) error {
 		if _, isService := c.Repos[name]; isService {
 			return fmt.Errorf("dependencies.%s: %q is already a service", name, name)
 		}
-		dep, err := dependencyEntry(name, val)
+		dep, needs, err := dependencyEntry(name, val)
 		if err != nil {
 			return err
 		}
 		c.Dependencies = append(c.Dependencies, dep)
+		if needs != nil {
+			c.Needs = setKey(c.Needs, name, needs)
+		}
 		return nil
 	})
 }
@@ -545,15 +639,17 @@ func parseDependencies(n *yaml.Node, c *ServiceCatalog) error {
 // required. A chart starting with preview.OCIScheme is an OCI chart reference,
 // and repo must then be absent; any other chart is a chart name, and repo, an
 // https:// Helm repository URL, is then required. values (a mapping),
-// valueFiles and hostParam are optional. Any other key is an error.
-func dependencyEntry(name string, n *yaml.Node) (preview.DependencyEntry, error) {
+// valueFiles, hostParam and needs are optional. Any other key is an error. It
+// returns the entry and its needs, nil when absent.
+func dependencyEntry(name string, n *yaml.Node) (preview.DependencyEntry, []string, error) {
 	prefix := "dependencies." + name
 	if n.Kind != yaml.MappingNode {
-		return preview.DependencyEntry{}, fmt.Errorf("%s must be a mapping", prefix)
+		return preview.DependencyEntry{}, nil, fmt.Errorf("%s must be a mapping", prefix)
 	}
 	dep := preview.DependencyEntry{Name: name}
 	var chart, repo string
 	var hasRepo bool
+	var needs []string
 	err := eachKey(prefix, n, func(key string, val *yaml.Node) error {
 		var err error
 		path := prefix + "." + key
@@ -573,34 +669,36 @@ func dependencyEntry(name string, n *yaml.Node) (preview.DependencyEntry, error)
 			dep.ValueFiles, err = parseValueFiles(path, val)
 		case "hostParam":
 			dep.HostParam, err = requireString(path, val)
+		case "needs":
+			needs, err = parseNeeds(path, name, val)
 		default:
 			err = fmt.Errorf("%s: unknown key %q", prefix, key)
 		}
 		return err
 	})
 	if err != nil {
-		return preview.DependencyEntry{}, err
+		return preview.DependencyEntry{}, nil, err
 	}
 	switch {
 	case chart == "":
-		return preview.DependencyEntry{}, fmt.Errorf("%s: missing 'chart'", prefix)
+		return preview.DependencyEntry{}, nil, fmt.Errorf("%s: missing 'chart'", prefix)
 	case dep.Chart.Version == "":
-		return preview.DependencyEntry{}, fmt.Errorf("%s: missing 'version'", prefix)
+		return preview.DependencyEntry{}, nil, fmt.Errorf("%s: missing 'version'", prefix)
 	case strings.HasPrefix(chart, preview.OCIScheme):
 		if hasRepo {
-			return preview.DependencyEntry{}, fmt.Errorf(
+			return preview.DependencyEntry{}, nil, fmt.Errorf(
 				"%s: 'repo' must be absent when 'chart' is an %s reference", prefix, preview.OCIScheme)
 		}
 		dep.Chart.RepoURL = chart
 	case !hasRepo:
-		return preview.DependencyEntry{}, fmt.Errorf(
+		return preview.DependencyEntry{}, nil, fmt.Errorf(
 			"%s: missing 'repo' ('chart' is not an %s reference)", prefix, preview.OCIScheme)
 	case !strings.HasPrefix(repo, "https://"):
-		return preview.DependencyEntry{}, fmt.Errorf("%s.repo must be an https:// Helm repository URL", prefix)
+		return preview.DependencyEntry{}, nil, fmt.Errorf("%s.repo must be an https:// Helm repository URL", prefix)
 	default:
 		dep.Chart.RepoURL, dep.Chart.Name = repo, chart
 	}
-	return dep, nil
+	return dep, needs, nil
 }
 
 // parseValues validates a dependency's values, at path: a mapping, returned

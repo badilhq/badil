@@ -90,6 +90,10 @@ type Catalog struct {
 	// Dependencies are the upstream charts of badil.yaml, in order, as
 	// parsed: HostParam as written, Host empty.
 	Dependencies []DependencyEntry
+	// Needs maps a service or dependency to the services and dependencies it
+	// needs. When empty, a preview runs every service and dependency;
+	// otherwise only its pinned entries and what they need (included).
+	Needs map[string][]string
 	// GitopsRepoURL is the git URL of the gitops repo.
 	GitopsRepoURL string
 }
@@ -130,7 +134,10 @@ func (c Catalog) imageTag(name string) string {
 //   - dependencies are cat.Dependencies, in that order, except one named like
 //     a service entry of the result (a kept pinned entry of a service removed
 //     from the catalog), which is left out. Their host is ApplyHosts's to
-//     set.
+//     set;
+//   - when cat declares needs, only the included services and dependencies
+//     are kept: the pinned entries and their transitive needs, every other
+//     one left out (Catalog.Excluded).
 func ApplyCatalog(vals PreviewValues, cat Catalog) PreviewValues {
 	inCatalog := make(map[string]bool, len(cat.Services))
 	out := make([]ServiceEntry, 0, len(cat.Services)+len(vals.Services))
@@ -154,21 +161,26 @@ func ApplyCatalog(vals PreviewValues, cat Catalog) PreviewValues {
 		kept[svc.Name] = true
 		out = append(out, svc)
 	}
+	in := cat.included(out)
+	if in != nil {
+		out = slices.DeleteFunc(out, func(s ServiceEntry) bool { return !in[s.Name] })
+	}
 	res := vals
 	res.APIVersion = APIVersion
 	res.GitopsRepoURL = cat.GitopsRepoURL
 	res.Namespace = cat.Namespace
 	res.Services = out
-	res.Dependencies = projectDependencies(cat.Dependencies, out)
+	res.Dependencies = projectDependencies(cat.Dependencies, out, in)
 	return res
 }
 
 // projectDependencies returns a copy of deps without those named like an
-// entry of services.
-func projectDependencies(deps []DependencyEntry, services []ServiceEntry) []DependencyEntry {
+// entry of services and, when in is not nil, without those not in it.
+func projectDependencies(deps []DependencyEntry, services []ServiceEntry, in map[string]bool) []DependencyEntry {
 	out := make([]DependencyEntry, 0, len(deps))
 	for _, dep := range deps {
-		if slices.ContainsFunc(services, func(s ServiceEntry) bool { return s.Name == dep.Name }) {
+		if (in != nil && !in[dep.Name]) ||
+			slices.ContainsFunc(services, func(s ServiceEntry) bool { return s.Name == dep.Name }) {
 			continue
 		}
 		dep.ValueFiles = slices.Clone(dep.ValueFiles)

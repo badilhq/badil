@@ -137,6 +137,7 @@ func teardown(ctx context.Context, api TeardownAPI, tt Target, reason, trigger s
 	}
 	summary := preview.BuildSummary(
 		tt.Slug, result.Values, catalog.URLs, catalog.Branches, result.CommitMessage, result.CommitURL,
+		catalog.Excluded(result.Values)...,
 	)
 	if fanErr := api.FanOutPRComments(ctx, result.Values, summary); fanErr != nil {
 		teardownCommentFailed(ctx, tt, fanErr)
