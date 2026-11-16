@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.21.0](https://github.com/badilhq/badil/compare/v0.20.0...v0.21.0) (2026-11-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* the preview file requires the root gitopsRepoURL and dependencies.
+* preview-env.yaml is removed: chart settings move to badil.yaml (services.<name>.chart, root namespace and imageTag), and the preview file carries chart, imageTag and namespace. preview-env 0.11.0 reads only the preview file.
+
+### Features
+
+* deploy upstream helm and oci charts as preview dependencies ([#77](https://github.com/badilhq/badil/issues/77)) ([429321f](https://github.com/badilhq/badil/commit/429321f6b15fbe84084502c7173f5e15d7957e40))
+* link each preview's argo cd applications from its pr comment ([#80](https://github.com/badilhq/badil/issues/80)) ([add0f2c](https://github.com/badilhq/badil/commit/add0f2c576aa3e3cdd8e5cf1efdee935baa2b929))
+* move chart settings and image tags into badil.yaml ([#75](https://github.com/badilhq/badil/issues/75)) ([32df98c](https://github.com/badilhq/badil/commit/32df98cfff38a8a5b1b2afe10056bf4d76482303))
+* **server:** sync every preview with badil.yaml on push and POST /v1/sync ([#79](https://github.com/badilhq/badil/issues/79)) ([d53b91d](https://github.com/badilhq/badil/commit/d53b91d4d2ad35f1c245f3396c7aa5d665c87f8b))
+* trim previews to pinned services and what they need ([#78](https://github.com/badilhq/badil/issues/78)) ([406f71d](https://github.com/badilhq/badil/commit/406f71d2b930b890d15c68874f68360dad628677))
+
 ## [0.20.0](https://github.com/badilhq/badil/compare/v0.19.0...v0.20.0) (2026-11-15)
 
 
