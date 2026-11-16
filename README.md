@@ -18,7 +18,7 @@ When code is written at machine speed, the bottleneck is validating and integrat
 
 1. CI in a service repo builds and pushes the image.
 2. Adding the `preview` label to the PR makes badil write `previews/<slug>/values.yaml` (every catalog service, the PR's at its head SHA) and comment on the PR; a push to the labeled PR updates it. The slug is the PR's branch, slugified; a `preview:<name>` label picks the preview name instead.
-3. An ArgoCD ApplicationSet picks up `previews/*` and deploys one namespace per preview, one Application per service.
+3. An ArgoCD ApplicationSet picks up `previews/*` and deploys one namespace per preview, one Application per service, and one per dependency: an upstream chart from an OCI registry or a Helm repository (postgres, redis) declared in `badil.yaml`, with no git repo of its own.
 4. Removing the label or closing the PR unpins its service, or deletes the file when no PR remains, and ArgoCD prunes the preview.
 5. `badil cleanup` (in the server on an interval, or an hourly CronJob) sweeps every preview: it deletes previews with no pinned service, or with no deploy within `CLEANUP_TTL` when set, and tears down the pins of closed PRs that step 4 missed, and of open PRs whose label moved, conflicts or is gone. It then rewrites each preview it keeps to match `badil.yaml`. ArgoCD prunes what it removes.
 
@@ -56,7 +56,7 @@ From an empty cluster to a first preview: [docs/INSTALL.md](docs/INSTALL.md).
 
 Pre-1.0, and the v1 scope is complete. The full loop (label a PR, preview deployed by Argo CD, URLs tested, merge, teardown) runs end to end on a k3d testbed with a four-service demo.
 
-Working: label-triggered previews per branch or per `preview:<name>` label across repos, per-service chart overrides, teardown when a PR closes or loses its label, a cleanup sweep with optional TTL (in the server or as a CronJob), the manual `/v1/deploy` endpoint, PR comments with preview links, Prometheus metrics and a Grafana dashboard, preview spin-up time and GitHub deployments through Argo CD notifications.
+Working: label-triggered previews per branch or per `preview:<name>` label across repos, per-service chart overrides, upstream chart dependencies, teardown when a PR closes or loses its label, a cleanup sweep with optional TTL (in the server or as a CronJob), the manual `/v1/deploy` endpoint, PR comments with preview links, Prometheus metrics and a Grafana dashboard, preview spin-up time and GitHub deployments through Argo CD notifications.
 
 Until 1.0, env vars, metric names, annotations and chart values can still change between minor releases; the [CHANGELOG](CHANGELOG.md) marks breaking changes.
 
@@ -70,7 +70,7 @@ badil verify-app      # check GitHub App credentials, list installations
 badil version         # print the version (also badil --version)
 ```
 
-badil reads its whole preview config from `badil.yaml` in the gitops repo (service catalog, chart settings, image tag format, namespace metadata, `preview` block) and writes everything `preview-env` needs into each preview file (see ARCHITECTURE [Gitops repo contract](docs/ARCHITECTURE.md#gitops-repo-contract)).
+badil reads its whole preview config from `badil.yaml` in the gitops repo (service catalog, chart settings, image tag format, dependencies, namespace metadata, `preview` block) and writes everything `preview-env` needs into each preview file (see ARCHITECTURE [Gitops repo contract](docs/ARCHITECTURE.md#gitops-repo-contract)).
 
 Configuration (env):
 
@@ -95,7 +95,7 @@ Local setup: [DEVELOPMENT.md](DEVELOPMENT.md).
 | Chart | Purpose |
 |---|---|
 | [`charts/badil`](charts/badil) | Installs the badil server; the cleanup sweep runs in the server hourly by default, the cleanup CronJob is disabled by default |
-| [`charts/preview-env`](charts/preview-env) | One preview: AppProject, Namespace, one ArgoCD Application per service |
+| [`charts/preview-env`](charts/preview-env) | One preview: AppProject, Namespace, one ArgoCD Application per service and per dependency |
 | [`charts/app`](charts/app) | Generic service chart; service charts wrap it as a dependency aliased `app` |
 
 Install: [docs/INSTALL.md](docs/INSTALL.md); ArgoCD wiring: [examples/argocd](examples/argocd/README.md). Charts are published to `oci://ghcr.io/badilhq/charts`; see [CONTRIBUTING.md](CONTRIBUTING.md#releases) for how versions are set.
