@@ -327,6 +327,10 @@ func TestParseCatalog_ArgoCDURL(t *testing.T) {
 			want: "https://argocd.example.com",
 		},
 		{
+			name: "percent-encoded path", preview: "preview:\n  argocdURL: https://ops.example.com/argo%20cd\n",
+			want: "https://ops.example.com/argo%20cd",
+		},
+		{
 			name: "port and path", preview: "preview:\n  argocdURL: https://ops.example.com:8443/argocd/\n",
 			want: "https://ops.example.com:8443/argocd",
 		},
@@ -387,6 +391,30 @@ func TestParseCatalog_MalformedArgoCDURL(t *testing.T) {
 		"fragment": {
 			"preview:\n  argocdURL: \"https://argocd.example.com/#apps\"\n",
 			`"https://argocd.example.com/#apps" must not have a query or a fragment`,
+		},
+		"credentials": {
+			"preview:\n  argocdURL: https://admin:s3cret@argocd.example.com\n",
+			`"https://admin:s3cret@argocd.example.com" must not contain credentials`,
+		},
+		"user only": {
+			"preview:\n  argocdURL: https://admin@argocd.example.com\n",
+			`"https://admin@argocd.example.com" must not contain credentials`,
+		},
+		"space in path": {
+			"preview:\n  argocdURL: \"https://argocd.example.com/a b\"\n",
+			`"https://argocd.example.com/a b" must only contain URL characters, without spaces or parentheses`,
+		},
+		"closing parenthesis": {
+			"preview:\n  argocdURL: https://argocd.example.com/a)b\n",
+			`"https://argocd.example.com/a)b" must only contain URL characters, without spaces or parentheses`,
+		},
+		"opening parenthesis": {
+			"preview:\n  argocdURL: https://argocd.example.com/a(b\n",
+			`"https://argocd.example.com/a(b" must only contain URL characters, without spaces or parentheses`,
+		},
+		"angle bracket": {
+			"preview:\n  argocdURL: https://argocd.example.com/a<b\n",
+			`"https://argocd.example.com/a<b" must only contain URL characters, without spaces or parentheses`,
 		},
 	}
 	for name, tt := range tests {

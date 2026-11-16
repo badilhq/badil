@@ -194,8 +194,9 @@ func (m *maxPreviews) UnmarshalYAML(n *yaml.Node) error {
 }
 
 // argocdURL is preview.argocdURL. It only accepts a YAML string holding an
-// absolute http or https URL with a host and no query or fragment; a trailing
-// slash is removed. A YAML null leaves the field unset.
+// absolute http or https URL with a host, no credentials, no query or fragment
+// and only URL characters other than parentheses; a trailing slash is removed.
+// A YAML null leaves the field unset.
 type argocdURL string
 
 func (a *argocdURL) UnmarshalYAML(n *yaml.Node) error {
@@ -210,8 +211,26 @@ func (a *argocdURL) UnmarshalYAML(n *yaml.Node) error {
 	if strings.ContainsAny(n.Value, "?#") {
 		return malformed(key, "%q must not have a query or a fragment", n.Value)
 	}
+	if u.User != nil {
+		return malformed(key, "%q must not contain credentials", n.Value)
+	}
+	if strings.ContainsFunc(n.Value, func(r rune) bool { return !isLinkURLChar(r) }) {
+		return malformed(key, "%q must only contain URL characters, without spaces or parentheses", n.Value)
+	}
 	*a = argocdURL(strings.TrimSuffix(n.Value, "/"))
 	return nil
+}
+
+// isLinkURLChar reports whether r may appear as written in a URL (RFC 3986
+// unreserved and reserved characters and %) without breaking a Markdown link
+// target, which a space or a parenthesis ends.
+func isLinkURLChar(r rune) bool {
+	switch {
+	case 'a' <= r && r <= 'z', 'A' <= r && r <= 'Z', '0' <= r && r <= '9':
+		return true
+	default:
+		return strings.ContainsRune("-._~:/[]@!$&'*+,;=%", r)
+	}
 }
 
 // tlsFlag is preview.tls. It only accepts a YAML boolean, not the YAML 1.1
