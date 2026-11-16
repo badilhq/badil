@@ -279,9 +279,11 @@ func statusCode(err error) int {
 // Unchanged is true when skipUnchanged skipped the write: Values then holds
 // the fetched file, and CommitURL and CommitMessage are empty. Created is true
 // when the write created the file (the first attempt on a missing file); a
-// write after a 409 re-fetch is an update.
+// write after a 409 re-fetch is an update. Excluded is the projection's
+// (preview.Projection.Excluded).
 type WriteResult struct {
 	Values        preview.PreviewValues
+	Excluded      []string
 	CommitURL     string
 	CommitMessage string
 	Unchanged     bool
@@ -298,14 +300,8 @@ type WriteResult struct {
 // the resulting values.yaml lists every service (the triggering one pinned to
 // commitSha, the rest tracking their branch).
 //
-// After every build or merge, preview.ApplyCatalog then preview.ApplyHosts
-// project the file on catalog: apiVersion, gitopsRepoURL and namespace, every
-// catalog service in catalog order (a missing one added as a branch-tracking
-// entry) with its repoURL, branch, chart, imageTag and host, then the pinned
-// entries of services no longer in it; their unpinned entries are dropped;
-// then the catalog dependencies with their hosts. When badil.yaml declares
-// needs, only the pinned entries and the services and dependencies they need
-// are kept. The written file follows the current catalog.
+// After every build or merge, the file is projected on catalog
+// (applyCatalog). The written file follows the current catalog.
 //
 // With skipUnchanged, when the file exists and the values to write differ
 // from it only in serviceName's updated-at (preview.EqualExceptUpdatedAt),
@@ -344,29 +340,23 @@ func (c *Client) gitopsRepoURL() string {
 	return "https://github.com/" + c.owner + "/" + c.repo + ".git"
 }
 
-// applyCatalog returns vals projected on catalog: the gitops repo URL, the
-// namespace metadata, every catalog service in catalog order with its
-// repoURL, branch, chart and imageTag, then the pinned entries of removed
-// services, then the catalog dependencies (preview.ApplyCatalog), only the
-// pinned entries and what they need when badil.yaml declares needs, then
-// hosts (preview.ApplyHosts). A dependency left out because a kept pinned
-// entry has its name is logged as a warning.
+// applyCatalog returns vals projected on catalog (preview.ApplyCatalog) with
+// its hosts (preview.ApplyHosts), and logs a dependency left out because a
+// kept pinned entry has its name.
 func (c *Client) applyCatalog(
 	ctx context.Context, vals preview.PreviewValues, slug string, catalog *ServiceCatalog,
-) preview.PreviewValues {
-	projected := preview.ApplyCatalog(vals, catalog.previewCatalog(c.gitopsRepoURL()))
-	for _, dep := range catalog.Dependencies {
-		if slices.ContainsFunc(projected.Services, func(s preview.ServiceEntry) bool {
-			return s.Name == dep.Name
-		}) {
-			//nolint:sloglint // gitops has no scoped logger yet
-			slog.WarnContext(ctx, "dependency left out: a pinned service has its name",
-				slog.String("slug", slug),
-				slog.String("name", dep.Name),
-			)
-		}
+) preview.Projection {
+	cat := catalog.Catalog
+	cat.GitopsRepoURL = c.gitopsRepoURL()
+	projected := preview.ApplyCatalog(vals, cat)
+	for _, name := range projected.Shadowed {
+		slog.WarnContext(ctx, "dependency left out: a pinned service has its name",
+			slog.String("slug", slug),
+			slog.String("name", name),
+		)
 	}
-	return preview.ApplyHosts(projected, slug, catalog.URLs)
+	projected.Values = preview.ApplyHosts(projected.Values, slug, catalog.URLs)
+	return projected
 }
 
 // writePreviewWithRetry is WritePreviewWithRetry, untimed.
@@ -385,17 +375,17 @@ func (c *Client) writePreviewWithRetry(
 		return nil, err
 	}
 
-	var vals preview.PreviewValues
+	var proj preview.Projection
 	var message string
 	if exists {
 		updated := preview.UpdatePreviewValues(*existing, serviceName, commitSha, inputs)
-		vals = c.applyCatalog(ctx, updated, slug, catalog)
-		if skipUnchanged && preview.EqualExceptUpdatedAt(*existing, vals, serviceName) {
-			return &WriteResult{Values: *existing, Unchanged: true}, nil
+		proj = c.applyCatalog(ctx, updated, slug, catalog)
+		if skipUnchanged && preview.EqualExceptUpdatedAt(*existing, proj.Values, serviceName) {
+			return &WriteResult{Values: *existing, Excluded: proj.Excluded, Unchanged: true}, nil
 		}
 		message = updateMessage
 	} else {
-		vals = c.applyCatalog(
+		proj = c.applyCatalog(
 			ctx, preview.BuildPreviewValues(serviceName, commitSha, catalog.Services, inputs), slug, catalog,
 		)
 		message = createMessage
@@ -403,9 +393,12 @@ func (c *Client) writePreviewWithRetry(
 
 	creating := !exists
 	for attempt := 1; attempt <= MaxWriteRetries; attempt++ {
-		commitURL, writeErr := c.WritePreview(ctx, slug, vals, sha, message)
+		commitURL, writeErr := c.WritePreview(ctx, slug, proj.Values, sha, message)
 		if writeErr == nil {
-			return &WriteResult{Values: vals, CommitURL: commitURL, CommitMessage: message, Created: creating}, nil
+			return &WriteResult{
+				Values: proj.Values, Excluded: proj.Excluded, CommitURL: commitURL, CommitMessage: message,
+				Created: creating,
+			}, nil
 		}
 		if statusCode(writeErr) != http.StatusConflict {
 			return nil, writeErr
@@ -417,9 +410,9 @@ func (c *Client) writePreviewWithRetry(
 		}
 		sha = latestSHA
 		updated := preview.UpdatePreviewValues(*latest, serviceName, commitSha, inputs)
-		vals = c.applyCatalog(ctx, updated, slug, catalog)
-		if skipUnchanged && preview.EqualExceptUpdatedAt(*latest, vals, serviceName) {
-			return &WriteResult{Values: *latest, Unchanged: true}, nil
+		proj = c.applyCatalog(ctx, updated, slug, catalog)
+		if skipUnchanged && preview.EqualExceptUpdatedAt(*latest, proj.Values, serviceName) {
+			return &WriteResult{Values: *latest, Excluded: proj.Excluded, Unchanged: true}, nil
 		}
 		message = updateMessage
 		creating = false
@@ -429,10 +422,12 @@ func (c *Client) writePreviewWithRetry(
 
 // TeardownResult is the outcome of TeardownPreviewWithRetry. Removed lists the
 // services unpinned from the closed PR; it is empty when there was nothing to
-// tear down. Values holds the written file and is set only when Deleted is
-// false.
+// tear down. Values, Excluded (preview.Projection.Excluded) and Catalog, the
+// badil.yaml the file was projected on, are set only when Deleted is false.
 type TeardownResult struct {
 	Values        preview.PreviewValues
+	Excluded      []string
+	Catalog       *ServiceCatalog
 	Removed       []string
 	Deleted       bool
 	CommitURL     string
@@ -490,10 +485,10 @@ func (c *Client) teardownPreviewWithRetry(
 					return nil, fmt.Errorf("teardown %s: %w", previewPath(slug), err)
 				}
 			}
-			vals = c.applyCatalog(ctx, vals, slug, catalog)
-			result.Values = vals
+			proj := c.applyCatalog(ctx, vals, slug, catalog)
+			result.Values, result.Excluded, result.Catalog = proj.Values, proj.Excluded, catalog
 			result.CommitMessage = fmt.Sprintf("chore(preview): remove %s from %s", strings.Join(removed, ", "), slug)
-			result.CommitURL, writeErr = c.WritePreview(ctx, slug, vals, sha, result.CommitMessage)
+			result.CommitURL, writeErr = c.WritePreview(ctx, slug, proj.Values, sha, result.CommitMessage)
 		} else {
 			result.CommitMessage = fmt.Sprintf("chore(preview): delete %s preview", slug)
 			result.CommitURL, writeErr = c.deletePreview(ctx, slug, sha, result.CommitMessage)
@@ -520,16 +515,19 @@ func (c *Client) teardownPreviewWithRetry(
 }
 
 // SyncResult is the outcome of SyncPreviewWithRetry. Changed is true when
-// the file was rewritten; Values, CommitURL and CommitMessage then describe
-// that write. Notify is true when the written file's ordered list of service
-// or dependency names, or any entry's host, differs from the file it
-// replaced.
+// the file was rewritten; Values, Excluded (preview.Projection.Excluded),
+// CommitURL and CommitMessage then describe that write. Notify is true when
+// the written file's ordered list of service or dependency names, or any
+// entry's host, differs from the file it replaced. NotFound is true when the
+// file does not exist.
 type SyncResult struct {
 	Values        preview.PreviewValues
+	Excluded      []string
 	CommitURL     string
 	CommitMessage string
 	Changed       bool
 	Notify        bool
+	NotFound      bool
 }
 
 // SyncPreviewWithRetry rewrites previews/<slug>/values.yaml as its projection
@@ -537,8 +535,8 @@ type SyncResult struct {
 // with the message "chore(preview): sync <slug> with badil.yaml". On a 409
 // conflict the file is re-fetched and the projection recomputed, up to
 // MaxWriteRetries attempts. A file that already matches is not written. A
-// missing file (on read or re-fetch) is a no-op: an empty SyncResult and a nil
-// error.
+// missing file (on read or re-fetch) is a no-op: a SyncResult with only
+// NotFound set and a nil error.
 //
 // Its duration, retries included, is observed as the sync operation.
 func (c *Client) SyncPreviewWithRetry(ctx context.Context, slug string, catalog *ServiceCatalog) (*SyncResult, error) {
@@ -552,7 +550,7 @@ func (c *Client) SyncPreviewWithRetry(ctx context.Context, slug string, catalog 
 func (c *Client) syncPreviewWithRetry(ctx context.Context, slug string, catalog *ServiceCatalog) (*SyncResult, error) {
 	existing, sha, err := c.GetPreview(ctx, slug)
 	if errors.Is(err, ErrNotFound) {
-		return &SyncResult{}, nil
+		return &SyncResult{NotFound: true}, nil
 	}
 	if err != nil {
 		return nil, err
@@ -560,18 +558,19 @@ func (c *Client) syncPreviewWithRetry(ctx context.Context, slug string, catalog 
 
 	message := fmt.Sprintf("chore(preview): sync %s with badil.yaml", slug)
 	for attempt := 1; attempt <= MaxWriteRetries; attempt++ {
-		vals := c.applyCatalog(ctx, *existing, slug, catalog)
-		if preview.Equal(*existing, vals) {
+		proj := c.applyCatalog(ctx, *existing, slug, catalog)
+		if preview.Equal(*existing, proj.Values) {
 			return &SyncResult{}, nil
 		}
-		commitURL, writeErr := c.WritePreview(ctx, slug, vals, sha, message)
+		commitURL, writeErr := c.WritePreview(ctx, slug, proj.Values, sha, message)
 		if writeErr == nil {
 			return &SyncResult{
-				Values:        vals,
+				Values:        proj.Values,
+				Excluded:      proj.Excluded,
 				CommitURL:     commitURL,
 				CommitMessage: message,
 				Changed:       true,
-				Notify:        summaryChanged(*existing, vals),
+				Notify:        summaryChanged(*existing, proj.Values),
 			}, nil
 		}
 		if statusCode(writeErr) != http.StatusConflict {
@@ -580,7 +579,7 @@ func (c *Client) syncPreviewWithRetry(ctx context.Context, slug string, catalog 
 		// 409 — re-fetch and recompute the projection.
 		existing, sha, err = c.GetPreview(ctx, slug)
 		if errors.Is(err, ErrNotFound) {
-			return &SyncResult{}, nil
+			return &SyncResult{NotFound: true}, nil
 		}
 		if err != nil {
 			return nil, fmt.Errorf("conflict re-fetch: %w", err)

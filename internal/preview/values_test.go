@@ -163,7 +163,7 @@ func TestEqualExceptUpdatedAt(t *testing.T) {
 	base := preview.ApplyCatalog(
 		preview.BuildPreviewValues(in.ServiceName, in.CommitSha, services, in),
 		preview.Catalog{Services: services, Repos: catalogRepos(), Namespace: sampleNamespace()},
-	)
+	).Values
 	base.Services[1] = preview.ServiceEntry{
 		Name: "front", RepoURL: "https://github.com/acme/front", Branch: "main",
 		CommitSha: "f00", ImageTag: "f00", Chart: valueFilesChart(), Host: "front.example.com",
@@ -171,14 +171,12 @@ func TestEqualExceptUpdatedAt(t *testing.T) {
 	}
 	clone := func() preview.PreviewValues {
 		out := base
-		out.Namespace = sampleNamespace()
 		out.Services = slices.Clone(base.Services)
 		for i := range out.Services {
 			if md := out.Services[i].Metadata; md != nil {
 				cp := *md
 				out.Services[i].Metadata = &cp
 			}
-			out.Services[i].Chart.ValueFiles = slices.Clone(out.Services[i].Chart.ValueFiles)
 		}
 		return out
 	}
@@ -206,11 +204,6 @@ func TestEqualExceptUpdatedAt(t *testing.T) {
 		{name: "api version", change: func(v *preview.PreviewValues) { v.APIVersion = "" }},
 		{name: "repo url", change: func(v *preview.PreviewValues) { v.Services[1].RepoURL = "https://example.com/x" }},
 		{name: "branch", change: func(v *preview.PreviewValues) { v.Services[0].Branch = "develop" }},
-		{name: "image tag", change: func(v *preview.PreviewValues) { v.Services[0].ImageTag = "x" }},
-		{name: "chart path", change: func(v *preview.PreviewValues) { v.Services[1].Chart.Path = "x" }},
-		{name: "chart value file", change: func(v *preview.PreviewValues) { v.Services[1].Chart.ValueFiles[0] = "x" }},
-		{name: "namespace label", change: func(v *preview.PreviewValues) { v.Namespace.Labels["team"] = "x" }},
-		{name: "namespace removed", change: func(v *preview.PreviewValues) { v.Namespace = nil }},
 		{
 			name:   "pipeline run url",
 			change: func(v *preview.PreviewValues) { v.Services[0].Metadata.PipelineRunURL = "x" },
@@ -805,17 +798,10 @@ func TestExpandImageTag(t *testing.T) {
 		{"{sha8}", sha, "f913b6cb"},
 		{"sha-{sha7}", sha, "sha-f913b6c"},
 		{"{sha8}-amd64", sha, "f913b6cb-amd64"},
-		{"v1.{sha}_x", sha, "v1." + sha + "_x"},
 		{"{sha7}", "abc12", "abc12"},
-		{"{sha8}", "abc1234", "abc1234"},
-		{"{sha}", "abc", "abc"},
 		{"{sha}", "", "${ARGOCD_APP_REVISION}"},
 		{"{sha7}", "", "${ARGOCD_APP_REVISION_SHORT}"},
 		{"{sha8}", "", "${ARGOCD_APP_REVISION_SHORT_8}"},
-		{"sha-{sha7}", "", "sha-${ARGOCD_APP_REVISION_SHORT}"},
-		{"{sha8}-amd64", "", "${ARGOCD_APP_REVISION_SHORT_8}-amd64"},
-		{"", sha, sha},
-		{"", "", "${ARGOCD_APP_REVISION}"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.format+"/"+tt.commitSha, func(t *testing.T) {
@@ -839,6 +825,9 @@ func TestValidImageTagFormat(t *testing.T) {
 		"{SHA}":                           false,
 		"-{sha}":                          false,
 		"a:{sha}":                         false,
+		"{sha9}":                          false,
+		"a/{sha}":                         false,
+		".{sha}":                          false,
 	} {
 		if got := preview.ValidImageTagFormat(format); got != want {
 			t.Errorf("ValidImageTagFormat(%q) = %v, want %v", format, got, want)
@@ -875,7 +864,7 @@ func TestApplyCatalog(t *testing.T) {
 			"front":     {ImageTagParam: "image.tag", HostParam: "ingress.hostname"},
 		},
 		Namespace: sampleNamespace(),
-	})
+	}).Values
 
 	if got.APIVersion != preview.APIVersion {
 		t.Errorf("APIVersion = %q, want %q", got.APIVersion, preview.APIVersion)
@@ -921,7 +910,8 @@ func TestApplyCatalog_Defaults(t *testing.T) {
 		{Name: "backend-1", CommitSha: "abc1234567890"},
 	}}
 
-	got := preview.ApplyCatalog(in, preview.Catalog{Services: []string{"backend-1", "front"}, Repos: catalogRepos()})
+	cat := preview.Catalog{Services: []string{"backend-1", "front"}, Repos: catalogRepos()}
+	got := preview.ApplyCatalog(in, cat).Values
 
 	if got.Namespace != nil {
 		t.Errorf("Namespace = %+v, want nil when the catalog sets none", got.Namespace)
@@ -941,28 +931,10 @@ func TestApplyCatalog_Defaults(t *testing.T) {
 	}
 }
 
-func TestApplyCatalog_UnpinnedEntryTracksItsBranch(t *testing.T) {
-	const pr42 = "https://github.com/acme/backend-1/pull/42"
-	cat := preview.Catalog{Services: catalogServices(), Repos: catalogRepos(), ImageTag: "sha-{sha7}"}
-	pinnedVals := preview.ApplyCatalog(preview.PreviewValues{Services: []preview.ServiceEntry{
-		pinned("backend-1", "f913b6cb1a2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f", pr42),
-	}}, cat)
-	if tag := pinnedVals.Services[0].ImageTag; tag != "sha-f913b6c" {
-		t.Fatalf("pinned ImageTag = %q, want sha-f913b6c", tag)
-	}
-
-	unpinned, _, _ := preview.UnpinPR(pinnedVals, "acme", "backend-1", 42)
-	got := preview.ApplyCatalog(unpinned, cat)
-
-	if tag := got.Services[0].ImageTag; tag != "sha-${ARGOCD_APP_REVISION_SHORT}" {
-		t.Errorf("unpinned ImageTag = %q, want sha-${ARGOCD_APP_REVISION_SHORT}", tag)
-	}
-}
-
 func TestApplyCatalog_AddsMissingServicesInCatalogOrder(t *testing.T) {
 	in := preview.PreviewValues{Services: []preview.ServiceEntry{{Name: "front"}}}
 
-	got := preview.ApplyCatalog(in, preview.Catalog{Services: catalogServices(), Repos: catalogRepos()})
+	got := preview.ApplyCatalog(in, preview.Catalog{Services: catalogServices(), Repos: catalogRepos()}).Values
 
 	names := make([]string, 0, len(got.Services))
 	for _, svc := range got.Services {
@@ -1000,7 +972,7 @@ func TestApplyCatalog_KeepsFirstEntryOfDuplicates(t *testing.T) {
 	got := preview.ApplyCatalog(in, preview.Catalog{
 		Services: []string{"front"},
 		Repos:    map[string]string{"front": "https://github.com/acme/front.git"},
-	})
+	}).Values
 
 	want := []preview.ServiceEntry{
 		{
@@ -1016,7 +988,7 @@ func TestApplyCatalog_KeepsFirstEntryOfDuplicates(t *testing.T) {
 
 func TestApplyCatalog_KeepsAPIVersion(t *testing.T) {
 	in := preview.PreviewValues{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{{Name: "front"}}}
-	got := preview.ApplyCatalog(in, preview.Catalog{Services: catalogServices(), Repos: catalogRepos()})
+	got := preview.ApplyCatalog(in, preview.Catalog{Services: catalogServices(), Repos: catalogRepos()}).Values
 	if got.APIVersion != preview.APIVersion {
 		t.Errorf("APIVersion = %q, want %q", got.APIVersion, preview.APIVersion)
 	}

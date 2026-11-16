@@ -13,7 +13,7 @@ func (ServiceEntry) JSONSchemaExtend(s *jsonschema.Schema) {
 		"metadata":  {"commitSha"},
 	}
 	if p, ok := s.Properties.Get("imageTag"); ok {
-		p.MinLength = nonEmpty()
+		p.MinLength = new(uint64(1))
 	}
 }
 
@@ -23,13 +23,10 @@ func (ChartSettings) JSONSchemaExtend(s *jsonschema.Schema) {
 	s.Required = []string{"path", "imageTagParam", "hostParam"}
 	for _, name := range []string{"path", "imageTagParam", "hostParam"} {
 		if p, ok := s.Properties.Get(name); ok {
-			p.MinLength = nonEmpty()
+			p.MinLength = new(uint64(1))
 		}
 	}
-	if p, ok := s.Properties.Get("valueFiles"); ok && p.Items != nil {
-		p.MinItems = nonEmpty()
-		p.Items.MinLength = nonEmpty()
-	}
+	nonEmptyList(s, "valueFiles")
 }
 
 // JSONSchemaExtend makes both fields optional and rejects, in each, the keys
@@ -65,7 +62,7 @@ func (PreviewValues) JSONSchemaExtend(s *jsonschema.Schema) {
 		p.Const = APIVersion
 	}
 	if p, ok := s.Properties.Get("gitopsRepoURL"); ok {
-		p.MinLength = nonEmpty()
+		p.MinLength = new(uint64(1))
 	}
 }
 
@@ -74,20 +71,16 @@ func (PreviewValues) JSONSchemaExtend(s *jsonschema.Schema) {
 // hostParam together. values stays a free-form object.
 func (DependencyEntry) JSONSchemaExtend(s *jsonschema.Schema) {
 	s.Required = []string{"name", "chart"}
-	const host, hostParam = "host", "hostParam"
 	s.DependentRequired = map[string][]string{
-		host:      {hostParam},
-		hostParam: {host},
+		"host":      {"hostParam"},
+		"hostParam": {"host"},
 	}
-	for _, name := range []string{"name", hostParam, host} {
+	for _, name := range []string{"name", "hostParam", "host"} {
 		if p, ok := s.Properties.Get(name); ok {
-			p.MinLength = nonEmpty()
+			p.MinLength = new(uint64(1))
 		}
 	}
-	if p, ok := s.Properties.Get("valueFiles"); ok && p.Items != nil {
-		p.MinItems = nonEmpty()
-		p.Items.MinLength = nonEmpty()
-	}
+	nonEmptyList(s, "valueFiles")
 }
 
 // JSONSchemaExtend requires repoURL and version, non-empty, with repoURL an
@@ -97,7 +90,7 @@ func (DependencyChart) JSONSchemaExtend(s *jsonschema.Schema) {
 	s.Required = []string{"repoURL", "version"}
 	for _, name := range []string{"repoURL", "name", "version"} {
 		if p, ok := s.Properties.Get(name); ok {
-			p.MinLength = nonEmpty()
+			p.MinLength = new(uint64(1))
 		}
 	}
 	if p, ok := s.Properties.Get("repoURL"); ok {
@@ -121,8 +114,11 @@ func reserve(s *jsonschema.Schema, keys ...string) {
 	}
 }
 
-// nonEmpty is a minimum of 1, for minLength or minItems.
-func nonEmpty() *uint64 {
-	n := uint64(1)
-	return &n
+// nonEmptyList makes the list property name of s, when present, a non-empty
+// list of non-empty strings.
+func nonEmptyList(s *jsonschema.Schema, name string) {
+	if p, ok := s.Properties.Get(name); ok && p.Items != nil {
+		p.MinItems = new(uint64(1))
+		p.Items.MinLength = new(uint64(1))
+	}
 }

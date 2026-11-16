@@ -1,12 +1,8 @@
 package preview_test
 
 import (
-	"bytes"
-	"os"
 	"reflect"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/badilhq/badil/internal/preview"
 )
@@ -158,101 +154,12 @@ func TestApplyCatalog_Needs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cat := tt.catalog()
 			got := preview.ApplyCatalog(preview.PreviewValues{Services: tt.services}, cat)
-			services, deps := names(got)
+			services, deps := names(got.Values)
 			if !reflect.DeepEqual(services, tt.wantServices) || !reflect.DeepEqual(deps, tt.wantDeps) {
 				t.Errorf("services/dependencies = %v/%v, want %v/%v", services, deps, tt.wantServices, tt.wantDeps)
 			}
-			if excluded := cat.Excluded(got); !reflect.DeepEqual(excluded, tt.wantExcluded) {
-				t.Errorf("Excluded = %v, want %v", excluded, tt.wantExcluded)
-			}
-		})
-	}
-}
-
-// TestGoldenYAML_Needs pins the YAML emission of a deploy of front on the
-// needs catalog to testdata/values-needs.golden.yaml (rewritten with -update).
-func TestGoldenYAML_Needs(t *testing.T) {
-	in := sampleInputs()
-	in.ServiceName = "front"
-	in.PRURL = "https://github.com/acme/front/pull/42"
-	cat := needsCatalog()
-	vals := preview.ApplyCatalog(preview.BuildPreviewValues(in.ServiceName, in.CommitSha, cat.Services, in), cat)
-
-	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
-	enc.SetIndent(2)
-	if err := enc.Encode(vals); err != nil {
-		t.Fatalf("encode: %v", err)
-	}
-	_ = enc.Close()
-
-	const path = "testdata/values-needs.golden.yaml"
-	if *updateGolden {
-		if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
-			t.Fatalf("write golden: %v", err)
-		}
-		return
-	}
-	want, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read golden: %v", err)
-	}
-	if !bytes.Equal(buf.Bytes(), want) {
-		t.Errorf("yaml output drift\n--- want (golden) ---\n%s\n--- got ---\n%s", want, buf.Bytes())
-	}
-}
-
-func TestBuildSummary_Excluded(t *testing.T) {
-	const line = "Not in this preview: `payments`, `search`, `kafka`, `elasticsearch`\n"
-	excluded := []string{"payments", "search", "kafka", "elasticsearch"}
-	deps := []preview.DependencyEntry{
-		{Name: "postgres", Chart: preview.DependencyChart{RepoURL: "oci://r/postgresql", Version: "1.0.0"}},
-	}
-	tests := []struct {
-		name     string
-		services []preview.ServiceEntry
-		excluded []string
-		want     string
-	}{
-		{
-			name:     "with the pinned-image note",
-			services: []preview.ServiceEntry{{Name: "front", CommitSha: "abc1234567890"}, {Name: "backend"}},
-			excluded: excluded,
-			want: "## 🚀 Preview: `slug`\n\n" +
-				"- **front** · 📌 `abc12345`\n" +
-				"- **backend** · 🔄 `main`\n" +
-				"- **postgres** · 📦 `postgresql` `1.0.0`\n" +
-				"\n" + line +
-				"\n" + pinnedNote + "\n" +
-				"\n---\n🔗 [m](u)",
-		},
-		{
-			name:     "without the pinned-image note",
-			services: []preview.ServiceEntry{{Name: "front"}, {Name: "backend"}},
-			excluded: excluded,
-			want: "## 🚀 Preview: `slug`\n\n" +
-				"- **front** · 🔄 `main`\n" +
-				"- **backend** · 🔄 `main`\n" +
-				"- **postgres** · 📦 `postgresql` `1.0.0`\n" +
-				"\n" + line +
-				"\n---\n🔗 [m](u)",
-		},
-		{
-			name:     "nothing excluded",
-			services: []preview.ServiceEntry{{Name: "front"}, {Name: "backend"}},
-			want: "## 🚀 Preview: `slug`\n\n" +
-				"- **front** · 🔄 `main`\n" +
-				"- **backend** · 🔄 `main`\n" +
-				"- **postgres** · 📦 `postgresql` `1.0.0`\n" +
-				"\n---\n🔗 [m](u)",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			vals := preview.PreviewValues{Services: tt.services, Dependencies: deps}
-			got := preview.BuildSummary("slug", vals, preview.URLConfig{}, "", nil, "m", "u", tt.excluded...)
-			if got != tt.want {
-				t.Errorf("summary mismatch\n got:\n%s\nwant:\n%s", got, tt.want)
+			if !reflect.DeepEqual(got.Excluded, tt.wantExcluded) {
+				t.Errorf("Excluded = %v, want %v", got.Excluded, tt.wantExcluded)
 			}
 		})
 	}

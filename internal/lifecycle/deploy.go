@@ -52,9 +52,7 @@ func DeployPR(
 	}
 
 	summary := preview.BuildSummary(
-		slug, result.Values, catalog.URLs, catalog.ArgoCDURL, catalog.Branches,
-		result.CommitMessage, result.CommitURL,
-		catalog.Excluded(result.Values)...,
+		slug, result.Values, catalog.URLs, catalog.ArgoCDURL, result.Excluded, result.CommitMessage, result.CommitURL,
 	)
 	return result, api.FanOutPRComments(ctx, result.Values, summary), nil
 }

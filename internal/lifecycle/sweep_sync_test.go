@@ -181,8 +181,7 @@ func TestSweep_SyncCommentLinksArgoCD(t *testing.T) {
 	if err := lifecycle.Sweep(context.Background(), f, now, ttl); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
-	const link = "🔎 [All apps in Argo CD]" +
-		"(https://argocd.example.com/applications?labels=app.kubernetes.io%2Finstance%3Dfeature-x)\n\n---\n"
+	link := preview.ArgoCDAppsURL("https://argocd.example.com", "feature-x")
 	if len(f.fanOuts) != 1 || !strings.Contains(f.fanOuts[0].body, link) {
 		t.Errorf("fanOuts = %+v, want one whose body links Argo CD", f.fanOuts)
 	}

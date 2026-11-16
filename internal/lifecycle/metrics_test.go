@@ -32,10 +32,9 @@ func assertMetrics(t *testing.T, m *metrics.Metrics, want map[string]float64, na
 			"# TYPE badil_previews gauge\n",
 		"badil_sweep_previews_deleted_total": "# HELP badil_sweep_previews_deleted_total " +
 			"Previews deleted by the cleanup sweep, by rule.\n# TYPE badil_sweep_previews_deleted_total counter\n",
-		"badil_sweep_previews_synced_total": "# HELP badil_sweep_previews_synced_total " +
-			"Previews rewritten by a sweep to match badil.yaml.\n# TYPE badil_sweep_previews_synced_total counter\n",
-		"badil_config_syncs_total": "# HELP badil_config_syncs_total Syncs of every preview, or one, with " +
-			"badil.yaml outside the sweep, by trigger and result.\n# TYPE badil_config_syncs_total counter\n",
+		"badil_previews_synced_total": "# HELP badil_previews_synced_total " +
+			"Previews rewritten to match badil.yaml, by a sweep, a push or /v1/sync.\n" +
+			"# TYPE badil_previews_synced_total counter\n",
 	}
 	var expected strings.Builder
 	matched := 0
@@ -262,9 +261,9 @@ func TestSweepMetrics(t *testing.T) {
 		`badil_sweep_previews_deleted_total{rule="no_pin"}`:       1,
 		`badil_sweep_previews_deleted_total{rule="ttl"}`:          1,
 		`badil_teardowns_total{result="deleted",trigger="sweep"}`: 1,
-		`badil_sweep_previews_synced_total`:                       1,
+		`badil_previews_synced_total`:                             1,
 	}, "badil_previews", "badil_sweep_previews_deleted_total", "badil_teardowns_total",
-		"badil_sweep_previews_synced_total")
+		"badil_previews_synced_total")
 }
 
 func TestSweepMetrics_UnpinOnlyIsASweepTeardown(t *testing.T) {

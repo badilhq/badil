@@ -1,6 +1,6 @@
 package preview
 
-import "strings"
+import "path"
 
 // APIVersion is the apiVersion of the preview values contract badil writes.
 const APIVersion = "badil.dev/v1beta1"
@@ -93,8 +93,7 @@ func (c DependencyChart) ChartName() string {
 	if c.Name != "" {
 		return c.Name
 	}
-	ref := strings.TrimSuffix(c.RepoURL, "/")
-	return ref[strings.LastIndex(ref, "/")+1:]
+	return path.Base(c.RepoURL)
 }
 
 // ChartSettings is how a service's chart is rendered: the chart path in the

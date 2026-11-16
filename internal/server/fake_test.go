@@ -90,7 +90,7 @@ func (f *fakeGitops) FetchServiceCatalog(_ context.Context) (*gitops.ServiceCata
 	if f.badilYAML != "" {
 		return gitops.ParseCatalog([]byte(f.badilYAML))
 	}
-	return &gitops.ServiceCatalog{Services: f.catalog}, nil
+	return &gitops.ServiceCatalog{Catalog: preview.Catalog{Services: f.catalog}}, nil
 }
 
 func (f *fakeGitops) WritePreviewWithRetry(
@@ -143,7 +143,17 @@ func (f *fakeGitops) TeardownPreviewWithRetry(
 	if f.teardownResult == nil {
 		return &gitops.TeardownResult{}, nil
 	}
-	return f.teardownResult, nil
+	if len(f.teardownResult.Removed) == 0 || f.teardownResult.Deleted {
+		return f.teardownResult, nil
+	}
+	// Like the client, an update carries the catalog it was projected on.
+	res := *f.teardownResult
+	if f.badilYAML != "" {
+		res.Catalog, _ = gitops.ParseCatalog([]byte(f.badilYAML))
+	} else {
+		res.Catalog = &gitops.ServiceCatalog{Catalog: preview.Catalog{Services: f.catalog}}
+	}
+	return &res, nil
 }
 
 func (f *fakeGitops) UpsertPRComment(_ context.Context, owner, repo string, prNumber int, body string) error {
@@ -198,6 +208,9 @@ func (f *fakeGitops) SyncPreviewWithRetry(
 	}
 	f.syncMu.Lock()
 	defer f.syncMu.Unlock()
+	if _, ok := f.previews[slug]; !ok {
+		return &gitops.SyncResult{NotFound: true}, nil
+	}
 	f.syncs = append(f.syncs, slug)
 	if err := f.syncErr[slug]; err != nil {
 		return nil, err

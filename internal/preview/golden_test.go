@@ -54,7 +54,7 @@ func TestGoldenYAML(t *testing.T) {
 				"front": {Path: "deploy/chart", ValueFiles: []string{"values-preview.yaml"}},
 			},
 		},
-	)
+	).Values
 
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)

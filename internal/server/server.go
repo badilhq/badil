@@ -14,8 +14,9 @@ import (
 	"github.com/badilhq/badil/internal/metrics"
 )
 
-// defaultSyncTimeout caps a config sync run when WithSyncTimeout is not set.
-const defaultSyncTimeout = 10 * time.Minute
+// syncTimeout caps each config sync run (a push to the gitops default branch,
+// or POST /v1/sync), counted from when the run holds the syncer's guard.
+const syncTimeout = 10 * time.Minute
 
 // WebhookValidator validates GitHub webhook signatures and parses payloads
 // into typed event structs.
@@ -49,15 +50,6 @@ func WithArgoCDToken(token string) Option {
 	}
 }
 
-// WithSyncTimeout caps each config sync run (a push to the gitops default
-// branch, or POST /v1/sync) at d, counted from when the run holds the sync
-// guard.
-func WithSyncTimeout(d time.Duration) Option {
-	return func(s *Server) {
-		s.syncTimeout = d
-	}
-}
-
 type Server struct {
 	webhook     WebhookValidator
 	gitops      gitopsAPI
@@ -80,9 +72,6 @@ type Server struct {
 	jobs sync.Mutex
 	// jobTimeout caps each background job, counted from when it holds jobs.
 	jobTimeout time.Duration
-	// syncTimeout caps each config sync run, counted from when it holds the
-	// syncer's guard.
-	syncTimeout time.Duration
 	// syncer runs the config syncs, one at a time.
 	syncer *lifecycle.Syncer
 }
@@ -100,14 +89,13 @@ func NewServer(
 		deployToken:           deployToken,
 		allowedInstallationID: allowedInstallationID,
 		jobTimeout:            reconcileTimeout,
-		syncTimeout:           defaultSyncTimeout,
 		now:                   time.Now,
 	}
 	for _, opt := range opts {
 		opt(s)
 	}
 	s.lifecycle = lifecycleAPI{gitopsAPI: gitops, Metrics: s.metrics}
-	s.syncer = lifecycle.NewSyncer(s.lifecycle, s.syncTimeout)
+	s.syncer = lifecycle.NewSyncer(s.lifecycle, syncTimeout)
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)

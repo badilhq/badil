@@ -32,15 +32,14 @@ func (trustingValidator) ParseEvent(eventType string, payload []byte) (any, erro
 
 // newPushServer returns a server over fg with the trusting validator, the
 // installation 123 allowed, and metrics recorded in a fresh *Metrics.
-func newPushServer(t *testing.T, fg *fakeGitops, opts ...Option) (*Server, *metrics.Metrics, *LogCapture) {
+func newPushServer(t *testing.T, fg *fakeGitops) (*Server, *metrics.Metrics, *LogCapture) {
 	t.Helper()
 	capture := &LogCapture{}
 	prev := slog.Default()
 	slog.SetDefault(slog.New(capture))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 	m := metrics.New()
-	opts = append([]Option{WithMetrics(m)}, opts...)
-	return NewServer(trustingValidator{}, fg, "t", 123, opts...), m, capture
+	return NewServer(trustingValidator{}, fg, "t", 123, WithMetrics(m)), m, capture
 }
 
 // pushPayload is a push of ref to repo, whose default branch is main.
@@ -105,8 +104,7 @@ func TestPush_DefaultBranchSyncsEveryPreview(t *testing.T) {
 			if got := fg.synced(); !slices.Equal(got, []string{"a", "b"}) {
 				t.Errorf("synced = %v, want every preview", got)
 			}
-			assertCountedOnce(t, m, `badil_webhook_deliveries_total{event="push",status="200"}`)
-			assertCountedOnce(t, m, `badil_config_syncs_total{result="ok",trigger="push"}`)
+			assertCounter(t, m, "badil_webhook_deliveries_total", `{event="push",status="200"} 1`)
 		})
 	}
 }
@@ -133,33 +131,11 @@ func TestPush_OtherPushesIgnored(t *testing.T) {
 			if got := drain(fg.started); len(got) != 0 || len(fg.synced()) != 0 {
 				t.Errorf("gitops calls = %v, syncs = %v, want none", got, fg.synced())
 			}
-			assertCountedOnce(t, m, `badil_webhook_deliveries_total{event="push",status="200"}`)
-			if n, _ := testutil.GatherAndCount(m.Gatherer(), "badil_config_syncs_total"); n != 0 {
-				t.Errorf("config syncs counted %d, want none", n)
-			}
-			if got := attrsOf(capture, "config sync skipped")["reason"]; got != tc.reason {
-				t.Errorf("skip reason = %q, want %q", got, tc.reason)
+			assertCounter(t, m, "badil_webhook_deliveries_total", `{event="push",status="200"} 1`)
+			if _, attrs := teardownRecord(t, capture, "webhook push"); attrs["reason"].String() != tc.reason {
+				t.Errorf("skip reason = %q, want %q", attrs["reason"], tc.reason)
 			}
 		})
-	}
-}
-
-func TestPush_UnchangedSHASyncsNothing(t *testing.T) {
-	fg := syncFake()
-	s, m, _ := newPushServer(t, fg)
-	body := pushPayload(t, "acme/gitops", "refs/heads/main", false)
-	pushAndWait(t, s, body)
-	// badil's own commit: a push to main that leaves badil.yaml as it was.
-	pushAndWait(t, s, body)
-	if got := fg.synced(); !slices.Equal(got, []string{"a", "b"}) {
-		t.Errorf("synced = %v, want one run", got)
-	}
-	assertCountedOnce(t, m, `badil_config_syncs_total{result="ok",trigger="push"}`)
-
-	fg.catalogSHA = "sha-2"
-	pushAndWait(t, s, body)
-	if got := fg.synced(); len(got) != 4 {
-		t.Errorf("synced = %v, want a second run for a new SHA", got)
 	}
 }
 
@@ -186,51 +162,27 @@ func TestPush_WaitBackgroundWaitsForSync(t *testing.T) {
 
 func TestPush_BoundedBySyncTimeout(t *testing.T) {
 	fg := syncFake()
-	s, _, _ := newPushServer(t, fg, WithSyncTimeout(time.Hour))
+	s, _, _ := newPushServer(t, fg)
 	pushAndWait(t, s, pushPayload(t, "acme/gitops", "refs/heads/main", false))
-	if left := time.Until(fg.catalogDeadline); left < 59*time.Minute || left > time.Hour {
-		t.Errorf("sync deadline in %v, want the 1h WithSyncTimeout bound", left)
+	if left := time.Until(fg.catalogDeadline); left < syncTimeout-time.Minute || left > syncTimeout {
+		t.Errorf("sync deadline in %v, want the %v syncTimeout bound", left, syncTimeout)
 	}
 }
 
-// assertCountedOnce fails t unless the counter sample of m named by key (name
-// and labels as exposed) is 1.
-func assertCountedOnce(t *testing.T, m *metrics.Metrics, key string) {
+// assertCounter fails t unless the counter family name of m is exactly
+// samples, one "{labels} value" (or " value") line each.
+func assertCounter(t *testing.T, m *metrics.Metrics, name string, samples ...string) {
 	t.Helper()
-	families, err := m.Gatherer().Gather()
-	if err != nil {
-		t.Fatal(err)
+	help := map[string]string{
+		"badil_webhook_deliveries_total": "GitHub webhook deliveries, by verified event and HTTP status.",
+		"badil_previews_synced_total":    "Previews rewritten to match badil.yaml, by a sweep, a push or /v1/sync.",
 	}
-	for _, mf := range families {
-		for _, metric := range mf.GetMetric() {
-			labels := make([]string, 0, len(metric.GetLabel()))
-			for _, l := range metric.GetLabel() {
-				labels = append(labels, l.GetName()+`="`+l.GetValue()+`"`)
-			}
-			if mf.GetName()+"{"+strings.Join(labels, ",")+"}" != key {
-				continue
-			}
-			if got := metric.GetCounter().GetValue(); got != 1 {
-				t.Errorf("%s = %v, want 1", key, got)
-			}
-			return
-		}
+	var expected strings.Builder
+	expected.WriteString("# HELP " + name + " " + help[name] + "\n# TYPE " + name + " counter\n")
+	for _, sample := range samples {
+		expected.WriteString(name + sample + "\n")
 	}
-	t.Errorf("%s not exported, want 1", key)
-}
-
-// attrsOf returns the string attributes of the first record logged with msg.
-func attrsOf(capture *LogCapture, msg string) map[string]string {
-	out := map[string]string{}
-	for _, r := range capture.Records() {
-		if r.Message != msg {
-			continue
-		}
-		r.Attrs(func(a slog.Attr) bool {
-			out[a.Key] = a.Value.String()
-			return true
-		})
-		break
+	if err := testutil.GatherAndCompare(m.Gatherer(), strings.NewReader(expected.String()), name); err != nil {
+		t.Error(err)
 	}
-	return out
 }

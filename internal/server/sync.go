@@ -60,7 +60,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, gitops.ErrUnauthorized):
 			status = http.StatusBadGateway
 		}
-		slog.WarnContext(ctx, "sync failed", //nolint:sloglint // server has no scoped logger yet
+		slog.WarnContext(ctx, "sync failed",
 			slog.String("slug", slug),
 			slog.Int("status", status),
 			slog.String("err", err.Error()),

@@ -21,6 +21,7 @@ const (
 // SweepAPI is the subset of gitops.Client used by Sweep, plus the Recorder.
 type SweepAPI interface {
 	TeardownAPI
+	FetchServiceCatalog(ctx context.Context) (*gitops.ServiceCatalog, error)
 	ListPreviews(ctx context.Context) ([]string, error)
 	GetPreview(ctx context.Context, slug string) (*preview.PreviewValues, string, error)
 	GetPullRequest(ctx context.Context, owner, repo string, number int) (*gitops.PullRequest, error)
@@ -149,35 +150,36 @@ func sweepPreview(
 
 // syncPreview rewrites a kept preview to match catalog (step 4), records and
 // logs a rewrite and, when it changed the service list or a host, refreshes
-// the open PRs' comments. It reports whether the preview was rewritten; only
-// the sync error is returned.
-func syncPreview(ctx context.Context, api PreviewSyncAPI, slug string, catalog *gitops.ServiceCatalog) (bool, error) {
+// the open PRs' comments. It returns the sync result; only the sync error is
+// returned.
+func syncPreview(
+	ctx context.Context, api PreviewSyncAPI, slug string, catalog *gitops.ServiceCatalog,
+) (*gitops.SyncResult, error) {
 	res, err := api.SyncPreviewWithRetry(ctx, slug, catalog)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	if !res.Changed {
-		return false, nil
+		return res, nil
 	}
-	api.SweepSynced()
-	slog.InfoContext(ctx, "preview synced", //nolint:sloglint // lifecycle has no scoped logger yet
+	api.PreviewSynced()
+	slog.InfoContext(ctx, "preview synced",
 		slog.String("slug", slug),
 		slog.String("gitops_commit_url", res.CommitURL),
 	)
 	if !res.Notify {
-		return true, nil
+		return res, nil
 	}
 	body := preview.BuildSummary(
-		slug, res.Values, catalog.URLs, catalog.ArgoCDURL, catalog.Branches, res.CommitMessage, res.CommitURL,
-		catalog.Excluded(res.Values)...,
+		slug, res.Values, catalog.URLs, catalog.ArgoCDURL, res.Excluded, res.CommitMessage, res.CommitURL,
 	)
 	if fanErr := api.FanOutPRComments(ctx, res.Values, body); fanErr != nil {
-		slog.WarnContext(ctx, "preview sync comment failed", //nolint:sloglint // lifecycle has no scoped logger yet
+		slog.WarnContext(ctx, "preview sync comment failed",
 			slog.String("slug", slug),
 			slog.String("err", fanErr.Error()),
 		)
 	}
-	return true, nil
+	return res, nil
 }
 
 // hasPin reports whether any entry of vals is pinned to a commit.

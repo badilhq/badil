@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/preview"
 )
 
 const teardownPath = "/repos/acme/gitops/contents/previews/feature-x/values.yaml"
@@ -239,11 +240,14 @@ func TestTeardown_UpdateWhenPinsRemain(t *testing.T) {
 		"    imageTag: sha-${ARGOCD_APP_REVISION_SHORT}\n" +
 		defaultChartYAML +
 		"dependencies: []\n"
-	if reqs[0].content != wantBody {
-		t.Errorf("PUT content mismatch\n got:\n%s\nwant:\n%s", reqs[0].content, wantBody)
+	if got := decode(t, reqs[0].content); !preview.Equal(got, decode(t, wantBody)) {
+		t.Errorf("PUT content = %+v, want %s", got, wantBody)
 	}
 	if result.Deleted || !slices.Equal(result.Removed, []string{"backend-1"}) {
 		t.Errorf("result = %+v, want Removed [backend-1], Deleted false", result)
+	}
+	if result.Catalog == nil || !slices.Equal(result.Catalog.Services, []string{"backend-1", "backend-2", "front"}) {
+		t.Errorf("Catalog = %+v, want the badil.yaml read for the projection", result.Catalog)
 	}
 	if result.CommitMessage != wantMsg || !strings.HasSuffix(result.CommitURL, "/c0ffee") {
 		t.Errorf("result message/url = %q/%q", result.CommitMessage, result.CommitURL)
@@ -386,11 +390,14 @@ func TestTeardown_DropsPartsOnlyThePRNeeded(t *testing.T) {
 		"    chart:\n" +
 		"      repoURL: oci://r/redis\n" +
 		"      version: 1.0.0\n"
-	if reqs[0].content != wantBody {
-		t.Errorf("PUT content mismatch\n got:\n%s\nwant:\n%s", reqs[0].content, wantBody)
+	if got := decode(t, reqs[0].content); !preview.Equal(got, decode(t, wantBody)) {
+		t.Errorf("PUT content = %+v, want %s", got, wantBody)
 	}
 	if result.Deleted || !slices.Equal(result.Removed, []string{"payments"}) {
 		t.Errorf("result = %+v, want Removed [payments], Deleted false", result)
+	}
+	if want := []string{"payments", "search", "kafka", "elasticsearch"}; !slices.Equal(result.Excluded, want) {
+		t.Errorf("Excluded = %v, want %v", result.Excluded, want)
 	}
 }
 

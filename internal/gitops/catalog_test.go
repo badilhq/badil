@@ -612,6 +612,16 @@ func TestParseCatalog_MalformedServices(t *testing.T) {
 			"services:\n  front: {repo: r}\n  front: {repo: s}\n",
 			"badil.yaml: services.front is defined more than once",
 		},
+		{
+			"service name a number",
+			"services:\n  1: {repo: r}\n",
+			`badil.yaml: services: keys must be strings, got "1"`,
+		},
+		{
+			"service name a mapping",
+			"services:\n  ? {a: b}\n  : {repo: r}\n",
+			`badil.yaml: services: keys must be strings, got ""`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -723,28 +733,9 @@ func TestParseCatalog_RendererDefaults(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseCatalog: %v", err)
 			}
-			if got.ImageTag != preview.DefaultImageTag || got.ImageTags != nil || got.Charts != nil ||
-				got.Namespace != nil {
-				t.Errorf("ImageTag, ImageTags, Charts, Namespace = %q, %v, %v, %v; want %q, nil, nil, nil",
-					got.ImageTag, got.ImageTags, got.Charts, got.Namespace, preview.DefaultImageTag)
-			}
-		})
-	}
-}
-
-func TestParseCatalog_ImageTagFormats(t *testing.T) {
-	long := strings.Repeat("a", preview.MaxImageTagFormatLen-len("{sha}")) + "{sha}"
-	for _, format := range []string{
-		"{sha}", "{sha7}", "{sha8}", "sha-{sha7}", "{sha8}-amd64", "v1.2_{sha}.x-y", "_{sha}", "{sha}.", long,
-	} {
-		t.Run(format, func(t *testing.T) {
-			raw := "imageTag: \"" + format + "\"\nservices:\n  front: {repo: r, imageTag: \"" + format + "\"}\n"
-			got, err := gitops.ParseCatalog([]byte(raw))
-			if err != nil {
-				t.Fatalf("ParseCatalog: %v", err)
-			}
-			if got.ImageTag != format || got.ImageTags["front"] != format {
-				t.Errorf("ImageTag, ImageTags[front] = %q, %q; want %q", got.ImageTag, got.ImageTags["front"], format)
+			if got.ImageTag != "" || got.ImageTags != nil || got.Charts != nil || got.Namespace != nil {
+				t.Errorf(`ImageTag, ImageTags, Charts, Namespace = %q, %v, %v, %v; want "", nil, nil, nil`,
+					got.ImageTag, got.ImageTags, got.Charts, got.Namespace)
 			}
 		})
 	}
@@ -753,7 +744,6 @@ func TestParseCatalog_ImageTagFormats(t *testing.T) {
 func TestParseCatalog_MalformedRendererSettings(t *testing.T) {
 	const badTag = " must be a quoted string made of an optional prefix, one of {sha}, {sha7} or {sha8}, " +
 		"and an optional suffix ([a-zA-Z0-9_.-], the prefix not starting with . or -), at most 93 characters"
-	tooLong := strings.Repeat("a", preview.MaxImageTagFormatLen-len("{sha}")+1) + "{sha}"
 	tests := []struct {
 		name string
 		raw  string
@@ -764,32 +754,6 @@ func TestParseCatalog_MalformedRendererSettings(t *testing.T) {
 		{"root imageTag unquoted", catalogServices + "imageTag: {sha}\n", "badil.yaml: imageTag" + badTag},
 		{"root imageTag a number", catalogServices + "imageTag: 1\n", "badil.yaml: imageTag" + badTag},
 		{"root imageTag no placeholder", catalogServices + "imageTag: latest\n", "badil.yaml: imageTag" + badTag},
-		{
-			"root imageTag two placeholders",
-			catalogServices + "imageTag: \"{sha}-{sha7}\"\n",
-			"badil.yaml: imageTag" + badTag,
-		},
-		{
-			"root imageTag unknown placeholder",
-			catalogServices + "imageTag: \"{sha9}\"\n",
-			"badil.yaml: imageTag" + badTag,
-		},
-		{
-			"root imageTag prefix starts with -",
-			catalogServices + "imageTag: \"-{sha}\"\n",
-			"badil.yaml: imageTag" + badTag,
-		},
-		{
-			"root imageTag prefix starts with .",
-			catalogServices + "imageTag: \".{sha}\"\n",
-			"badil.yaml: imageTag" + badTag,
-		},
-		{"root imageTag slash", catalogServices + "imageTag: \"a/{sha}\"\n", "badil.yaml: imageTag" + badTag},
-		{
-			"root imageTag too long",
-			catalogServices + "imageTag: \"" + tooLong + "\"\n",
-			"badil.yaml: imageTag" + badTag,
-		},
 		{
 			"service imageTag bad",
 			"services:\n  front: {repo: r, imageTag: \"x:{sha}\"}\n",
@@ -1050,6 +1014,16 @@ func TestParseCatalog_MalformedDependencies(t *testing.T) {
 			"badil.yaml: dependencies.db.repo must be an https:// Helm repository URL",
 		},
 		{
+			"repo without a host",
+			"dependencies: {db: {repo: \"https://\", chart: c, version: 1.0.0}}\n",
+			"badil.yaml: dependencies.db.repo must be an https:// Helm repository URL",
+		},
+		{
+			"oci chart without a host",
+			"dependencies: {db: {chart: \"oci://\", version: 1.0.0}}\n",
+			"badil.yaml: dependencies.db.chart must be an oci:// reference with a host",
+		},
+		{
 			"unknown key",
 			"dependencies: {db: {" + helmRepo + ", path: k8s/}}\n",
 			`badil.yaml: dependencies.db: unknown key "path"`,
@@ -1208,19 +1182,5 @@ func TestParseCatalog_MalformedNeeds(t *testing.T) {
 				t.Fatalf("err = %v, want %q", err, tt.want)
 			}
 		})
-	}
-}
-
-func TestServiceCatalog_Excluded(t *testing.T) {
-	c, err := gitops.ParseCatalog([]byte(needsBadil))
-	if err != nil {
-		t.Fatalf("ParseCatalog: %v", err)
-	}
-	vals := preview.PreviewValues{Services: []preview.ServiceEntry{
-		{Name: "front", CommitSha: "abc"}, {Name: "backend"},
-	}}
-	want := []string{"payments", "search", "kafka", "elasticsearch"}
-	if got := c.Excluded(vals); !reflect.DeepEqual(got, want) {
-		t.Errorf("Excluded = %v, want %v", got, want)
 	}
 }

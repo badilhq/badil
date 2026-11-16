@@ -38,8 +38,7 @@ type Metrics struct {
 	sweepRuns         *prometheus.CounterVec
 	sweepLastSuccess  prometheus.Gauge
 	sweepDeleted      *prometheus.CounterVec
-	sweepSynced       prometheus.Counter
-	configSyncs       *prometheus.CounterVec
+	previewsSynced    prometheus.Counter
 	previews          prometheus.Gauge
 	spinUp            *prometheus.HistogramVec
 	argoCDEvents      *prometheus.CounterVec
@@ -96,16 +95,11 @@ func New() *Metrics {
 			Name:      "sweep_previews_deleted_total",
 			Help:      "Previews deleted by the cleanup sweep, by rule.",
 		}, []string{"rule"}),
-		sweepSynced: prometheus.NewCounter(prometheus.CounterOpts{
+		previewsSynced: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: namespace,
-			Name:      "sweep_previews_synced_total",
-			Help:      "Previews rewritten by a sweep to match badil.yaml.",
+			Name:      "previews_synced_total",
+			Help:      "Previews rewritten to match badil.yaml, by a sweep, a push or /v1/sync.",
 		}),
-		configSyncs: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: namespace,
-			Name:      "config_syncs_total",
-			Help:      "Syncs of every preview, or one, with badil.yaml outside the sweep, by trigger and result.",
-		}, []string{"trigger", labelResult}),
 		previews: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: namespace,
 			Name:      "previews",
@@ -135,8 +129,7 @@ func New() *Metrics {
 		m.sweepRuns,
 		m.sweepLastSuccess,
 		m.sweepDeleted,
-		m.sweepSynced,
-		m.configSyncs,
+		m.previewsSynced,
 		m.previews,
 		m.spinUp,
 		m.argoCDEvents,
@@ -219,21 +212,13 @@ func (m *Metrics) SweepDeleted(rule string) {
 	m.updatePreviews(func(n int) int { return n - 1 })
 }
 
-// SweepSynced counts one preview a sweep rewrote to match badil.yaml.
-func (m *Metrics) SweepSynced() {
+// PreviewSynced counts one preview rewritten to match badil.yaml, by a sweep,
+// a push or /v1/sync.
+func (m *Metrics) PreviewSynced() {
 	if m == nil {
 		return
 	}
-	m.sweepSynced.Inc()
-}
-
-// ConfigSync counts one sync with badil.yaml outside the sweep, by trigger
-// (push or api) and result (ok or error).
-func (m *Metrics) ConfigSync(trigger, result string) {
-	if m == nil {
-		return
-	}
-	m.configSyncs.WithLabelValues(trigger, result).Inc()
+	m.previewsSynced.Inc()
 }
 
 // updatePreviews sets the previews gauge to f of its value, or to 0 when f
