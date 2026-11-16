@@ -875,8 +875,12 @@ func TestWritePreviewWithRetry_Created(t *testing.T) {
 			expected := "# HELP badil_previews Previews in the gitops repo: listed at startup, " +
 				"counted on each create and delete by this server, and reset by each in-server cleanup sweep.\n" +
 				"# TYPE badil_previews gauge\nbadil_previews " + want + "\n"
-			if err := testutil.GatherAndCompare(m.Gatherer(), strings.NewReader(expected), "badil_previews"); err != nil {
-				t.Error(err)
+			if cmpErr := testutil.GatherAndCompare(
+				m.Gatherer(),
+				strings.NewReader(expected),
+				"badil_previews",
+			); cmpErr != nil {
+				t.Error(cmpErr)
 			}
 		})
 	}
@@ -1078,7 +1082,14 @@ func TestWritePreviewWithRetry_RendererSettings(t *testing.T) {
 	}
 	for i, w := range want {
 		if svc := got.Services[i]; svc.ImageTag != w.ImageTag || !reflect.DeepEqual(svc.Chart, w.Chart) {
-			t.Errorf("%s imageTag, chart = %q, %+v; want %q, %+v", svc.Name, svc.ImageTag, svc.Chart, w.ImageTag, w.Chart)
+			t.Errorf(
+				"%s imageTag, chart = %q, %+v; want %q, %+v",
+				svc.Name,
+				svc.ImageTag,
+				svc.Chart,
+				w.ImageTag,
+				w.Chart,
+			)
 		}
 	}
 }

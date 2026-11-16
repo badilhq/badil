@@ -53,7 +53,7 @@ func BuildSummary(
 		}
 		if sha != "" {
 			pinned = true
-			shaShort := shortSHA(sha, 8)
+			shaShort := shortSHA(sha, shortSHALen8)
 			cURL := deriveCommitURL(prURL, sha)
 			commitPart := "📌 `" + shaShort + "`"
 			if cURL != "" {

@@ -71,11 +71,12 @@ func (PreviewValues) JSONSchemaExtend(s *jsonschema.Schema) {
 // hostParam together. values stays a free-form object.
 func (DependencyEntry) JSONSchemaExtend(s *jsonschema.Schema) {
 	s.Required = []string{"name", "chart"}
+	const host, hostParam = "host", "hostParam"
 	s.DependentRequired = map[string][]string{
-		"host":      {"hostParam"},
-		"hostParam": {"host"},
+		host:      {hostParam},
+		hostParam: {host},
 	}
-	for _, name := range []string{"name", "hostParam", "host"} {
+	for _, name := range []string{"name", hostParam, host} {
 		if p, ok := s.Properties.Get(name); ok {
 			p.MinLength = new(uint64(1))
 		}

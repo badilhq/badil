@@ -26,6 +26,13 @@ func ValidImageTagFormat(format string) bool {
 }
 
 // shortSHA returns the first n characters of sha, or all of it when shorter.
+// Short SHA lengths of Argo CD's ARGOCD_APP_REVISION_SHORT and
+// ARGOCD_APP_REVISION_SHORT_8.
+const (
+	shortSHALen  = 7
+	shortSHALen8 = 8
+)
+
 func shortSHA(sha string, n int) string {
 	return sha[:min(n, len(sha))]
 }
@@ -47,9 +54,9 @@ func ExpandImageTag(format, commitSha string) string {
 	case commitSha == "":
 		sha = "${ARGOCD_APP_REVISION}"
 	case placeholder == "sha7":
-		sha = shortSHA(commitSha, 7)
+		sha = shortSHA(commitSha, shortSHALen)
 	case placeholder == "sha8":
-		sha = shortSHA(commitSha, 8)
+		sha = shortSHA(commitSha, shortSHALen8)
 	default:
 		sha = commitSha
 	}
