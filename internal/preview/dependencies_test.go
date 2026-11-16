@@ -32,7 +32,7 @@ func TestApplyCatalog_Dependencies(t *testing.T) {
 		GitopsRepoURL: gitops,
 	}
 
-	got := preview.ApplyCatalog(in, cat)
+	got := preview.ApplyCatalog(in, cat).Values
 
 	if got.GitopsRepoURL != gitops {
 		t.Errorf("GitopsRepoURL = %q, want %q", got.GitopsRepoURL, gitops)
@@ -57,16 +57,20 @@ func TestApplyCatalog_DependencyShadowedByPinnedEntry(t *testing.T) {
 	in := preview.PreviewValues{Services: []preview.ServiceEntry{{Name: "backend-1"}, pinnedPostgres}}
 	cat := preview.Catalog{Services: []string{"backend-1"}, Repos: catalogRepos(), Dependencies: sampleDependencies()}
 
-	got := preview.ApplyCatalog(in, cat)
+	proj := preview.ApplyCatalog(in, cat)
+	got := proj.Values
 	if names := dependencyNames(got.Dependencies); !reflect.DeepEqual(names, []string{"mailpit"}) {
 		t.Errorf("dependencies = %v, want [mailpit]: postgres is a kept pinned entry", names)
+	}
+	if !reflect.DeepEqual(proj.Shadowed, []string{"postgres"}) {
+		t.Errorf("Shadowed = %v, want [postgres]", proj.Shadowed)
 	}
 	if len(got.Services) != 2 || got.Services[1].Name != "postgres" {
 		t.Fatalf("services = %+v, want backend-1 then the kept postgres", got.Services)
 	}
 
 	unpinned, _, _ := preview.UnpinPR(got, "acme", "postgres", 1)
-	got = preview.ApplyCatalog(unpinned, cat)
+	got = preview.ApplyCatalog(unpinned, cat).Values
 	if names := dependencyNames(got.Dependencies); !reflect.DeepEqual(names, []string{"postgres", "mailpit"}) {
 		t.Errorf("dependencies = %v, want [postgres mailpit] once the pinned entry is gone", names)
 	}

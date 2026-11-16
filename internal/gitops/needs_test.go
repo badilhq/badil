@@ -45,35 +45,17 @@ func TestWritePreviewWithRetry_Needs(t *testing.T) {
 	}
 
 	first, written := deploy([]string{""}, "front")
-	if got, want := partNames(
-		first.Values,
-	), []string{
-		"front",
-		"backend",
-		"postgres",
-		"redis",
-	}; !slices.Equal(
-		got,
-		want,
-	) {
+	want := []string{"front", "backend", "postgres", "redis"}
+	if got := partNames(first.Values); !slices.Equal(got, want) {
 		t.Errorf("front preview = %v, want %v", got, want)
 	}
-	if got, want := catalog.Excluded(
-		first.Values,
-	), []string{
-		"payments",
-		"search",
-		"kafka",
-		"elasticsearch",
-	}; !slices.Equal(
-		got,
-		want,
-	) {
-		t.Errorf("front Excluded = %v, want %v", got, want)
+	want = []string{"payments", "search", "kafka", "elasticsearch"}
+	if !slices.Equal(first.Excluded, want) {
+		t.Errorf("front Excluded = %v, want %v", first.Excluded, want)
 	}
 
 	second, _ := deploy([]string{written}, "payments")
-	want := []string{"front", "backend", "payments", "postgres", "redis", "kafka"}
+	want = []string{"front", "backend", "payments", "postgres", "redis", "kafka"}
 	if got := partNames(second.Values); !slices.Equal(got, want) {
 		t.Errorf("front and payments preview = %v, want %v", got, want)
 	}

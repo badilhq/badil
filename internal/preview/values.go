@@ -3,7 +3,6 @@ package preview
 import (
 	"bytes"
 	"cmp"
-	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -101,20 +100,31 @@ type Catalog struct {
 // chart returns the chart settings of name, its defaults applied.
 func (c Catalog) chart(name string) ChartSettings {
 	set := c.Charts[name]
-	out := ChartSettings{
+	return ChartSettings{
 		Path:          cmp.Or(set.Path, DefaultChartPath),
 		ImageTagParam: cmp.Or(set.ImageTagParam, DefaultImageTagParam),
 		HostParam:     cmp.Or(set.HostParam, DefaultHostParam),
+		ValueFiles:    slices.Clone(set.ValueFiles),
 	}
-	if len(set.ValueFiles) > 0 {
-		out.ValueFiles = slices.Clone(set.ValueFiles)
-	}
-	return out
 }
 
 // imageTag returns the image tag format of name.
 func (c Catalog) imageTag(name string) string {
 	return cmp.Or(c.ImageTags[name], c.ImageTag, DefaultImageTag)
+}
+
+// Projection is a preview file projected on a Catalog (ApplyCatalog).
+type Projection struct {
+	// Values is the projected file.
+	Values PreviewValues
+	// Excluded lists the catalog services then the catalog dependencies, in
+	// badil.yaml order, that Values leaves out because no pinned service
+	// needs them, directly or transitively. It is nil when the catalog
+	// declares no needs or every part runs.
+	Excluded []string
+	// Shadowed lists the catalog dependencies, in order, left out because a
+	// kept pinned entry of a service removed from the catalog has their name.
+	Shadowed []string
 }
 
 // ApplyCatalog returns vals projected on cat, never mutating vals:
@@ -133,12 +143,12 @@ func (c Catalog) imageTag(name string) string {
 //   - every other entry is dropped;
 //   - dependencies are cat.Dependencies, in that order, except one named like
 //     a service entry of the result (a kept pinned entry of a service removed
-//     from the catalog), which is left out. Their host is ApplyHosts's to
-//     set;
+//     from the catalog), which is left out (Shadowed). Their host is
+//     ApplyHosts's to set;
 //   - when cat declares needs, only the included services and dependencies
 //     are kept: the pinned entries and their transitive needs, every other
-//     one left out (Catalog.Excluded).
-func ApplyCatalog(vals PreviewValues, cat Catalog) PreviewValues {
+//     one left out (Excluded).
+func ApplyCatalog(vals PreviewValues, cat Catalog) Projection {
 	inCatalog := make(map[string]bool, len(cat.Services))
 	out := make([]ServiceEntry, 0, len(cat.Services)+len(vals.Services))
 	for _, name := range cat.Services {
@@ -161,111 +171,67 @@ func ApplyCatalog(vals PreviewValues, cat Catalog) PreviewValues {
 		kept[svc.Name] = true
 		out = append(out, svc)
 	}
-	in := cat.included(out)
+	in := cat.included(out, inCatalog)
+	var excluded []string
 	if in != nil {
 		out = slices.DeleteFunc(out, func(s ServiceEntry) bool { return !in[s.Name] })
+		excluded = cat.excluded(in)
 	}
 	res := vals
 	res.APIVersion = APIVersion
 	res.GitopsRepoURL = cat.GitopsRepoURL
 	res.Namespace = cat.Namespace
 	res.Services = out
-	res.Dependencies = projectDependencies(cat.Dependencies, out, in)
-	return res
-}
-
-// projectDependencies returns a copy of deps without those named like an
-// entry of services and, when in is not nil, without those not in it.
-func projectDependencies(deps []DependencyEntry, services []ServiceEntry, in map[string]bool) []DependencyEntry {
-	out := make([]DependencyEntry, 0, len(deps))
-	for _, dep := range deps {
-		if (in != nil && !in[dep.Name]) ||
-			slices.ContainsFunc(services, func(s ServiceEntry) bool { return s.Name == dep.Name }) {
-			continue
+	var shadowed []string
+	res.Dependencies = make([]DependencyEntry, 0, len(cat.Dependencies))
+	for _, dep := range cat.Dependencies {
+		switch {
+		case slices.ContainsFunc(out, func(s ServiceEntry) bool { return s.Name == dep.Name }):
+			shadowed = append(shadowed, dep.Name)
+		case in == nil || in[dep.Name]:
+			dep.ValueFiles = slices.Clone(dep.ValueFiles)
+			res.Dependencies = append(res.Dependencies, dep)
 		}
-		dep.ValueFiles = slices.Clone(dep.ValueFiles)
-		out = append(out, dep)
 	}
-	return out
+	return Projection{Values: res, Excluded: excluded, Shadowed: shadowed}
 }
 
-// Equal reports whether a and b have the same apiVersion, gitopsRepoURL and
-// namespace and hold the same service and dependency entries, in the same
-// order, every field compared (chart, metadata and values by value).
+// Equal reports whether a and b encode to the same YAML, so that a nil and an
+// empty namespace, list or map are equal, and so is a number in a
+// dependency's values whether decoded as a float or an integer.
 func Equal(a, b PreviewValues) bool {
-	return equalValues(a, b, "", false)
+	x, errA := yaml.Marshal(canonical(a))
+	y, errB := yaml.Marshal(canonical(b))
+	return errA == nil && errB == nil && bytes.Equal(x, y)
 }
 
 // EqualExceptUpdatedAt reports whether a and b are Equal, ignoring only the
 // updated-at of serviceName's entry.
 func EqualExceptUpdatedAt(a, b PreviewValues, serviceName string) bool {
-	return equalValues(a, b, serviceName, true)
+	return Equal(withoutUpdatedAt(a, serviceName), withoutUpdatedAt(b, serviceName))
 }
 
-// equalValues compares a and b as Equal does, ignoring the updated-at of
-// serviceName's entry when ignoreUpdatedAt is set.
-func equalValues(a, b PreviewValues, serviceName string, ignoreUpdatedAt bool) bool {
-	if a.APIVersion != b.APIVersion || a.GitopsRepoURL != b.GitopsRepoURL ||
-		!equalNamespace(a.Namespace, b.Namespace) ||
-		!slices.EqualFunc(a.Dependencies, b.Dependencies, equalDependency) {
-		return false
+// canonical returns vals with an empty namespace set to nil, which yaml.v3
+// would otherwise encode as {}.
+func canonical(vals PreviewValues) PreviewValues {
+	if ns := vals.Namespace; ns != nil && len(ns.Labels) == 0 && len(ns.Annotations) == 0 {
+		vals.Namespace = nil
 	}
-	return slices.EqualFunc(a.Services, b.Services, func(x, y ServiceEntry) bool {
-		if x.Name != y.Name || x.RepoURL != y.RepoURL || x.Branch != y.Branch ||
-			x.CommitSha != y.CommitSha || x.ImageTag != y.ImageTag || x.Host != y.Host ||
-			!equalChart(x.Chart, y.Chart) {
-			return false
+	return vals
+}
+
+// withoutUpdatedAt returns a copy of vals whose serviceName entry has an
+// empty updated-at. vals is never mutated.
+func withoutUpdatedAt(vals PreviewValues, serviceName string) PreviewValues {
+	vals.Services = slices.Clone(vals.Services)
+	for i, svc := range vals.Services {
+		if svc.Name == serviceName && svc.Metadata != nil {
+			md := *svc.Metadata
+			md.UpdatedAt = ""
+			vals.Services[i].Metadata = &md
 		}
-		if x.Metadata == nil || y.Metadata == nil {
-			return x.Metadata == nil && y.Metadata == nil
-		}
-		mx, my := *x.Metadata, *y.Metadata
-		if ignoreUpdatedAt && x.Name == serviceName {
-			mx.UpdatedAt, my.UpdatedAt = "", ""
-		}
-		return mx == my
-	})
-}
-
-// equalDependency reports whether a and b hold the same fields. Values are
-// compared as YAML, so that a number decoded as a float equals the same
-// number read back as an integer; nil and empty ValueFiles or Values are
-// equal.
-func equalDependency(a, b DependencyEntry) bool {
-	return a.Name == b.Name && a.Chart == b.Chart && a.HostParam == b.HostParam && a.Host == b.Host &&
-		slices.Equal(a.ValueFiles, b.ValueFiles) && equalYAML(a.Values, b.Values)
-}
-
-// equalYAML reports whether a and b encode to the same YAML; empty maps are
-// equal whatever their encoding.
-func equalYAML(a, b map[string]any) bool {
-	if len(a) == 0 || len(b) == 0 {
-		return len(a) == len(b)
 	}
-	x, errA := yaml.Marshal(a)
-	y, errB := yaml.Marshal(b)
-	return errA == nil && errB == nil && bytes.Equal(x, y)
-}
-
-// equalChart reports whether a and b hold the same settings; a nil and an
-// empty ValueFiles are equal.
-func equalChart(a, b ChartSettings) bool {
-	return a.Path == b.Path && a.ImageTagParam == b.ImageTagParam && a.HostParam == b.HostParam &&
-		slices.Equal(a.ValueFiles, b.ValueFiles)
-}
-
-// equalNamespace reports whether a and b hold the same labels and
-// annotations; nil, an empty NamespaceMetadata and nil or empty maps are
-// equal.
-func equalNamespace(a, b *NamespaceMetadata) bool {
-	var x, y NamespaceMetadata
-	if a != nil {
-		x = *a
-	}
-	if b != nil {
-		y = *b
-	}
-	return maps.Equal(x.Labels, y.Labels) && maps.Equal(x.Annotations, y.Annotations)
+	return vals
 }
 
 // UnpinPR returns a copy of vals where every entry deployed by the PR

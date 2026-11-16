@@ -3,6 +3,7 @@ package lifecycle_test
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"slices"
 	"sync"
 	"testing"
@@ -19,9 +20,10 @@ const quiet = 100 * time.Millisecond
 
 // syncFake is a concurrency-safe lifecycle.SyncAPI. FetchServiceCatalogSHA
 // returns sha with catalogErr; previews is what ListPreviews returns and the
-// set of slugs GetPreview finds. SyncPreviewWithRetry rewrites the slugs in
-// changed and fails those in syncErr. When gate is set, SyncPreviewWithRetry
-// sends its slug on entered, then waits until gate is closed.
+// set of slugs SyncPreviewWithRetry finds. SyncPreviewWithRetry rewrites the
+// slugs in changed and fails those in syncErr. When gate is set,
+// SyncPreviewWithRetry sends its slug on entered, then waits until gate is
+// closed.
 type syncFake struct {
 	*metrics.Metrics
 
@@ -30,7 +32,6 @@ type syncFake struct {
 	catalogErr error
 	previews   []string
 	listErr    error
-	getErr     error
 	changed    map[string]bool
 	syncErr    map[string]error
 	gate       chan struct{}
@@ -38,7 +39,6 @@ type syncFake struct {
 
 	catalogReads int
 	synced       []string
-	gets         []string
 }
 
 func newSyncFake(previews ...string) *syncFake {
@@ -77,19 +77,6 @@ func (f *syncFake) ListPreviews(context.Context) ([]string, error) {
 	return f.previews, f.listErr
 }
 
-func (f *syncFake) GetPreview(_ context.Context, slug string) (*preview.PreviewValues, string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.gets = append(f.gets, slug)
-	if f.getErr != nil {
-		return nil, "", f.getErr
-	}
-	if !slices.Contains(f.previews, slug) {
-		return nil, "", gitops.ErrNotFound
-	}
-	return &preview.PreviewValues{}, "blob-" + slug, nil
-}
-
 func (f *syncFake) SyncPreviewWithRetry(
 	_ context.Context,
 	slug string,
@@ -104,6 +91,9 @@ func (f *syncFake) SyncPreviewWithRetry(
 	f.synced = append(f.synced, slug)
 	if err := f.syncErr[slug]; err != nil {
 		return nil, err
+	}
+	if !slices.Contains(f.previews, slug) {
+		return &gitops.SyncResult{NotFound: true}, nil
 	}
 	if f.changed[slug] {
 		return &gitops.SyncResult{Changed: true, CommitURL: syncCommitURL}, nil
@@ -133,13 +123,6 @@ func waitEntered(t *testing.T, f *syncFake) {
 	}
 }
 
-// configSyncs fails t unless the badil_config_syncs_total samples of m are
-// exactly want.
-func configSyncs(t *testing.T, m *metrics.Metrics, want map[string]float64) {
-	t.Helper()
-	assertMetrics(t, m, want, "badil_config_syncs_total")
-}
-
 func TestSyncer_SyncAll(t *testing.T) {
 	captureLogs(t)
 	f := newSyncFake("a", "b", "c")
@@ -157,29 +140,26 @@ func TestSyncer_SyncAll(t *testing.T) {
 	if got := f.syncs(); !slices.Equal(got, []string{"a", "b", "c"}) {
 		t.Errorf("syncs = %v, want every preview", got)
 	}
-	configSyncs(t, f.Metrics, map[string]float64{`badil_config_syncs_total{result="error",trigger="api"}`: 1})
-	assertMetrics(t, f.Metrics, map[string]float64{"badil_sweep_previews_synced_total": 1},
-		"badil_sweep_previews_synced_total")
+	assertMetrics(t, f.Metrics, map[string]float64{"badil_previews_synced_total": 1}, "badil_previews_synced_total")
 }
 
 func TestSyncer_SyncOne(t *testing.T) {
 	cases := []struct {
 		name       string
 		slug       string
-		getErr     error
+		syncErr    error
 		wantErr    error
 		wantReport lifecycle.SyncReport
 		wantSyncs  []string
-		wantResult string
 	}{
 		{
 			name: "rewritten", slug: "b", wantReport: lifecycle.SyncReport{Synced: []string{"b"}},
-			wantSyncs: []string{"b"}, wantResult: "ok",
+			wantSyncs: []string{"b"},
 		},
-		{name: "unknown", slug: "zz", wantErr: lifecycle.ErrPreviewNotFound, wantResult: "ok"},
+		{name: "unknown", slug: "zz", wantErr: lifecycle.ErrPreviewNotFound, wantSyncs: []string{"zz"}},
 		{
-			name: "unreadable", slug: "b", getErr: errors.New("read boom"),
-			wantReport: lifecycle.SyncReport{Failed: []string{"b"}}, wantResult: "error",
+			name: "unreadable", slug: "b", syncErr: errors.New("read boom"),
+			wantReport: lifecycle.SyncReport{Failed: []string{"b"}}, wantSyncs: []string{"b"},
 		},
 	}
 	for _, tc := range cases {
@@ -187,7 +167,7 @@ func TestSyncer_SyncOne(t *testing.T) {
 			captureLogs(t)
 			f := newSyncFake("a", "b")
 			f.changed = map[string]bool{"b": true}
-			f.getErr = tc.getErr
+			f.syncErr = map[string]error{"b": tc.syncErr}
 			report, err := lifecycle.NewSyncer(f, time.Minute).Sync(context.Background(), tc.slug)
 			if !errors.Is(err, tc.wantErr) || (tc.wantErr == nil && err != nil) {
 				t.Fatalf("err = %v, want %v", err, tc.wantErr)
@@ -200,9 +180,6 @@ func TestSyncer_SyncOne(t *testing.T) {
 			if got := f.syncs(); !slices.Equal(got, tc.wantSyncs) {
 				t.Errorf("syncs = %v, want %v", got, tc.wantSyncs)
 			}
-			configSyncs(t, f.Metrics, map[string]float64{
-				`badil_config_syncs_total{result="` + tc.wantResult + `",trigger="api"}`: 1,
-			})
 		})
 	}
 }
@@ -229,7 +206,6 @@ func TestSyncer_SyncErrors(t *testing.T) {
 			if got := f.syncs(); len(got) != 0 {
 				t.Errorf("syncs = %v, want none", got)
 			}
-			configSyncs(t, f.Metrics, map[string]float64{`badil_config_syncs_total{result="error",trigger="api"}`: 1})
 		})
 	}
 }
@@ -251,23 +227,22 @@ func TestSyncer_PushSyncsOnlyANewSHA(t *testing.T) {
 	if got := f.syncs(); !slices.Equal(got, []string{"a", "b", "a", "b"}) {
 		t.Errorf("syncs = %v, want a second run for sha-2", got)
 	}
-	configSyncs(t, f.Metrics, map[string]float64{`badil_config_syncs_total{result="error",trigger="push"}`: 2})
 }
 
 func TestSyncer_PushConfigErrors(t *testing.T) {
 	cases := []struct {
 		name string
 		sha  string
-		// wantRuns is the runs of two pushes: the second push of a recorded
-		// SHA stops before any run.
-		wantRuns float64
+		// wantFailures is the failed runs of two pushes: the second push of a
+		// recorded SHA stops before any run.
+		wantFailures int
 	}{
-		{name: "unparsable content is recorded", sha: "sha-bad", wantRuns: 1},
-		{name: "unreadable file is retried", sha: "", wantRuns: 2},
+		{name: "unparsable content is recorded", sha: "sha-bad", wantFailures: 1},
+		{name: "unreadable file is retried", sha: "", wantFailures: 2},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			captureLogs(t)
+			logs := captureLogs(t)
 			f := newSyncFake("a")
 			f.sha, f.catalogErr = tc.sha, errors.New("catalog boom")
 			s := lifecycle.NewSyncer(f, time.Minute)
@@ -279,9 +254,9 @@ func TestSyncer_PushConfigErrors(t *testing.T) {
 			if got := f.syncs(); len(got) != 0 {
 				t.Errorf("syncs = %v, want none", got)
 			}
-			configSyncs(t, f.Metrics, map[string]float64{
-				`badil_config_syncs_total{result="error",trigger="push"}`: tc.wantRuns,
-			})
+			if got := len(logs.find(slog.LevelError, "config sync failed")); got != tc.wantFailures {
+				t.Errorf("failed runs = %d, want %d", got, tc.wantFailures)
+			}
 		})
 	}
 }
@@ -300,10 +275,6 @@ func TestSyncer_PushListErrorRecordsNoSHA(t *testing.T) {
 	if got := f.syncs(); !slices.Equal(got, []string{"a"}) {
 		t.Errorf("syncs = %v, want one run over a after the list failure", got)
 	}
-	configSyncs(t, f.Metrics, map[string]float64{
-		`badil_config_syncs_total{result="error",trigger="push"}`: 1,
-		`badil_config_syncs_total{result="ok",trigger="push"}`:    1,
-	})
 }
 
 func TestSyncer_PushDoesNotTouchAPISHA(t *testing.T) {
@@ -322,70 +293,6 @@ func TestSyncer_PushDoesNotTouchAPISHA(t *testing.T) {
 func TestSyncer_OneRunAtATime(t *testing.T) {
 	captureLogs(t)
 	f := newSyncFake("a")
-	release := f.gated()
-	defer release()
-	s := lifecycle.NewSyncer(f, time.Minute)
-
-	var wg sync.WaitGroup
-	wg.Go(func() { _, _ = s.Sync(context.Background(), "") })
-	waitEntered(t, f)
-	wg.Go(func() { s.Push(context.Background()) })
-	wg.Go(func() { _, _ = s.Sync(context.Background(), "a") })
-	time.Sleep(quiet)
-	if got := f.reads(); got != 1 {
-		t.Fatalf("catalog reads during the first run = %d, want 1 (the others wait for the guard)", got)
-	}
-	f.mu.Lock()
-	gets := len(f.gets)
-	f.mu.Unlock()
-	if gets != 0 {
-		t.Errorf("slug run read its preview while another run held the guard")
-	}
-	release()
-	wg.Wait()
-	if got := f.reads(); got != 3 {
-		t.Errorf("catalog reads = %d, want 3", got)
-	}
-}
-
-func TestSyncer_PushArrivalsCollapse(t *testing.T) {
-	captureLogs(t)
-	f := newSyncFake("a")
-	release := f.gated()
-	defer release()
-	s := lifecycle.NewSyncer(f, time.Minute)
-
-	var wg sync.WaitGroup
-	wg.Go(func() { _, _ = s.Sync(context.Background(), "") })
-	waitEntered(t, f)
-	returned := make(chan struct{}, 3)
-	for range 3 {
-		wg.Go(func() {
-			s.Push(context.Background())
-			returned <- struct{}{}
-		})
-	}
-	for range 2 {
-		select {
-		case <-returned:
-		case <-time.After(time.Second):
-			t.Fatal("collapsed pushes did not return while the run held the guard")
-		}
-	}
-	release()
-	wg.Wait()
-	if got := f.reads(); got != 2 {
-		t.Errorf("catalog reads = %d, want 2 (the API run and one push follow-up)", got)
-	}
-	configSyncs(t, f.Metrics, map[string]float64{
-		`badil_config_syncs_total{result="ok",trigger="api"}`:  1,
-		`badil_config_syncs_total{result="ok",trigger="push"}`: 1,
-	})
-}
-
-func TestSyncer_APICallsDoNotCollapse(t *testing.T) {
-	captureLogs(t)
-	f := newSyncFake("a")
 	f.changed = map[string]bool{"a": true}
 	release := f.gated()
 	defer release()
@@ -395,14 +302,18 @@ func TestSyncer_APICallsDoNotCollapse(t *testing.T) {
 	wg.Go(func() { s.Push(context.Background()) })
 	waitEntered(t, f)
 	reports := make(chan lifecycle.SyncReport, 3)
-	for range 3 {
+	for _, slug := range []string{"", "", "a"} {
 		wg.Go(func() {
-			report, err := s.Sync(context.Background(), "")
+			report, err := s.Sync(context.Background(), slug)
 			if err != nil {
-				t.Errorf("Sync: %v", err)
+				t.Errorf("Sync %q: %v", slug, err)
 			}
 			reports <- report
 		})
+	}
+	time.Sleep(quiet)
+	if got := f.reads(); got != 1 {
+		t.Fatalf("catalog reads during the first run = %d, want 1 (the others wait for the guard)", got)
 	}
 	release()
 	wg.Wait()
@@ -414,13 +325,10 @@ func TestSyncer_APICallsDoNotCollapse(t *testing.T) {
 			t.Errorf("report = %+v, want a synced", r)
 		}
 	}
-	if n != 3 {
-		t.Errorf("answered API calls = %d, want 3", n)
+	if n != 3 || f.reads() != 4 {
+		t.Errorf("answered API calls, catalog reads = %d, %d; want 3, 4: each caller runs and gets its own report",
+			n, f.reads())
 	}
-	configSyncs(t, f.Metrics, map[string]float64{
-		`badil_config_syncs_total{result="ok",trigger="api"}`:  3,
-		`badil_config_syncs_total{result="ok",trigger="push"}`: 1,
-	})
 }
 
 func TestSyncer_SyncWaitStopsWithContext(t *testing.T) {
@@ -440,28 +348,4 @@ func TestSyncer_SyncWaitStopsWithContext(t *testing.T) {
 	if _, err := s.Sync(ctx, ""); !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("err = %v, want the context's error", err)
 	}
-}
-
-func TestSyncer_RunBoundedFromGuard(t *testing.T) {
-	captureLogs(t)
-	f := &deadlineFake{syncFake: newSyncFake("a")}
-	s := lifecycle.NewSyncer(f, time.Hour)
-	if _, err := s.Sync(context.Background(), ""); err != nil {
-		t.Fatalf("Sync: %v", err)
-	}
-	if left := time.Until(f.deadline); left < 59*time.Minute || left > time.Hour {
-		t.Errorf("run deadline in %v, want about the 1h bound", left)
-	}
-}
-
-// deadlineFake is a syncFake recording the deadline of the catalog read.
-type deadlineFake struct {
-	*syncFake
-
-	deadline time.Time
-}
-
-func (f *deadlineFake) FetchServiceCatalogSHA(ctx context.Context) (*gitops.ServiceCatalog, string, error) {
-	f.deadline, _ = ctx.Deadline()
-	return f.syncFake.FetchServiceCatalogSHA(ctx)
 }

@@ -162,13 +162,20 @@ func (f *reconcileFake) TeardownPreviewWithRetry(
 	if f.teardownErr != nil {
 		return nil, f.teardownErr
 	}
-	if res, ok := f.teardownBySlug[slug]; ok {
-		return res, nil
+	res, ok := f.teardownBySlug[slug]
+	if !ok {
+		res = f.teardown
 	}
-	if f.teardown == nil {
+	if res == nil {
 		return &gitops.TeardownResult{}, nil
 	}
-	return f.teardown, nil
+	if len(res.Removed) == 0 || res.Deleted {
+		return res, nil
+	}
+	// Like the client, an update carries the catalog it was projected on.
+	withCatalog := *res
+	withCatalog.Catalog, _ = gitops.ParseCatalog([]byte(reconcileServices))
+	return &withCatalog, nil
 }
 
 func (f *reconcileFake) UpsertPRComment(_ context.Context, _, _ string, _ int, body string) error {

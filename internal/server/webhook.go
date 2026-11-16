@@ -167,12 +167,6 @@ func (s *Server) handlePullRequest(ctx context.Context, e *gh.PullRequestEvent) 
 // repo's default branch that did not delete it. Any other push is ignored.
 func (s *Server) handlePush(ctx context.Context, e *gh.PushEvent) {
 	repo := e.GetRepo().GetFullName()
-	slog.InfoContext(ctx, "webhook push", //nolint:sloglint // server has no scoped logger yet
-		slog.String("repo", repo),
-		slog.String("ref", e.GetRef()),
-		slog.String("after", e.GetAfter()),
-		slog.Bool("deleted", e.GetDeleted()),
-	)
 	reason := ""
 	switch {
 	case !strings.EqualFold(repo, s.gitops.FullName()):
@@ -182,28 +176,31 @@ func (s *Server) handlePush(ctx context.Context, e *gh.PushEvent) {
 	case e.GetDeleted():
 		reason = "branch deleted"
 	}
-	if reason != "" {
-		slog.InfoContext(ctx, "config sync skipped", //nolint:sloglint // server has no scoped logger yet
-			slog.String("trigger", lifecycle.TriggerPush),
-			slog.String("repo", repo),
-			slog.String("ref", e.GetRef()),
-			slog.String("reason", reason),
-		)
-		return
+	attrs := []any{
+		slog.String("repo", repo),
+		slog.String("ref", e.GetRef()),
+		slog.String("after", e.GetAfter()),
+		slog.Bool("deleted", e.GetDeleted()),
 	}
-	s.startPushSync(ctx)
+	if reason != "" {
+		attrs = append(attrs, slog.String("reason", reason))
+	}
+	slog.InfoContext(ctx, "webhook push", attrs...)
+	if reason == "" {
+		s.startPushSync(ctx)
+	}
 }
 
 // startPushSync runs the push config sync in the background, tracked for
 // WaitBackground. It does not take s.jobs: the syncer's guard serializes it
-// with the other config syncs, and caps it at s.syncTimeout from when it holds
+// with the other config syncs, and caps it at syncTimeout from when it holds
 // the guard. Its context is detached from ctx's cancellation.
 func (s *Server) startPushSync(ctx context.Context) {
 	sctx := context.WithoutCancel(ctx)
 	s.Go(func() {
 		defer func() {
 			if rec := recover(); rec != nil {
-				slog.ErrorContext(sctx, "config sync panicked", //nolint:sloglint // server has no scoped logger yet
+				slog.ErrorContext(sctx, "config sync panicked",
 					slog.String("trigger", lifecycle.TriggerPush),
 					slog.Any("panic", rec),
 				)

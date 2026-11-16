@@ -32,11 +32,8 @@ func TestMetrics_Counters(t *testing.T) {
 	m.Teardown("webhook", "unpinned")
 	m.Teardown("sweep", "noop")
 	m.SweepRun(false, time.Unix(1, 0))
-	m.SweepSynced()
-	m.SweepSynced()
-	m.ConfigSync("push", "ok")
-	m.ConfigSync("api", "error")
-	m.ConfigSync("api", "error")
+	m.PreviewSynced()
+	m.PreviewSynced()
 
 	assertGathered(t, m, `
 # HELP badil_webhook_deliveries_total GitHub webhook deliveries, by verified event and HTTP status.
@@ -58,21 +55,16 @@ badil_teardowns_total{result="noop",trigger="sweep"} 1
 # HELP badil_sweep_runs_total In-server cleanup sweep runs, by result.
 # TYPE badil_sweep_runs_total counter
 badil_sweep_runs_total{result="error"} 1
-# HELP badil_sweep_previews_synced_total Previews rewritten by a sweep to match badil.yaml.
-# TYPE badil_sweep_previews_synced_total counter
-badil_sweep_previews_synced_total 2
-# HELP badil_config_syncs_total Syncs of every preview, or one, with badil.yaml outside the sweep, by trigger and result.
-# TYPE badil_config_syncs_total counter
-badil_config_syncs_total{result="ok",trigger="push"} 1
-badil_config_syncs_total{result="error",trigger="api"} 2
+# HELP badil_previews_synced_total Previews rewritten to match badil.yaml, by a sweep, a push or /v1/sync.
+# TYPE badil_previews_synced_total counter
+badil_previews_synced_total 2
 `,
 		"badil_webhook_deliveries_total",
 		"badil_reconciles_total",
 		"badil_reconcile_skips_total",
 		"badil_teardowns_total",
 		"badil_sweep_runs_total",
-		"badil_sweep_previews_synced_total",
-		"badil_config_syncs_total",
+		"badil_previews_synced_total",
 	)
 	if got := testutil.ToFloat64(m.SweepLastSuccessGauge()); got != 0 {
 		t.Errorf("sweep last success = %v, want 0", got)
@@ -231,8 +223,7 @@ func TestMetrics_NilIsSafe(t *testing.T) {
 	m.PreviewsListed(3)
 	m.PreviewCreated()
 	m.SweepDeleted("ttl")
-	m.SweepSynced()
-	m.ConfigSync("push", "ok")
+	m.PreviewSynced()
 	m.GitopsOp("write", "ok", time.Second)
 	m.SweepRun(true, time.Now())
 	m.SpinUp("backend-1", time.Minute)

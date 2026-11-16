@@ -6,7 +6,7 @@ Requires Argo CD 3.1 or later (OCI chart source).
 
 ## Gitops repo contract
 
-- [`badil.yaml`](badil.yaml) at the repo root, read by badil only and the only preview config: the service catalog (each service's `repo` and optional `branch`, `imageTag` and `chart`), the optional root `imageTag` and `namespace`, and the optional `preview` block. The copy here lists the demo services.
+- [`badil.yaml`](badil.yaml) at the repo root, read by badil only and the only preview config: the service catalog (each service's `repo` and optional `branch`, `imageTag`, `chart` and `needs`), the optional root `imageTag` and `namespace`, the optional `dependencies` (upstream charts, each with optional `needs`) and the optional `preview` block. The copy here lists the demo services.
 - badil writes `previews/<slug>/values.yaml`, one per preview, with the services it runs, their chart settings, image tags and PR metadata, and the namespace metadata. Sample: [`values.golden.yaml`](../../internal/preview/testdata/values.golden.yaml).
 - The ApplicationSet renders `preview-env` with `previews/<slug>/values.yaml` as its only value file.
 
@@ -19,8 +19,6 @@ Requires Argo CD 3.1 or later (OCI chart source).
 ## Preview URLs
 
 To give each preview its own URL, uncomment the `preview` block in `badil.yaml` and set `domain`, then create a wildcard DNS record for `*.<domain>` pointing at your ingress controller. Each service listed under `expose` gets the ingress host `<service>-<slug>.<domain>` (capped to a 63-character label, see ARCHITECTURE) and a link in the PR comment; its chart must enable ingress and honor `app.ingress.host` (or its `chart.hostParam`). This needs `preview-env` 0.3.0 or later and badil 0.10.0 or later: after changing the chart version (`targetRevision`) in `applicationset-previews.yaml`, re-apply it with `kubectl apply -f applicationset-previews.yaml`, as Argo CD does not manage the ApplicationSet itself.
-
-Per-service settings go in `services.<name>` of `badil.yaml`: `branch`, `imageTag` and `chart` (`path`, `imageTagParam`, `hostParam`, `valueFiles`). The image tag format CI uses goes in the root `imageTag`.
 
 Preview Namespace labels and annotations go in `namespace` of `badil.yaml`. For per-preview limits on top of them, see the Kyverno example in [`../kyverno/`](../kyverno/README.md).
 

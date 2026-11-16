@@ -37,6 +37,7 @@ const (
 type ReconcileAPI interface {
 	DeployAPI
 	TeardownAPI
+	FetchServiceCatalog(ctx context.Context) (*gitops.ServiceCatalog, error)
 	GetPullRequest(ctx context.Context, owner, repo string, number int) (*gitops.PullRequest, error)
 	GetPreview(ctx context.Context, slug string) (*preview.PreviewValues, string, error)
 	ListPreviews(ctx context.Context) ([]string, error)

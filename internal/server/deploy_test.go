@@ -256,9 +256,9 @@ preview:
 func previewWriteResult() *gitops.WriteResult {
 	return &gitops.WriteResult{
 		Values: preview.PreviewValues{Services: []preview.ServiceEntry{
-			{Name: "backend-1", CommitSha: "abc1234567890"},
-			{Name: "backend-2"},
-			{Name: "front"},
+			{Name: "backend-1", Branch: "main", CommitSha: "abc1234567890"},
+			{Name: "backend-2", Branch: "main"},
+			{Name: "front", Branch: "main"},
 		}},
 		CommitURL:     "https://github.com/acme/gitops/commit/deadbeef",
 		CommitMessage: "chore(preview): update backend-1 in feature-pricing",
@@ -301,8 +301,7 @@ func TestDeploy_ArgoCDLinkInSummary(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	const want = "\n🔎 [All apps in Argo CD]" +
-		"(https://argocd.example.com/applications?labels=app.kubernetes.io%2Finstance%3Dfeature-pricing)\n\n---\n"
+	want := preview.ArgoCDAppsURL("https://argocd.example.com", "feature-pricing")
 	if !strings.Contains(fg.capturedSummary, want) {
 		t.Errorf("summary missing %q, got:\n%s", want, fg.capturedSummary)
 	}

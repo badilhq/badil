@@ -46,7 +46,6 @@ type gitopsAPI interface {
 	GetPullRequest(ctx context.Context, owner, repo string, number int) (*gitops.PullRequest, error)
 	FetchServiceCatalogSHA(ctx context.Context) (*gitops.ServiceCatalog, string, error)
 	SyncPreviewWithRetry(ctx context.Context, slug string, catalog *gitops.ServiceCatalog) (*gitops.SyncResult, error)
-	// FullName returns the gitops repo as owner/repo.
 	FullName() string
 }
 

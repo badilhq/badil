@@ -1,7 +1,6 @@
 package preview
 
 import (
-	"cmp"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -34,20 +33,19 @@ const pinnedImageNote = "> ⏳ A pinned service starts once CI has pushed the im
 // dependency follows, with its chart name and version and the link to its
 // written host, if any. When excluded is not empty, a line after the lists
 // names the catalog services and dependencies left out of the preview
-// (Catalog.Excluded). When at least one service is pinned, a note follows
+// (Projection.Excluded). When at least one service is pinned, a note follows
 // saying a pinned service starts once CI has pushed its image. When argocdURL
 // (the catalog's preview.argocdURL) is set, a line links to the Argo CD
 // application list filtered on the preview (ArgoCDAppsURL). The trailing line
 // links to the gitops commit that recorded the change.
 func BuildSummary(
-	slug string, values PreviewValues, urls URLConfig, argocdURL string, branches map[string]string,
-	commitMessage, commitURL string, excluded ...string,
+	slug string, values PreviewValues, urls URLConfig, argocdURL string, excluded []string,
+	commitMessage, commitURL string,
 ) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## 🚀 Preview: `%s`\n\n", slug)
 	pinned := false
 	for _, svc := range values.Services {
-		branch := cmp.Or(branches[svc.Name], "main")
 		sha := svc.CommitSha
 		var prURL, prNumber string
 		if svc.Metadata != nil {
@@ -55,10 +53,7 @@ func BuildSummary(
 		}
 		if sha != "" {
 			pinned = true
-			shaShort := sha
-			if len(shaShort) >= 8 {
-				shaShort = shaShort[:8]
-			}
+			shaShort := shortSHA(sha, shortSHALen8)
 			cURL := deriveCommitURL(prURL, sha)
 			commitPart := "📌 `" + shaShort + "`"
 			if cURL != "" {
@@ -70,7 +65,7 @@ func BuildSummary(
 			}
 			fmt.Fprintf(&b, "- **%s** · %s%s", svc.Name, commitPart, prPart)
 		} else {
-			fmt.Fprintf(&b, "- **%s** · 🔄 `%s`", svc.Name, branch)
+			fmt.Fprintf(&b, "- **%s** · 🔄 `%s`", svc.Name, svc.Branch)
 		}
 		if text, url, ok := urls.Link(svc.Name, svc.Host); ok {
 			fmt.Fprintf(&b, " · [%s](%s)", text, url)

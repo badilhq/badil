@@ -6,13 +6,10 @@ package preview
 // service and dependency in the transitive needs of the pinned catalog
 // services. A kept pinned entry of a removed service has no needs. Cycles are
 // followed once. It returns nil when c declares no needs: every part runs.
-func (c Catalog) included(services []ServiceEntry) map[string]bool {
+// inCatalog holds the names of c.Services.
+func (c Catalog) included(services []ServiceEntry, inCatalog map[string]bool) map[string]bool {
 	if len(c.Needs) == 0 {
 		return nil
-	}
-	inCatalog := make(map[string]bool, len(c.Services))
-	for _, name := range c.Services {
-		inCatalog[name] = true
 	}
 	in := make(map[string]bool)
 	visited := make(map[string]bool)
@@ -41,15 +38,9 @@ func (c Catalog) included(services []ServiceEntry) map[string]bool {
 	return in
 }
 
-// Excluded returns the catalog services then the catalog dependencies, in
-// badil.yaml order, that the preview file vals leaves out because no pinned
-// service needs them, directly or transitively. It returns nil when c
-// declares no needs or every part runs.
-func (c Catalog) Excluded(vals PreviewValues) []string {
-	in := c.included(vals.Services)
-	if in == nil {
-		return nil
-	}
+// excluded returns the catalog services then the catalog dependencies, in
+// badil.yaml order, not in in, the included parts; nil when every part runs.
+func (c Catalog) excluded(in map[string]bool) []string {
 	var out []string
 	for _, name := range c.Services {
 		if !in[name] {

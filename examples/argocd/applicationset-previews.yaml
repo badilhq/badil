@@ -24,7 +24,7 @@ spec:
           targetRevision: HEAD
           ref: values
         - repoURL: oci://ghcr.io/badilhq/charts/preview-env
-          targetRevision: 0.12.0
+          targetRevision: 0.12.1
           path: "."
           helm:
             releaseName: "{{ .path.basename }}"

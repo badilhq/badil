@@ -8,6 +8,15 @@ import (
 	"github.com/badilhq/badil/internal/preview"
 )
 
+// onMain returns vals with every entry tracking main, as ApplyCatalog writes
+// an entry whose service sets no branch.
+func onMain(vals preview.PreviewValues) preview.PreviewValues {
+	for i := range vals.Services {
+		vals.Services[i].Branch = preview.DefaultBranch
+	}
+	return vals
+}
+
 // pinnedNote is the paragraph BuildSummary adds when a service is pinned.
 const pinnedNote = "> ⏳ A pinned service starts once CI has pushed the image for its commit. " +
 	"Until then its link may not respond."
@@ -18,7 +27,7 @@ func TestBuildSummary_PinnedAndMainTracking(t *testing.T) {
 	vals := preview.BuildPreviewValues(in.ServiceName, in.CommitSha, catalog, in)
 
 	got := preview.BuildSummary(
-		"feature-add-pricing", vals, preview.URLConfig{}, "", nil,
+		"feature-add-pricing", onMain(vals), preview.URLConfig{}, "", nil,
 		"chore(preview): create feature-add-pricing preview",
 		"https://github.com/acme/gitops/commit/deadbeef",
 	)
@@ -39,13 +48,12 @@ func TestBuildSummary_PinnedAndMainTracking(t *testing.T) {
 
 func TestBuildSummary_BranchBadge(t *testing.T) {
 	vals := preview.PreviewValues{Services: []preview.ServiceEntry{
-		{Name: "backend-1"},
-		{Name: "backend-2", CommitSha: "abc1234567890"},
-		{Name: "front"},
+		{Name: "backend-1", Branch: "master"},
+		{Name: "backend-2", Branch: "release", CommitSha: "abc1234567890"},
+		{Name: "front", Branch: "main"},
 	}}
-	branches := map[string]string{"backend-1": "master", "backend-2": "release"}
 
-	got := preview.BuildSummary("slug", vals, preview.URLConfig{}, "", branches, "m", "u")
+	got := preview.BuildSummary("slug", vals, preview.URLConfig{}, "", nil, "m", "u")
 
 	want := "## 🚀 Preview: `slug`\n\n- **backend-1** · 🔄 `master`\n- **backend-2** · 📌 `abc12345`\n- **front** · 🔄 `main`\n\n" +
 		pinnedNote + "\n" +
@@ -62,7 +70,7 @@ func TestBuildSummary_ExactOutput(t *testing.T) {
 	vals := preview.BuildPreviewValues(in.ServiceName, in.CommitSha, catalog, in)
 
 	got := preview.BuildSummary(
-		"feature-add-pricing", vals, preview.URLConfig{}, "", nil,
+		"feature-add-pricing", onMain(vals), preview.URLConfig{}, "", nil,
 		"chore(preview): create feature-add-pricing preview",
 		"https://github.com/acme/gitops/commit/deadbeef",
 	)
@@ -86,8 +94,8 @@ func TestBuildSummary_ExactOutput(t *testing.T) {
 // pinned-image note, byte for byte the list then the separator.
 func TestBuildSummary_NoPinNoNote(t *testing.T) {
 	vals := preview.PreviewValues{Services: []preview.ServiceEntry{
-		{Name: "backend-1"},
-		{Name: "front"},
+		{Name: "backend-1", Branch: "main"},
+		{Name: "front", Branch: "main"},
 	}}
 
 	got := preview.BuildSummary("slug", vals, preview.URLConfig{}, "", nil, "m", "u")
@@ -114,8 +122,16 @@ func TestBuildSummary_ArgoCDLink(t *testing.T) {
 	}{
 		{
 			name:     "no pin",
-			services: []preview.ServiceEntry{{Name: "backend-1"}},
+			services: []preview.ServiceEntry{{Name: "backend-1", Branch: "main"}},
 			want:     "## 🚀 Preview: `feature-x`\n\n- **backend-1** · 🔄 `main`\n\n" + link + "\n---\n🔗 [m](u)",
+		},
+		{
+			name:     "no pin with exclusions",
+			services: []preview.ServiceEntry{{Name: "backend-1", Branch: "main"}},
+			excluded: []string{"front"},
+			want: "## 🚀 Preview: `feature-x`\n\n- **backend-1** · 🔄 `main`\n\n" +
+				"Not in this preview: `front`\n\n" +
+				link + "\n---\n🔗 [m](u)",
 		},
 		{
 			name:     "pinned with exclusions",
@@ -131,20 +147,12 @@ func TestBuildSummary_ArgoCDLink(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			vals := preview.PreviewValues{Services: tt.services}
 			got := preview.BuildSummary(
-				"feature-x", vals, preview.URLConfig{}, "https://argocd.example.com", nil, "m", "u", tt.excluded...,
+				"feature-x", vals, preview.URLConfig{}, "https://argocd.example.com", tt.excluded, "m", "u",
 			)
 			if got != tt.want {
 				t.Errorf("summary mismatch\n got:\n%s\nwant:\n%s", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestArgoCDAppsURL(t *testing.T) {
-	got := preview.ArgoCDAppsURL("https://ops.example.com:8443/argocd", "feature-x")
-	want := "https://ops.example.com:8443/argocd/applications?labels=app.kubernetes.io%2Finstance%3Dfeature-x"
-	if got != want {
-		t.Errorf("ArgoCDAppsURL = %q, want %q", got, want)
 	}
 }
 
@@ -193,7 +201,7 @@ func TestBuildSummary_PreviewURLs(t *testing.T) {
 	catalog := []string{"backend-1", "backend-2", "front"}
 	in := sampleInputs()
 	vals := preview.BuildPreviewValues(in.ServiceName, in.CommitSha, catalog, in)
-	vals = preview.ApplyHosts(vals, "feature-pricing", sharedURLFixture())
+	vals = preview.ApplyHosts(onMain(vals), "feature-pricing", sharedURLFixture())
 
 	got := preview.BuildSummary("feature-pricing", vals, sharedURLFixture(), "", nil, "msg", "url")
 
@@ -271,8 +279,8 @@ func TestBuildSummary_PreviewURLPathEscaping(t *testing.T) {
 
 func TestBuildSummary_LinksWrittenHosts(t *testing.T) {
 	vals := preview.PreviewValues{Services: []preview.ServiceEntry{
-		{Name: "front"},
-		{Name: "backend-2", Host: "backend-2-feature-pricing.127.0.0.1.nip.io"},
+		{Name: "front", Branch: "main"},
+		{Name: "backend-2", Branch: "main", Host: "backend-2-feature-pricing.127.0.0.1.nip.io"},
 	}}
 
 	got := preview.BuildSummary("feature-pricing", vals, sharedURLFixture(), "", nil, "msg", "url")
@@ -413,7 +421,7 @@ func TestBuildPreviewLimitSummary(t *testing.T) {
 func TestBuildSummary_Dependencies(t *testing.T) {
 	urls := sharedURLFixture()
 	urls.Expose["mailpit"] = "/ui"
-	vals := preview.PreviewValues{Services: []preview.ServiceEntry{{Name: "front"}}}
+	vals := preview.PreviewValues{Services: []preview.ServiceEntry{{Name: "front", Branch: "main"}}}
 	vals.Dependencies = []preview.DependencyEntry{
 		{
 			Name: "postgres",

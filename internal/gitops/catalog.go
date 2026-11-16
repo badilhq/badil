@@ -15,20 +15,18 @@ import (
 	"github.com/badilhq/badil/internal/preview"
 )
 
-// ServiceCatalog is the parsed badil.yaml of the gitops repo.
+// ServiceCatalog is the parsed badil.yaml of the gitops repo. Its Catalog
+// holds the services and dependencies, in file order, and their settings;
+// GitopsRepoURL is left empty, set by the client when it projects a preview
+// file. A map or slice of it is nil when no entry sets it.
 type ServiceCatalog struct {
-	// Services lists the keys of services, in file order.
-	Services []string
+	preview.Catalog
+
 	// URLs is the validated `preview` block; its zero value means off.
 	URLs preview.URLConfig
 	// Label is the pull request label that requests a preview (preview.label,
 	// default "preview"). GitHub label names compare case-insensitively.
 	Label string
-	// Repos maps each service to its git URL, as written in services.<name>.repo.
-	Repos map[string]string
-	// Branches maps each service whose entry sets branch to that branch; a
-	// service without one uses main. It is nil when no entry sets one.
-	Branches map[string]string
 	// MaxPreviews is preview.maxPreviews, the most previews that may exist
 	// before a deploy that would create a new one is refused. 0 means no cap.
 	MaxPreviews int
@@ -36,50 +34,6 @@ type ServiceCatalog struct {
 	// a trailing slash. When set, the preview summary links the preview's
 	// Applications in Argo CD. It is empty when absent.
 	ArgoCDURL string
-	// ImageTag is the root imageTag: the image tag format of every service
-	// whose entry sets none (preview.DefaultImageTag when absent).
-	ImageTag string
-	// ImageTags maps each service whose entry sets imageTag to that format.
-	// It is nil when no entry sets one.
-	ImageTags map[string]string
-	// Charts maps each service whose entry sets chart to its settings as
-	// written: an absent key is empty and takes its default when projected.
-	// It is nil when no entry sets one.
-	Charts map[string]preview.ChartSettings
-	// Namespace is the root namespace block: the extra labels and annotations
-	// of the preview Namespace. It is nil when absent or empty.
-	Namespace *preview.NamespaceMetadata
-	// Dependencies are the upstream charts of the dependencies mapping, in
-	// file order, with no host. It is nil when the mapping is absent or empty.
-	Dependencies []preview.DependencyEntry
-	// Needs maps each service or dependency whose entry sets needs to the
-	// services and dependencies it lists, in order. It is nil when no entry
-	// sets needs: a preview then runs every service and dependency.
-	Needs map[string][]string
-}
-
-// previewCatalog returns c as the catalog preview.ApplyCatalog projects a
-// preview file on, with gitopsRepoURL as the gitops repo URL.
-func (c *ServiceCatalog) previewCatalog(gitopsRepoURL string) preview.Catalog {
-	return preview.Catalog{
-		Services:      c.Services,
-		Repos:         c.Repos,
-		Branches:      c.Branches,
-		ImageTag:      c.ImageTag,
-		ImageTags:     c.ImageTags,
-		Charts:        c.Charts,
-		Namespace:     c.Namespace,
-		Dependencies:  c.Dependencies,
-		Needs:         c.Needs,
-		GitopsRepoURL: gitopsRepoURL,
-	}
-}
-
-// Excluded returns the services then the dependencies of c, in badil.yaml
-// order, that the preview file vals leaves out because no pinned service needs
-// them (preview.Catalog.Excluded). It is nil when no entry sets needs.
-func (c *ServiceCatalog) Excluded(vals preview.PreviewValues) []string {
-	return c.previewCatalog("").Excluded(vals)
 }
 
 // DefaultLabel is the preview label when preview.label is absent.
@@ -267,7 +221,7 @@ func ParseCatalog(raw []byte) (*ServiceCatalog, error) {
 
 // parseDocument validates the decoded badil.yaml and returns its catalog.
 func parseDocument(doc *badilFile) (*ServiceCatalog, error) {
-	c := &ServiceCatalog{Label: DefaultLabel, ImageTag: preview.DefaultImageTag}
+	c := &ServiceCatalog{Label: DefaultLabel}
 	if err := parseServiceEntries(&doc.Services, c); err != nil {
 		return nil, err
 	}
@@ -331,12 +285,8 @@ func parseServiceEntries(n *yaml.Node, c *ServiceCatalog) error {
 	}
 	c.Services = make([]string, 0, len(n.Content)/pairStride)
 	c.Repos = make(map[string]string, len(n.Content)/pairStride)
-	for i := 0; i+1 < len(n.Content); i += pairStride {
-		name := n.Content[i].Value
-		if _, dup := c.Repos[name]; dup {
-			return fmt.Errorf("services.%s is defined more than once", name)
-		}
-		spec, err := serviceEntry(name, resolveAlias(n.Content[i+1]))
+	return eachKey("services", n, func(name string, val *yaml.Node) error {
+		spec, err := serviceEntry(name, val)
 		if err != nil {
 			return err
 		}
@@ -354,8 +304,8 @@ func parseServiceEntries(n *yaml.Node, c *ServiceCatalog) error {
 		if spec.needs != nil {
 			c.Needs = setKey(c.Needs, name, spec.needs)
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 // setKey sets m[key] to v, allocating m when nil, and returns m.
@@ -555,7 +505,6 @@ func parseNamespace(n *yaml.Node) (preview.NamespaceMetadata, error) {
 // parseStringMap validates a mapping of non-empty string keys to string
 // values, at path, none of whose keys is in reserved.
 func parseStringMap(path string, n *yaml.Node, reserved []string) (map[string]string, error) {
-	n = resolveAlias(n)
 	if n.Kind != yaml.MappingNode {
 		return nil, fmt.Errorf("%s must be a mapping", path)
 	}
@@ -738,16 +687,27 @@ func dependencyEntry(name string, n *yaml.Node) (preview.DependencyEntry, []stri
 			return preview.DependencyEntry{}, nil, fmt.Errorf(
 				"%s: 'repo' must be absent when 'chart' is an %s reference", prefix, preview.OCIScheme)
 		}
+		if !hasHost(chart, "oci") {
+			return preview.DependencyEntry{}, nil, fmt.Errorf(
+				"%s.chart must be an %s reference with a host", prefix, preview.OCIScheme)
+		}
 		dep.Chart.RepoURL = chart
 	case !hasRepo:
 		return preview.DependencyEntry{}, nil, fmt.Errorf(
 			"%s: missing 'repo' ('chart' is not an %s reference)", prefix, preview.OCIScheme)
-	case !strings.HasPrefix(repo, "https://"):
+	case !hasHost(repo, "https"):
 		return preview.DependencyEntry{}, nil, fmt.Errorf("%s.repo must be an https:// Helm repository URL", prefix)
 	default:
 		dep.Chart.RepoURL, dep.Chart.Name = repo, chart
 	}
 	return dep, needs, nil
+}
+
+// hasHost reports whether raw starts with scheme:// and parses as a URL with
+// a host.
+func hasHost(raw, scheme string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && strings.HasPrefix(raw, scheme+"://") && u.Host != ""
 }
 
 // parseValues validates a dependency's values, at path: a mapping, returned
@@ -783,9 +743,6 @@ func timestampsAsStrings(n *yaml.Node) {
 // checkExposedDependencies rejects a dependency named in preview.expose
 // without a hostParam: no Helm parameter is known to set its host.
 func checkExposedDependencies(c *ServiceCatalog) error {
-	if !c.URLs.Enabled() {
-		return nil
-	}
 	for _, dep := range c.Dependencies {
 		if _, exposed := c.URLs.Expose[dep.Name]; exposed && dep.HostParam == "" {
 			return fmt.Errorf("dependencies.%s: missing 'hostParam' (required when preview.expose.%s is set)",

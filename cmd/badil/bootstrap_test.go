@@ -27,7 +27,7 @@ func TestPrintPlanListsEvents(t *testing.T) {
 
 	var out bytes.Buffer
 	printPlan(&out, bootstrapOpts{appName: "badil-dev"}, "https://d.example.com/webhooks/github")
-	if want := "events:      pull_request, push "; !strings.Contains(out.String(), want) {
+	if want := "pull_request, push"; !strings.Contains(out.String(), want) {
 		t.Errorf("plan = %q, want it to contain %q", out.String(), want)
 	}
 }

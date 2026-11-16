@@ -37,8 +37,8 @@ type Recorder interface {
 	SweepListed(n int)
 	// SweepDeleted records one preview deleted by a sweep rule.
 	SweepDeleted(rule string)
-	// SweepSynced records one preview a sweep rewrote to match badil.yaml.
-	SweepSynced()
+	// PreviewSynced records one preview rewritten to match badil.yaml.
+	PreviewSynced()
 }
 
 // TeardownAPI is the subset of gitops.Client used by TeardownPR, plus the
@@ -51,7 +51,6 @@ type TeardownAPI interface {
 		prNumber int,
 	) (*gitops.TeardownResult, error)
 	UpsertPRComment(ctx context.Context, owner, repo string, prNumber int, body string) error
-	FetchServiceCatalog(ctx context.Context) (*gitops.ServiceCatalog, error)
 	FanOutPRComments(ctx context.Context, vals preview.PreviewValues, body string) error
 }
 
@@ -130,15 +129,9 @@ func teardown(ctx context.Context, api TeardownAPI, tt Target, reason, trigger s
 		return true
 	}
 
-	catalog, err := api.FetchServiceCatalog(ctx)
-	if err != nil {
-		teardownCommentFailed(ctx, tt, err)
-		return true
-	}
 	summary := preview.BuildSummary(
-		tt.Slug, result.Values, catalog.URLs, catalog.ArgoCDURL, catalog.Branches,
+		tt.Slug, result.Values, result.Catalog.URLs, result.Catalog.ArgoCDURL, result.Excluded,
 		result.CommitMessage, result.CommitURL,
-		catalog.Excluded(result.Values)...,
 	)
 	if fanErr := api.FanOutPRComments(ctx, result.Values, summary); fanErr != nil {
 		teardownCommentFailed(ctx, tt, fanErr)
@@ -146,8 +139,8 @@ func teardown(ctx context.Context, api TeardownAPI, tt Target, reason, trigger s
 	return true
 }
 
-// teardownCommentFailed logs a comment or catalog failure after a successful
-// teardown write.
+// teardownCommentFailed logs a comment failure after a successful teardown
+// write.
 func teardownCommentFailed(ctx context.Context, tt Target, err error) {
 	slog.WarnContext(ctx, "preview teardown comment failed",
 		slog.String("slug", tt.Slug),

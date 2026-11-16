@@ -38,10 +38,8 @@ services:
 
 # Upstream charts deployed in every preview (optional), in this order, each as
 # an Argo CD Application created before the services. Never pinned, no image
-# tag. A name must not be a service name. The chart may render only namespaced
-# resources in the preview namespace: the per-preview AppProject refuses
-# cluster-scoped kinds (ClusterRole, CRD) and other namespaces. A private
-# registry or repository needs an Argo CD repository credential.
+# tag. A name must not be a service name. The chart limits and private
+# registries: docs/ARCHITECTURE.md#dependencies.
 # dependencies:
 #   postgres:
 #     chart: oci://registry-1.docker.io/bitnamicharts/postgresql   # an oci:// chart reference: no repo

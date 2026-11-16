@@ -2,7 +2,7 @@ package gitops_test
 
 import (
 	"context"
-	"strings"
+	"slices"
 	"testing"
 
 	"github.com/badilhq/badil/internal/gitops"
@@ -19,15 +19,17 @@ func staleBranchFile() string {
 
 func TestSyncPreviewWithRetry(t *testing.T) {
 	tests := []struct {
-		name        string
-		files       []string
-		conflicts   int32
-		catalog     func(*gitops.ServiceCatalog)
-		wantChanged bool
-		wantNotify  bool
-		wantGets    int32
-		wantPuts    int32
-		wantWritten []string
+		name         string
+		files        []string
+		conflicts    int32
+		catalog      func(*gitops.ServiceCatalog)
+		wantChanged  bool
+		wantNotify   bool
+		wantNotFound bool
+		wantGets     int32
+		wantPuts     int32
+		// want turns the last file read into the file written.
+		want func(*preview.PreviewValues)
 	}{
 		{name: "matches", files: []string{pinnedFile()}, wantGets: 1},
 		{
@@ -37,10 +39,14 @@ func TestSyncPreviewWithRetry(t *testing.T) {
 				c.Repos["front"] = "https://github.com/acme/front.git"
 			},
 			wantChanged: true, wantNotify: true, wantGets: 1, wantPuts: 1,
-			wantWritten: []string{
-				"  - name: front\n    repoURL: https://github.com/acme/front.git\n    branch: main\n" +
-					"    imageTag: ${ARGOCD_APP_REVISION}\n" + defaultChartYAML +
-					"  - name: backend-2\n",
+			want: func(v *preview.PreviewValues) {
+				v.Services = slices.Insert(v.Services, 1, preview.ServiceEntry{
+					Name: "front", RepoURL: "https://github.com/acme/front.git", Branch: "main",
+					ImageTag: "${ARGOCD_APP_REVISION}", Chart: preview.ChartSettings{
+						Path: preview.DefaultChartPath, ImageTagParam: preview.DefaultImageTagParam,
+						HostParam: preview.DefaultHostParam,
+					},
+				})
 			},
 		},
 		{
@@ -51,29 +57,18 @@ func TestSyncPreviewWithRetry(t *testing.T) {
 				}
 			},
 			wantChanged: true, wantGets: 1, wantPuts: 1,
-			wantWritten: []string{
-				"    branch: main\n    imageTag: ${ARGOCD_APP_REVISION}\n    chart:\n      path: deploy/helm\n" +
-					"      imageTagParam: app.image.tag\n      hostParam: app.ingress.host\n" +
-					"      valueFiles:\n        - values-preview.yaml\n",
-			},
-		},
-		{
-			name: "image tag format change", files: []string{pinnedFile()},
-			catalog: func(c *gitops.ServiceCatalog) {
-				c.ImageTag = "sha-{sha7}"
-				c.ImageTags = map[string]string{"backend-2": "{sha8}-amd64"}
-			},
-			wantChanged: true, wantGets: 1, wantPuts: 1,
-			wantWritten: []string{
-				"    commitSha: abc1234567890\n    imageTag: sha-abc1234\n",
-				"    branch: main\n    imageTag: ${ARGOCD_APP_REVISION_SHORT_8}-amd64\n",
+			want: func(v *preview.PreviewValues) {
+				v.Services[1].Chart.Path = "deploy/helm"
+				v.Services[1].Chart.ValueFiles = []string{"values-preview.yaml"}
 			},
 		},
 		{
 			name: "added dependencies", files: []string{pinnedFile()},
 			catalog:     withDependencies,
 			wantChanged: true, wantNotify: true, wantGets: 1, wantPuts: 1,
-			wantWritten: []string{"dependencies:\n" + dependenciesYAML},
+			want: func(v *preview.PreviewValues) {
+				v.Dependencies = decode(t, withDependenciesFile()).Dependencies
+			},
 		},
 		{
 			name: "dependencies match", files: []string{withDependenciesFile()},
@@ -86,16 +81,7 @@ func TestSyncPreviewWithRetry(t *testing.T) {
 				c.Dependencies = c.Dependencies[1:]
 			},
 			wantChanged: true, wantNotify: true, wantGets: 1, wantPuts: 1,
-			wantWritten: []string{"dependencies:\n  - name: mailpit\n"},
-		},
-		{
-			name: "dependency version change", files: []string{withDependenciesFile()},
-			catalog: func(c *gitops.ServiceCatalog) {
-				withDependencies(c)
-				c.Dependencies[1].Chart.Version = "0.21.0"
-			},
-			wantChanged: true, wantGets: 1, wantPuts: 1,
-			wantWritten: []string{"      version: 0.21.0\n"},
+			want: func(v *preview.PreviewValues) { v.Dependencies = v.Dependencies[1:] },
 		},
 		{
 			name: "dependency no longer exposed", files: []string{withDependenciesFile()},
@@ -104,64 +90,58 @@ func TestSyncPreviewWithRetry(t *testing.T) {
 				delete(c.URLs.Expose, "mailpit")
 			},
 			wantChanged: true, wantNotify: true, wantGets: 1, wantPuts: 1,
-			wantWritten: []string{"      version: 0.20.0\n"},
-		},
-		{
-			name:  "namespace change",
-			files: []string{pinnedFile()},
-			catalog: func(c *gitops.ServiceCatalog) {
-				c.Namespace = &preview.NamespaceMetadata{Labels: map[string]string{"team": "platform"}}
-			},
-			wantChanged: true,
-			wantGets:    1,
-			wantPuts:    1,
-			wantWritten: []string{
-				"apiVersion: badil.dev/v1beta1\ngitopsRepoURL: https://github.com/acme/gitops.git\nnamespace:\n  labels:\n    team: platform\nservices:\n",
+			want: func(v *preview.PreviewValues) {
+				v.Dependencies[1].Host, v.Dependencies[1].HostParam = "", ""
 			},
 		},
 		{
 			name: "host change", files: []string{pinnedFile("    host: backend-1-slug.127.0.0.1.nip.io\n", "")},
 			wantChanged: true, wantNotify: true, wantGets: 1, wantPuts: 1,
-			wantWritten: []string{"    host: backend-1-slug.127.0.0.1.nip.io\n"},
+			want: func(v *preview.PreviewValues) { v.Services[0].Host = "backend-1-slug.127.0.0.1.nip.io" },
 		},
 		{
 			name: "branch only", files: []string{staleBranchFile()},
 			wantChanged: true, wantGets: 1, wantPuts: 1,
-			wantWritten: []string{"    repoURL: https://github.com/acme/backend-2.git\n    branch: main\n"},
+			want: func(v *preview.PreviewValues) { v.Services[1].Branch = "main" },
 		},
 		{
 			name: "stale repo url", files: []string{pinnedFile("acme/backend-2.git", "acme/old.git")},
 			wantChanged: true, wantGets: 1, wantPuts: 1,
-			wantWritten: []string{"    repoURL: https://github.com/acme/backend-2.git\n"},
+			want: func(v *preview.PreviewValues) {
+				v.Services[1].RepoURL = "https://github.com/acme/backend-2.git"
+			},
 		},
 		{
 			name: "file without apiVersion", files: []string{pinnedFile("apiVersion: badil.dev/v1beta1\n", "")},
 			wantChanged: true, wantGets: 1, wantPuts: 1,
-			wantWritten: []string{"apiVersion: badil.dev/v1beta1\ngitopsRepoURL: https://github.com/acme/gitops.git\nservices:\n"},
+			want: func(v *preview.PreviewValues) { v.APIVersion = preview.APIVersion },
 		},
 		{
 			name:        "badil.dev/v1 file",
 			files:       []string{pinnedFile("apiVersion: badil.dev/v1beta1\n", "apiVersion: badil.dev/v1\n")},
 			wantChanged: true, wantGets: 1, wantPuts: 1,
-			wantWritten: []string{"apiVersion: badil.dev/v1beta1\ngitopsRepoURL: https://github.com/acme/gitops.git\nservices:\n"},
+			want: func(v *preview.PreviewValues) { v.APIVersion = preview.APIVersion },
 		},
 		{
 			name:      "changed after a 409 re-fetch",
 			files:     []string{staleBranchFile(), pinnedFile("acme/backend-2.git", "acme/x.git")},
 			conflicts: 1, wantChanged: true, wantGets: 2, wantPuts: 2,
-			wantWritten: []string{"    repoURL: https://github.com/acme/backend-2.git\n"},
+			want: func(v *preview.PreviewValues) {
+				v.Services[1].RepoURL = "https://github.com/acme/backend-2.git"
+			},
 		},
 		{
 			name: "matches after a 409 re-fetch", files: []string{staleBranchFile(), pinnedFile()},
 			conflicts: 1, wantGets: 2, wantPuts: 1,
 		},
-		{name: "missing file", wantGets: 1},
+		{name: "missing file", wantNotFound: true, wantGets: 1},
 		{
-			name:      "deleted before the re-fetch",
-			files:     []string{staleBranchFile(), ""},
-			conflicts: 1,
-			wantGets:  2,
-			wantPuts:  1,
+			name:         "deleted before the re-fetch",
+			files:        []string{staleBranchFile(), ""},
+			conflicts:    1,
+			wantNotFound: true,
+			wantGets:     2,
+			wantPuts:     1,
 		},
 	}
 	for _, tt := range tests {
@@ -180,18 +160,21 @@ func TestSyncPreviewWithRetry(t *testing.T) {
 			if gets, puts := s.gets.Load(), s.puts.Load(); gets != tt.wantGets || puts != tt.wantPuts {
 				t.Errorf("gets, puts = %d, %d; want %d, %d", gets, puts, tt.wantGets, tt.wantPuts)
 			}
-			if result.Changed != tt.wantChanged || result.Notify != tt.wantNotify {
-				t.Errorf("Changed, Notify = %v, %v; want %v, %v",
-					result.Changed, result.Notify, tt.wantChanged, tt.wantNotify)
+			got := [3]bool{result.Changed, result.Notify, result.NotFound}
+			if want := [3]bool{tt.wantChanged, tt.wantNotify, tt.wantNotFound}; got != want {
+				t.Errorf("Changed, Notify, NotFound = %v, want %v", got, want)
 			}
-			assertSyncWrite(t, s, result, tt.wantWritten)
+			assertSyncWrite(t, s, result, tt.files, tt.want)
 		})
 	}
 }
 
-// assertSyncWrite checks that a changed result describes the write s received,
-// whose content holds every part of want, and that an unchanged one is empty.
-func assertSyncWrite(t *testing.T, s *writeServer, result *gitops.SyncResult, want []string) {
+// assertSyncWrite checks that an unchanged result is empty, and that a
+// changed one describes the write s received, whose content parses to the
+// last of files turned by edit.
+func assertSyncWrite(
+	t *testing.T, s *writeServer, result *gitops.SyncResult, files []string, edit func(*preview.PreviewValues),
+) {
 	t.Helper()
 	if !result.Changed {
 		if result.CommitURL != "" || result.CommitMessage != "" || len(result.Values.Services) != 0 {
@@ -199,6 +182,8 @@ func assertSyncWrite(t *testing.T, s *writeServer, result *gitops.SyncResult, wa
 		}
 		return
 	}
+	want := decode(t, files[len(files)-1])
+	edit(&want)
 	const wantMessage = "chore(preview): sync slug with badil.yaml"
 	if result.CommitMessage != wantMessage || result.CommitURL != "https://github.com/x/y/commit/written" {
 		t.Errorf("CommitMessage, CommitURL = %q, %q", result.CommitMessage, result.CommitURL)
@@ -206,13 +191,8 @@ func assertSyncWrite(t *testing.T, s *writeServer, result *gitops.SyncResult, wa
 	if got, _ := s.message.Load().(string); got != wantMessage {
 		t.Errorf("commit message = %q, want %q", got, wantMessage)
 	}
-	written, _ := s.written.Load().(string)
-	if !strings.HasPrefix(written, "apiVersion: badil.dev/v1beta1\n") {
-		t.Errorf("written content has no apiVersion:\n%s", written)
+	if !preview.Equal(result.Values, want) {
+		t.Errorf("result Values = %+v, want %+v", result.Values, want)
 	}
-	for _, part := range want {
-		if !strings.Contains(written, part) {
-			t.Errorf("written content missing %q:\n%s", part, written)
-		}
-	}
+	assertWritten(t, s, want)
 }

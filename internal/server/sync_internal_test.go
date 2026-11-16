@@ -55,6 +55,7 @@ func TestSync_All(t *testing.T) {
 		t.Run(body, func(t *testing.T) {
 			fg := syncFake()
 			fg.listed = []string{"a", "b", "c"}
+			fg.previews = previewFiles("a", "b", "c")
 			fg.syncResult = map[string]*gitops.SyncResult{"a": {Changed: true}}
 			fg.syncErr = map[string]error{"c": errors.New("sync boom")}
 			s, m, _ := newPushServer(t, fg)
@@ -63,7 +64,7 @@ func TestSync_All(t *testing.T) {
 				!slices.Equal(resp.Failed, []string{"c"}) {
 				t.Errorf("response = %+v, want a synced, 1 unchanged, c failed", resp)
 			}
-			assertCountedOnce(t, m, `badil_config_syncs_total{result="error",trigger="api"}`)
+			assertCounter(t, m, "badil_previews_synced_total", " 1")
 		})
 	}
 }
@@ -87,7 +88,7 @@ func TestSync_OneSlug(t *testing.T) {
 	if got := fg.synced(); !slices.Equal(got, []string{"b"}) {
 		t.Errorf("synced = %v, want only b", got)
 	}
-	assertCountedOnce(t, m, `badil_config_syncs_total{result="ok",trigger="api"}`)
+	assertCounter(t, m, "badil_previews_synced_total", " 1")
 }
 
 func TestSync_Refused(t *testing.T) {
@@ -96,6 +97,7 @@ func TestSync_Refused(t *testing.T) {
 		status     int
 		wantErr    string
 		catalogErr error
+		listErr    error
 	}{
 		{name: "path slug", body: `{"slug":"../x"}`, status: http.StatusBadRequest, wantErr: "invalid slug"},
 		{name: "empty slug", body: `{"slug":""}`, status: http.StatusBadRequest, wantErr: "invalid slug"},
@@ -110,11 +112,15 @@ func TestSync_Refused(t *testing.T) {
 			name: "badil.yaml unreadable", body: `{}`, status: http.StatusServiceUnavailable,
 			wantErr: "badil.yaml unavailable: catalog boom", catalogErr: errors.New("catalog boom"),
 		},
+		{
+			name: "gitops unauthorized", body: `{}`, status: http.StatusBadGateway,
+			wantErr: "gitops: unauthorized", listErr: gitops.ErrUnauthorized,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			fg := syncFake()
-			fg.catalogErr = tc.catalogErr
+			fg.catalogErr, fg.listErr = tc.catalogErr, tc.listErr
 			fg.started = make(chan string, 4)
 			s, _, _ := newPushServer(t, fg)
 			rec := postSync(t, s, tc.body, "t")

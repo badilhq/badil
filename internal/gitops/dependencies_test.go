@@ -1,10 +1,9 @@
 package gitops_test
 
 import (
-	"bytes"
 	"context"
 	"log/slog"
-	"strings"
+	"maps"
 	"testing"
 
 	"github.com/badilhq/badil/internal/gitops"
@@ -76,27 +75,41 @@ func TestWritePreviewWithRetry_Dependencies(t *testing.T) {
 		t.Fatalf("WritePreviewWithRetry: %v", err)
 	}
 	written, _ := s.written.Load().(string)
-	if !strings.HasPrefix(
-		written,
-		"apiVersion: badil.dev/v1beta1\ngitopsRepoURL: https://github.com/acme/gitops.git\n",
-	) {
-		t.Errorf("written content does not start with apiVersion then gitopsRepoURL:\n%s", written)
+	got := decode(t, written)
+	want := got
+	want.GitopsRepoURL = "https://github.com/acme/gitops.git"
+	want.Dependencies = decode(t, withDependenciesFile()).Dependencies
+	if !preview.Equal(got, want) {
+		t.Errorf("written gitopsRepoURL, dependencies = %q, %+v; want the gitops repo and %+v",
+			got.GitopsRepoURL, got.Dependencies, want.Dependencies)
 	}
-	if !strings.HasSuffix(written, "\ndependencies:\n"+dependenciesYAML) {
-		t.Errorf("written content does not end with the dependencies:\n%s", written)
-	}
-	if len(result.Values.Dependencies) != 2 || result.Values.Dependencies[1].Host != "mailpit-slug.127.0.0.1.nip.io" {
-		t.Errorf("result dependencies = %+v", result.Values.Dependencies)
+	if !preview.Equal(result.Values, got) {
+		t.Errorf("result Values = %+v, want the written %+v", result.Values, got)
 	}
 }
+
+// recordHandler is a slog.Handler keeping every record.
+type recordHandler struct {
+	records []slog.Record
+}
+
+func (h *recordHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *recordHandler) Handle(_ context.Context, r slog.Record) error {
+	h.records = append(h.records, r.Clone())
+	return nil
+}
+
+func (h *recordHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *recordHandler) WithGroup(string) slog.Handler      { return h }
 
 // TestSyncPreviewWithRetry_ShadowedDependency checks that a dependency named
 // like a kept pinned entry of a removed service is left out with a warning,
 // and written once that entry is unpinned.
 func TestSyncPreviewWithRetry_ShadowedDependency(t *testing.T) {
-	var logs bytes.Buffer
+	logs := &recordHandler{}
 	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	slog.SetDefault(slog.New(logs))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
 	// backend-2 is pinned by a PR, then removed from the catalog and declared
@@ -122,9 +135,18 @@ func TestSyncPreviewWithRetry_ShadowedDependency(t *testing.T) {
 	if result.Changed {
 		t.Errorf("Changed = true, want the file kept without the dependency:\n%s", s.written.Load())
 	}
-	if got := logs.String(); !strings.Contains(got, "level=WARN") ||
-		!strings.Contains(got, "slug=slug name=backend-2") {
-		t.Errorf("logs = %q, want a warning naming slug and backend-2", got)
+	if len(logs.records) != 1 {
+		t.Fatalf("logged %d records, want 1 warning", len(logs.records))
+	}
+	r := logs.records[0]
+	attrs := map[string]string{}
+	r.Attrs(func(a slog.Attr) bool {
+		attrs[a.Key] = a.Value.String()
+		return true
+	})
+	if r.Level != slog.LevelWarn || r.Message != "dependency left out: a pinned service has its name" ||
+		!maps.Equal(attrs, map[string]string{"slug": "slug", "name": "backend-2"}) {
+		t.Errorf("record = %v %q %v, want a warning naming slug and backend-2", r.Level, r.Message, attrs)
 	}
 
 	// Once the PR leaves, backend-2 is unpinned: the next sync drops the entry

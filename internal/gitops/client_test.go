@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -17,6 +19,7 @@ import (
 
 	gh "github.com/google/go-github/v71/github"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"gopkg.in/yaml.v3"
 
 	"github.com/badilhq/badil/internal/gitops"
 	"github.com/badilhq/badil/internal/metrics"
@@ -310,7 +313,7 @@ func testCatalog(services ...string) *gitops.ServiceCatalog {
 	for _, name := range services {
 		repos[name] = "https://github.com/acme/" + name + ".git"
 	}
-	return &gitops.ServiceCatalog{Services: services, Repos: repos, URLs: hostURLs()}
+	return &gitops.ServiceCatalog{Catalog: preview.Catalog{Services: services, Repos: repos}, URLs: hostURLs()}
 }
 
 func TestWritePreviewWithRetry_ConflictThenSuccess(t *testing.T) {
@@ -422,16 +425,26 @@ func TestWritePreviewWithRetry_ConflictThenSuccess(t *testing.T) {
 	// The re-fetched file has no apiVersion, repoURL or branch: the retry
 	// write must carry the catalog's facts.
 	written, _ := capturedBody.Load().(string)
-	for _, expect := range []string{
-		"apiVersion: badil.dev/v1beta1\ngitopsRepoURL: https://github.com/acme/gitops.git\nservices:\n",
-		"  - name: backend-1\n    repoURL: https://github.com/acme/backend-1.git\n    branch: main\n",
-		"  - name: backend-2\n    repoURL: https://github.com/acme/backend-2.git\n    branch: develop\n",
-	} {
-		if !strings.Contains(written, expect) {
-			t.Errorf("retry body missing %q:\n%s", expect, written)
-		}
-	}
+	assertCatalogFacts(t, decode(t, written), []string{
+		"backend-1 https://github.com/acme/backend-1.git main",
+		"backend-2 https://github.com/acme/backend-2.git develop",
+	})
 	assertWrittenHosts(t, result.Values, &capturedBody, "slug")
+}
+
+// assertCatalogFacts checks that vals has the apiVersion and gitops repo of
+// testCatalog and, in order, the services of want, each "name repoURL branch".
+func assertCatalogFacts(t *testing.T, vals preview.PreviewValues, want []string) {
+	t.Helper()
+	got := make([]string, 0, len(vals.Services))
+	for _, svc := range vals.Services {
+		got = append(got, svc.Name+" "+svc.RepoURL+" "+svc.Branch)
+	}
+	if vals.APIVersion != preview.APIVersion || vals.GitopsRepoURL != "https://github.com/acme/gitops.git" ||
+		!slices.Equal(got, want) {
+		t.Errorf("apiVersion, gitopsRepoURL, services = %q, %q, %v; want %q, the gitops repo, %v",
+			vals.APIVersion, vals.GitopsRepoURL, got, preview.APIVersion, want)
+	}
 }
 
 // assertWrittenHosts checks that the exposed backend-1 carries its host and
@@ -452,8 +465,8 @@ func assertWrittenHosts(t *testing.T, vals preview.PreviewValues, body *atomic.V
 		}
 	}
 	written, _ := body.Load().(string)
-	if !strings.Contains(written, "    host: "+want+"\n") {
-		t.Errorf("written body missing host %q:\n%s", want, written)
+	if got := decode(t, written); !preview.Equal(got, vals) {
+		t.Errorf("written = %+v, want the returned %+v", got, vals)
 	}
 	if strings.Count(written, "host:") != 1 {
 		t.Errorf("written body has %d hosts, want 1:\n%s", strings.Count(written, "host:"), written)
@@ -517,16 +530,11 @@ func TestWritePreviewWithRetry_FreshCreateUsesCatalog(t *testing.T) {
 		}
 	}
 	written, _ := capturedBody.Load().(string)
-	for _, expect := range []string{
-		"apiVersion: badil.dev/v1beta1\ngitopsRepoURL: https://github.com/acme/gitops.git\nservices:\n",
-		"  - name: backend-1\n    repoURL: https://github.com/acme/backend-1.git\n    branch: main\n",
-		"  - name: backend-2\n    repoURL: https://github.com/acme/backend-2.git\n    branch: develop\n",
-		"  - name: front\n    repoURL: https://github.com/acme/front\n    branch: main\n",
-	} {
-		if !strings.Contains(written, expect) {
-			t.Errorf("written body missing %q:\n%s", expect, written)
-		}
-	}
+	assertCatalogFacts(t, decode(t, written), []string{
+		"backend-1 https://github.com/acme/backend-1.git main",
+		"backend-2 https://github.com/acme/backend-2.git develop",
+		"front https://github.com/acme/front main",
+	})
 	assertWrittenHosts(t, result.Values, &capturedBody, "fresh-slug")
 }
 
@@ -595,6 +603,26 @@ const defaultChartYAML = "    chart:\n" +
 	"      path: k8s/\n" +
 	"      imageTagParam: app.image.tag\n" +
 	"      hostParam: app.ingress.host\n"
+
+// decode returns the preview file content parsed.
+func decode(t *testing.T, content string) preview.PreviewValues {
+	t.Helper()
+	var vals preview.PreviewValues
+	if err := yaml.Unmarshal([]byte(content), &vals); err != nil {
+		t.Fatalf("parse preview file: %v\n%s", err, content)
+	}
+	return vals
+}
+
+// assertWritten fails t unless s received one write whose content parses to
+// want (preview.Equal).
+func assertWritten(t *testing.T, s *writeServer, want preview.PreviewValues) {
+	t.Helper()
+	written, _ := s.written.Load().(string)
+	if got := decode(t, written); !preview.Equal(got, want) {
+		t.Errorf("written = %+v, want %+v", got, want)
+	}
+}
 
 // pinnedFile is previews/slug/values.yaml as a deploy of sampleInputs with
 // hostURLs writes it, except updated-at, which is older. Its replacer
@@ -847,8 +875,12 @@ func TestWritePreviewWithRetry_Created(t *testing.T) {
 			expected := "# HELP badil_previews Previews in the gitops repo: listed at startup, " +
 				"counted on each create and delete by this server, and reset by each in-server cleanup sweep.\n" +
 				"# TYPE badil_previews gauge\nbadil_previews " + want + "\n"
-			if err := testutil.GatherAndCompare(m.Gatherer(), strings.NewReader(expected), "badil_previews"); err != nil {
-				t.Error(err)
+			if cmpErr := testutil.GatherAndCompare(
+				m.Gatherer(),
+				strings.NewReader(expected),
+				"badil_previews",
+			); cmpErr != nil {
+				t.Error(cmpErr)
 			}
 		})
 	}
@@ -944,9 +976,7 @@ func TestWritePreviewWithRetry_FollowsCatalog(t *testing.T) {
 		"      vcs.ref.name: feature/gone\n" +
 		"      cicd.pipeline.run.url: https://github.com/acme/gone-pinned/actions/runs/9\n" +
 		"dependencies: []\n"
-	if got, _ := s.written.Load().(string); got != want {
-		t.Errorf("written content mismatch\n got:\n%s\nwant:\n%s", got, want)
-	}
+	assertWritten(t, s, decode(t, want))
 }
 
 // TestWritePreviewWithRetry_AddsMissingService checks that a deploy to an
@@ -974,12 +1004,16 @@ func TestWritePreviewWithRetry_AddsMissingService(t *testing.T) {
 	if want := []string{"backend-1", "front", "backend-2"}; !slices.Equal(names, want) {
 		t.Errorf("names = %v, want %v", names, want)
 	}
-	got, _ := s.written.Load().(string)
-	if !strings.Contains(got, "      cicd.pipeline.run.url: https://github.com/acme/backend-1/actions/runs/1\n"+
-		"  - name: front\n    repoURL: https://github.com/acme/front.git\n    branch: main\n"+
-		"    imageTag: ${ARGOCD_APP_REVISION}\n"+defaultChartYAML+
-		"  - name: backend-2\n") {
-		t.Errorf("written content missing front between backend-1 and backend-2:\n%s", got)
+	written, _ := s.written.Load().(string)
+	got := decode(t, written)
+	front := preview.ServiceEntry{
+		Name: "front", RepoURL: "https://github.com/acme/front.git", Branch: "main",
+		ImageTag: "${ARGOCD_APP_REVISION}", Chart: preview.ChartSettings{
+			Path: "k8s/", ImageTagParam: "app.image.tag", HostParam: "app.ingress.host",
+		},
+	}
+	if !preview.Equal(got, result.Values) || !reflect.DeepEqual(got.Services[1], front) {
+		t.Errorf("written = %+v, want the returned values, front between backend-1 and backend-2", got)
 	}
 }
 
@@ -1029,15 +1063,33 @@ func TestWritePreviewWithRetry_RendererSettings(t *testing.T) {
 		t.Fatalf("WritePreviewWithRetry: %v", err)
 	}
 	written, _ := s.written.Load().(string)
-	for _, want := range []string{
-		"apiVersion: badil.dev/v1beta1\ngitopsRepoURL: https://github.com/acme/gitops.git\nnamespace:\n  labels:\n    team: platform\nservices:\n",
-		"    commitSha: " + sha + "\n    imageTag: sha-f913b6c\n    chart:\n      path: deploy/helm\n" +
-			"      imageTagParam: image.tag\n      hostParam: app.ingress.host\n" +
-			"      valueFiles:\n        - values-preview.yaml\n",
-		"    branch: main\n    imageTag: sha-${ARGOCD_APP_REVISION_SHORT}\n" + defaultChartYAML,
-	} {
-		if !strings.Contains(written, want) {
-			t.Errorf("written content missing %q:\n%s", want, written)
+	got := decode(t, written)
+	wantNS := preview.NamespaceMetadata{Labels: map[string]string{"team": "platform"}}
+	if got.Namespace == nil || !maps.Equal(got.Namespace.Labels, wantNS.Labels) || len(got.Namespace.Annotations) != 0 {
+		t.Errorf("written namespace = %+v, want %+v", got.Namespace, wantNS)
+	}
+	want := []preview.ServiceEntry{
+		{ImageTag: "sha-f913b6c", Chart: preview.ChartSettings{
+			Path: "deploy/helm", ImageTagParam: "image.tag", HostParam: "app.ingress.host",
+			ValueFiles: []string{"values-preview.yaml"},
+		}},
+		{ImageTag: "sha-${ARGOCD_APP_REVISION_SHORT}", Chart: preview.ChartSettings{
+			Path: "k8s/", ImageTagParam: "app.image.tag", HostParam: "app.ingress.host",
+		}},
+	}
+	if len(got.Services) != len(want) {
+		t.Fatalf("written %d services, want %d", len(got.Services), len(want))
+	}
+	for i, w := range want {
+		if svc := got.Services[i]; svc.ImageTag != w.ImageTag || !reflect.DeepEqual(svc.Chart, w.Chart) {
+			t.Errorf(
+				"%s imageTag, chart = %q, %+v; want %q, %+v",
+				svc.Name,
+				svc.ImageTag,
+				svc.Chart,
+				w.ImageTag,
+				w.Chart,
+			)
 		}
 	}
 }

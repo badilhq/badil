@@ -23,7 +23,7 @@ schema:
 contract-golden:
 	for f in testdata/contract/v1beta1/valid/*.yaml; do \
 		n=$$(basename "$$f" .yaml); \
-		helm template "$$n" charts/preview-env -f "$$f" --set argocdNamespace=argocd \
+		helm template "$$n" charts/preview-env -f "$$f" \
 			> "testdata/contract/v1beta1/preview-env/$$n.golden.yaml" || exit 1; \
 	done
 

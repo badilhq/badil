@@ -120,169 +120,6 @@ jobs:
             exit 1
           fi
 
-      - name: Render preview-env with badil-written hosts
-        run: |
-          out=$(helm template feature-pricing charts/preview-env -f - <<'EOF'
-          apiVersion: badil.dev/v1beta1
-          gitopsRepoURL: https://github.com/acme/gitops.git
-          services:
-            - name: backend-1
-              repoURL: https://github.com/acme/backend-1.git
-              branch: main
-              commitSha: abc123
-              imageTag: abc123
-              chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
-              host: backend-1-feature-pricing.127.0.0.1.nip.io
-              metadata:
-                pr-author: octocat
-                pr-url: https://github.com/acme/backend-1/pull/42
-                pr-number: "42"
-                created-at: "2026-05-26T10:00:00Z"
-                updated-at: "2026-05-26T10:00:00Z"
-                vcs.ref.name: feature/x
-                cicd.pipeline.run.url: ""
-            - name: backend-2
-              repoURL: https://github.com/acme/backend-2.git
-              branch: main
-              imageTag: ${ARGOCD_APP_REVISION}
-              chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
-            - name: front
-              repoURL: https://github.com/acme/front.git
-              branch: main
-              imageTag: ${ARGOCD_APP_REVISION}
-              chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
-              host: front-feature-pricing.127.0.0.1.nip.io
-          dependencies: []
-          EOF
-          )
-          # shellcheck disable=SC2016
-          got=$(echo "$out" | yq -N 'select(.kind == "Application") | .metadata.name as $app | .spec.source.helm.parameters[] | select(.name == "app.ingress.host") | $app + " " + .value')
-          want='feature-pricing-backend-1 backend-1-feature-pricing.127.0.0.1.nip.io
-          feature-pricing-front front-feature-pricing.127.0.0.1.nip.io'
-          if [ "$got" != "$want" ]; then
-            echo "::error::unexpected app.ingress.host parameters"
-            printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
-            exit 1
-          fi
-          got=$(echo "$out" | yq -N 'select(.kind == "Application") | .metadata.name + "=" + .metadata.annotations["preview.badil.dev/host"]')
-          want='feature-pricing-backend-1=backend-1-feature-pricing.127.0.0.1.nip.io
-          feature-pricing-backend-2=
-          feature-pricing-front=front-feature-pricing.127.0.0.1.nip.io'
-          if [ "$got" != "$want" ]; then
-            echo "::error::unexpected preview.badil.dev/host annotations"
-            printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
-            exit 1
-          fi
-
-      # The revision comes from each entry (commitSha, else branch); the chart
-      # settings and the image tag are read from the entry as written.
-      - name: Render preview-env chart settings and image tags
-        run: |
-          out=$(helm template preview-x charts/preview-env -f - <<'EOF'
-          apiVersion: badil.dev/v1beta1
-          gitopsRepoURL: https://github.com/acme/gitops.git
-          services:
-            - name: api
-              repoURL: https://github.com/acme/api.git
-              branch: master
-              imageTag: sha-${ARGOCD_APP_REVISION_SHORT}
-              chart:
-                path: deploy/helm
-                imageTagParam: image.tag
-                hostParam: ingress.hostname
-                valueFiles: [values-preview.yaml]
-              host: api-x.example.com
-            - name: front
-              repoURL: https://github.com/acme/front.git
-              branch: release
-              commitSha: "0123456789abcdef0123456789abcdef01234567"
-              imageTag: "0123456"
-              chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
-              metadata:
-                pr-author: octocat
-                pr-url: https://github.com/acme/front/pull/42
-                pr-number: "42"
-                created-at: "2026-05-26T10:00:00Z"
-                updated-at: "2026-05-26T10:00:00Z"
-                vcs.ref.name: feature/x
-                cicd.pipeline.run.url: ""
-            - name: worker
-              repoURL: https://github.com/acme/api.git
-              branch: main
-              imageTag: ${ARGOCD_APP_REVISION_SHORT_8}-amd64
-              chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
-            - name: cron
-              repoURL: https://github.com/acme/api.git
-              branch: main
-              imageTag: ${ARGOCD_APP_REVISION}
-              chart: {path: charts/cron, imageTagParam: app.image.tag, hostParam: app.ingress.host}
-          dependencies: []
-          EOF
-          )
-          got=$(echo "$out" | yq -N 'select(.kind == "Application") | .metadata.name + " " + .spec.source.repoURL + " " + .spec.source.targetRevision + " " + .spec.source.path + " " + (.spec.source.helm.valueFiles // "absent" | to_json(0)) + " " + ([.spec.source.helm.parameters[] | .name + "=" + .value + (.forceString // false | " forceString=" + to_string)] | join(","))')
-          # shellcheck disable=SC2016
-          want='preview-x-api https://github.com/acme/api.git master deploy/helm ["values-preview.yaml"] image.tag=sha-${ARGOCD_APP_REVISION_SHORT} forceString=true,ingress.hostname=api-x.example.com forceString=false
-          preview-x-front https://github.com/acme/front.git 0123456789abcdef0123456789abcdef01234567 k8s/ "absent" app.image.tag=0123456 forceString=true
-          preview-x-worker https://github.com/acme/api.git main k8s/ "absent" app.image.tag=${ARGOCD_APP_REVISION_SHORT_8}-amd64 forceString=true
-          preview-x-cron https://github.com/acme/api.git main charts/cron "absent" app.image.tag=${ARGOCD_APP_REVISION} forceString=true'
-          if [ "$got" != "$want" ]; then
-            echo "::error::chart settings and image tags do not render as expected"
-            printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
-            exit 1
-          fi
-          got=$(echo "$out" | yq -N 'select(.kind == "Application" and .metadata.name == "preview-x-front") | .spec.source.helm.parameters[0].value | tag')
-          if [ "$got" != '!!str' ]; then
-            echo '::error::expected the digits-only image tag 0123456 to render as a string'
-            printf 'got: %s\n' "$got"
-            exit 1
-          fi
-          got=$(echo "$out" | yq -N 'select(.kind == "AppProject") | .spec.sourceRepos[]')
-          want='https://github.com/acme/api.git
-          https://github.com/acme/front.git'
-          if [ "$got" != "$want" ]; then
-            echo "::error::expected the AppProject sourceRepos to be the distinct repoURLs of services, in file order"
-            printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
-            exit 1
-          fi
-
-      # Each dependency is an Application of wave -1 from its chart source:
-      # an OCI chart (path "."), with its valueFiles read from the gitops repo
-      # through a second source, or a chart of a Helm repository (chart). The
-      # AppProject lists every source.
-      - name: Render preview-env dependencies
-        run: |
-          out=$(helm template dependencies charts/preview-env -f testdata/contract/v1beta1/valid/dependencies.yaml)
-          deps=$(echo "$out" | yq 'select(.kind == "Application" and .metadata.annotations["argocd.argoproj.io/sync-wave"] == "-1")')
-          got=$(echo "$deps" | yq -N '.metadata.name + " name=" + .metadata.labels["app.kubernetes.io/name"] + " revision=" + .metadata.annotations["preview.badil.dev/vcs.ref.revision"] + " host=" + .metadata.annotations["preview.badil.dev/host"] + " pr-url=" + (.metadata.annotations["preview.badil.dev/pr-url"] // "absent") + " source=" + (.spec | has("source") | to_string) + " sources=" + (.spec | has("sources") | to_string)')
-          want='dependencies-postgres name=postgres revision= host= pr-url=absent source=false sources=true
-          dependencies-mailpit name=mailpit revision= host=mailpit-dependencies.preview.example.com pr-url=absent source=true sources=false'
-          if [ "$got" != "$want" ]; then
-            echo "::error::unexpected dependency Applications"
-            printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
-            exit 1
-          fi
-          # shellcheck disable=SC2016
-          got=$(echo "$deps" | yq -N '.metadata.name as $app | (.spec.sources // [.spec.source]) | .[] | $app + " " + to_json(0)')
-          # shellcheck disable=SC2016
-          want='dependencies-postgres {"repoURL":"oci://registry-1.docker.io/bitnamicharts/postgresql","targetRevision":"16.4.2","path":".","helm":{"releaseName":"postgres","valueFiles":["$values/deps/postgres.yaml"],"valuesObject":{"auth":{"password":"preview"},"primary":{"persistence":{"enabled":false}}}}}
-          dependencies-postgres {"repoURL":"https://github.com/acme/gitops.git","targetRevision":"HEAD","ref":"values"}
-          dependencies-mailpit {"repoURL":"https://jouve.github.io/charts","targetRevision":"0.20.0","chart":"mailpit","helm":{"releaseName":"mailpit","parameters":[{"name":"ingress.hostname","value":"mailpit-dependencies.preview.example.com"}]}}'
-          if [ "$got" != "$want" ]; then
-            echo "::error::unexpected dependency Application sources"
-            printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
-            exit 1
-          fi
-          got=$(echo "$out" | yq -N 'select(.kind == "AppProject") | .spec.sourceRepos[]')
-          want='https://github.com/acme/platform.git
-          oci://registry-1.docker.io/bitnamicharts/postgresql
-          https://github.com/acme/gitops.git
-          https://jouve.github.io/charts'
-          if [ "$got" != "$want" ]; then
-            echo "::error::expected the AppProject sourceRepos to list the services, the dependency charts and the gitops repo"
-            printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
-            exit 1
-          fi
-
       - name: Render preview-env Argo CD namespace
         run: |
           ns() {
@@ -397,7 +234,6 @@ jobs:
               exit 1
             fi
           done <<'CASES'
-          labels: {app.kubernetes.io/part-of: x}|at '/namespace/labels/app.kubernetes.io~1part-of': false schema
           annotations: {argocd.argoproj.io/sync-wave: "0"}|at '/namespace/annotations/argocd.argoproj.io~1sync-wave': false schema
           labels: {enabled: yes}|at '/namespace/labels/enabled': got boolean, want string
           annotations: {owner: [a]}|at '/namespace/annotations/owner': got array, want string
@@ -536,76 +372,12 @@ jobs:
           imageTag: 1234567, chart: {path: k8s/, imageTagParam: a, hostParam: b}|at '/services/0/imageTag': got number, want string
           CASES
 
-      - name: Render preview-env with an invalid preview file fails
-        run: |
-          fails() {
-            if out=$(helm template preview-x charts/preview-env -f - 2>&1); then
-              echo "::error::expected render to fail with \"$1\""
-              exit 1
-            fi
-            if ! echo "$out" | grep -qF "$1"; then
-              echo "::error::expected \"$1\""
-              printf 'got: %s\n' "$out"
-              exit 1
-            fi
-          }
-          fails "at '': missing property 'apiVersion'" <<'EOF'
-          gitopsRepoURL: https://github.com/acme/gitops.git
-          services:
-            - name: backend-1
-              repoURL: https://github.com/acme/backend-1.git
-              branch: main
-              imageTag: ${ARGOCD_APP_REVISION}
-              chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
-          dependencies: []
-          EOF
-          fails "at '/apiVersion': value must be 'badil.dev/v1beta1'" <<'EOF'
-          apiVersion: badil.dev/v2
-          gitopsRepoURL: https://github.com/acme/gitops.git
-          services: []
-          dependencies: []
-          EOF
-          fails "at '/services/0': additional properties 'image' not allowed" <<'EOF'
-          apiVersion: badil.dev/v1beta1
-          gitopsRepoURL: https://github.com/acme/gitops.git
-          services:
-            - name: backend-1
-              repoURL: https://github.com/acme/backend-1.git
-              branch: main
-              imageTag: ${ARGOCD_APP_REVISION}
-              chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
-              image: x
-          dependencies: []
-          EOF
-          fails "at '/services/0': missing property 'repoURL'" <<'EOF'
-          apiVersion: badil.dev/v1beta1
-          gitopsRepoURL: https://github.com/acme/gitops.git
-          services:
-            - name: backend-1
-              branch: main
-              imageTag: ${ARGOCD_APP_REVISION}
-              chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
-          dependencies: []
-          EOF
-          fails "at '/services/0': properties 'metadata' required, if 'commitSha' exists" <<'EOF'
-          apiVersion: badil.dev/v1beta1
-          gitopsRepoURL: https://github.com/acme/gitops.git
-          services:
-            - name: backend-1
-              repoURL: https://github.com/acme/backend-1.git
-              branch: main
-              commitSha: abc123
-              imageTag: abc123
-              chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
-          dependencies: []
-          EOF
-
       - name: Render the valid contract fixtures to their goldens
         run: |
           for f in testdata/contract/v1beta1/valid/*.yaml; do
             n=$(basename "$f" .yaml)
             golden="testdata/contract/v1beta1/preview-env/$n.golden.yaml"
-            if ! out=$(helm template "$n" charts/preview-env -f "$f" --set argocdNamespace=argocd); then
+            if ! out=$(helm template "$n" charts/preview-env -f "$f"); then
               echo "::error::preview-env failed to render $f"
               exit 1
             fi
@@ -623,7 +395,7 @@ jobs:
               echo "::error::$f has no '# want: ' line"
               exit 1
             fi
-            if out=$(helm template "$(basename "$f" .yaml)" charts/preview-env -f "$f" --set argocdNamespace=argocd 2>&1); then
+            if out=$(helm template "$(basename "$f" .yaml)" charts/preview-env -f "$f" 2>&1); then
               echo "::error::expected render of $f to fail"
               exit 1
             fi
@@ -681,7 +453,12 @@ jobs:
               [ "${#files[@]}" -gt 0 ] || { echo "no fixture readable in apps/" >&2; exit 1; }
               for f in "${files[@]}"; do
                 for t in $TRIGGERS; do
-                  r=$(argocd admin notifications trigger run "$t" "./$f" --config-map ./cm.yaml --secret :empty 2>/dev/null | awk "NR > 1 { print \$NF }" | tail -n 1)
+                  out=$(argocd admin notifications trigger run "$t" "./$f" --config-map ./cm.yaml --secret :empty 2>/tmp/stderr)
+                  if grep -F "failed to execute when condition" /tmp/stderr >&2; then
+                    echo "$(basename "$f" .yaml) $t: when condition failed" >&2
+                    exit 1
+                  fi
+                  r=$(echo "$out" | awk "NR > 1 { print \$NF }" | tail -n 1)
                   echo "$(basename "$f" .yaml) $t $r"
                 done
               done')

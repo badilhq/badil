@@ -164,11 +164,11 @@ func TestTeardown_UpdateComments(t *testing.T) {
 		catalog: []string{"backend-1", "backend-2", "front"},
 		teardownResult: &gitops.TeardownResult{
 			Values: preview.PreviewValues{Services: []preview.ServiceEntry{
-				{Name: "backend-1"},
+				{Name: "backend-1", Branch: "main"},
 				{Name: "backend-2", CommitSha: "bbbbbbbbbb", Metadata: &preview.Metadata{
 					PRURL: "https://github.com/acme/backend-2/pull/7", PRNumber: "7",
 				}},
-				{Name: "front"},
+				{Name: "front", Branch: "main"},
 			}},
 			Removed:       []string{"backend-1"},
 			CommitURL:     teardownCommitURL,
@@ -242,8 +242,7 @@ func TestTeardown_UpdateCommentsLinkArgoCD(t *testing.T) {
 	s, _ := newTeardownServer(t, fg)
 	closeAndWait(t, s)
 
-	const want = "\n🔎 [All apps in Argo CD]" +
-		"(https://argocd.example.com/applications?labels=app.kubernetes.io%2Finstance%3Dfeature-add-pricing)\n\n---\n"
+	want := preview.ArgoCDAppsURL("https://argocd.example.com", "feature-add-pricing")
 	if !fg.fanOutBodyCalled || !strings.Contains(fg.capturedSummary, want) {
 		t.Errorf("fan-out summary (called=%v) missing %q, got:\n%s", fg.fanOutBodyCalled, want, fg.capturedSummary)
 	}
