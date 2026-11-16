@@ -120,6 +120,7 @@ func NewServer(
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(requireBearer(deployToken))
 		r.Post("/deploy", s.handleDeploy)
+		r.Post("/sync", s.handleSync)
 	})
 	s.router = r
 	return s
