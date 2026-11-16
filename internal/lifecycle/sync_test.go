@@ -286,6 +286,26 @@ func TestSyncer_PushConfigErrors(t *testing.T) {
 	}
 }
 
+func TestSyncer_PushListErrorRecordsNoSHA(t *testing.T) {
+	captureLogs(t)
+	f := newSyncFake("a")
+	f.listErr = errors.New("list boom")
+	s := lifecycle.NewSyncer(f, time.Minute)
+	ctx := context.Background()
+
+	s.Push(ctx) // sha-1, previews can't be listed: nothing synced, no SHA kept.
+	f.listErr = nil
+	s.Push(ctx) // sha-1 again: retried, syncs a.
+	s.Push(ctx) // sha-1 now recorded: nothing.
+	if got := f.syncs(); !slices.Equal(got, []string{"a"}) {
+		t.Errorf("syncs = %v, want one run over a after the list failure", got)
+	}
+	configSyncs(t, f.Metrics, map[string]float64{
+		`badil_config_syncs_total{result="error",trigger="push"}`: 1,
+		`badil_config_syncs_total{result="ok",trigger="push"}`:    1,
+	})
+}
+
 func TestSyncer_PushDoesNotTouchAPISHA(t *testing.T) {
 	captureLogs(t)
 	f := newSyncFake("a")

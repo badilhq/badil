@@ -106,7 +106,8 @@ func (s *Syncer) release() {
 // not recorded. Otherwise every preview is synced with the catalog of that
 // content and the SHA recorded, also when a preview failed (the sweep retries
 // it) or the content can't be parsed (the same content would fail again). A
-// badil.yaml that can't be read records nothing but the error.
+// badil.yaml that can't be read, or previews that can't be listed, record
+// nothing but the error, so the next push retries.
 func (s *Syncer) Push(ctx context.Context) {
 	s.mu.Lock()
 	if s.pushWaiting {
@@ -137,14 +138,17 @@ func (s *Syncer) Push(ctx context.Context) {
 		)
 		return
 	}
-	if sha != "" {
-		defer func() { s.lastSHA = sha }()
-	}
 	if err != nil {
+		if sha != "" {
+			s.lastSHA = sha
+		}
 		s.configFailed(ctx, TriggerPush, err)
 		return
 	}
 	report, err := s.syncAll(ctx, catalog)
+	if err == nil {
+		s.lastSHA = sha
+	}
 	s.finish(ctx, TriggerPush, report, err)
 }
 
