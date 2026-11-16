@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/badilhq/badil/internal/gitops"
@@ -135,7 +136,7 @@ func TestSweep_SyncComments(t *testing.T) {
 				t.Fatalf("fanOuts = %d, want %d", len(f.fanOuts), tc.wantFanOuts)
 			}
 			if tc.wantFanOuts == 1 {
-				want := preview.BuildSummary("feature-x", *synced, preview.URLConfig{}, nil,
+				want := preview.BuildSummary("feature-x", *synced, preview.URLConfig{}, "", nil,
 					syncCommitMessage, syncCommitURL)
 				if f.fanOuts[0].body != want || len(f.fanOuts[0].vals.Services) != 2 {
 					t.Errorf("fanOut = %+v, want the summary of the written file", f.fanOuts[0])
@@ -161,5 +162,28 @@ func assertSyncLogged(t *testing.T, capture *logCapture, synced, commentFailed b
 	warns := capture.find(slog.LevelWarn, "preview sync comment failed")
 	if commentFailed != (len(warns) == 1) || len(warns) > 1 {
 		t.Errorf("preview sync comment failed logs = %v", warns)
+	}
+}
+
+func TestSweep_SyncCommentLinksArgoCD(t *testing.T) {
+	captureLogs(t)
+	synced := values(pin("backend-1", pr42, recent))
+	f := &fakeAPI{
+		label:     "preview",
+		argocdURL: "https://argocd.example.com",
+		previews:  []string{"feature-x"},
+		files:     map[string]*preview.PreviewValues{"feature-x": values(pin("backend-1", pr42, recent))},
+		prOpen:    map[string]bool{"acme/backend-1#42": true},
+		prHeadRef: map[string]string{"acme/backend-1#42": "feature-x"},
+		prLabels:  map[string][]string{"acme/backend-1#42": {"preview"}},
+		sync:      map[string]*gitops.SyncResult{"feature-x": syncedResult(synced, true)},
+	}
+	if err := lifecycle.Sweep(context.Background(), f, now, ttl); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	const link = "🔎 [All apps in Argo CD]" +
+		"(https://argocd.example.com/applications?labels=app.kubernetes.io%2Finstance%3Dfeature-x)\n\n---\n"
+	if len(f.fanOuts) != 1 || !strings.Contains(f.fanOuts[0].body, link) {
+		t.Errorf("fanOuts = %+v, want one whose body links Argo CD", f.fanOuts)
 	}
 }

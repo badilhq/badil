@@ -60,6 +60,7 @@ services:
 # preview:
 #   label: preview                # optional, default "preview": the PR label that creates the preview; "preview:<name>" picks its name
 #   maxPreviews: 10               # optional, default no cap: a deploy that would create a preview past it is refused
+#   argocdURL: https://argocd.example.com   # optional: the Argo CD UI; the PR comment links the preview's Applications
 #   domain: previews.example.com  # lowercase bare domain; needs a wildcard DNS record for *.<domain>
 #   tls: true                     # optional, default true: https links (ingress TLS stays in the service chart)
 #   expose:

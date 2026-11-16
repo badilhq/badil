@@ -308,6 +308,97 @@ func TestParseCatalog_MalformedMaxPreviews(t *testing.T) {
 	}
 }
 
+func TestParseCatalog_ArgoCDURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		preview string
+		want    string
+	}{
+		{name: "absent block"},
+		{name: "absent key", preview: "preview:\n  tls: false\n"},
+		{name: "null", preview: "preview:\n  argocdURL: ~\n"},
+		{
+			name: "https", preview: "preview:\n  argocdURL: https://argocd.example.com\n",
+			want: "https://argocd.example.com",
+		},
+		{name: "http", preview: "preview:\n  argocdURL: http://argocd.local\n", want: "http://argocd.local"},
+		{
+			name: "trailing slash removed", preview: "preview:\n  argocdURL: https://argocd.example.com/\n",
+			want: "https://argocd.example.com",
+		},
+		{
+			name: "port and path", preview: "preview:\n  argocdURL: https://ops.example.com:8443/argocd/\n",
+			want: "https://ops.example.com:8443/argocd",
+		},
+		{
+			name:    "set without a domain",
+			preview: "preview:\n  label: deploy\n  argocdURL: https://argocd.example.com\n",
+			want:    "https://argocd.example.com",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := gitops.ParseCatalog([]byte(catalogServices + tt.preview))
+			if err != nil {
+				t.Fatalf("ParseCatalog: %v", err)
+			}
+			if got.ArgoCDURL != tt.want {
+				t.Errorf("ArgoCDURL = %q, want %q", got.ArgoCDURL, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseCatalog_MalformedArgoCDURL(t *testing.T) {
+	const prefix = "badil.yaml: malformed preview block: preview.argocdURL: "
+	tests := map[string]struct {
+		preview string
+		want    string
+	}{
+		"number":       {"preview:\n  argocdURL: 42\n", "must be a string"},
+		"boolean":      {"preview:\n  argocdURL: true\n", "must be a string"},
+		"sequence":     {"preview:\n  argocdURL: [https://argocd.example.com]\n", "must be a string"},
+		"mapping":      {"preview:\n  argocdURL: {host: argocd.example.com}\n", "must be a string"},
+		"empty string": {"preview:\n  argocdURL: \"\"\n", `"" must be an absolute http or https URL with a host`},
+		"no scheme": {
+			"preview:\n  argocdURL: argocd.example.com\n",
+			`"argocd.example.com" must be an absolute http or https URL with a host`,
+		},
+		"other scheme": {
+			"preview:\n  argocdURL: ftp://argocd.example.com\n",
+			`"ftp://argocd.example.com" must be an absolute http or https URL with a host`,
+		},
+		"missing host": {
+			"preview:\n  argocdURL: https:///applications\n",
+			`"https:///applications" must be an absolute http or https URL with a host`,
+		},
+		"unparsable": {
+			"preview:\n  argocdURL: \"https://argo cd.example.com\"\n",
+			`"https://argo cd.example.com" must be an absolute http or https URL with a host`,
+		},
+		"query": {
+			"preview:\n  argocdURL: https://argocd.example.com/?a=b\n",
+			`"https://argocd.example.com/?a=b" must not have a query or a fragment`,
+		},
+		"empty query": {
+			"preview:\n  argocdURL: https://argocd.example.com?\n",
+			`"https://argocd.example.com?" must not have a query or a fragment`,
+		},
+		"fragment": {
+			"preview:\n  argocdURL: \"https://argocd.example.com/#apps\"\n",
+			`"https://argocd.example.com/#apps" must not have a query or a fragment`,
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := gitops.ParseCatalog([]byte(catalogServices + tt.preview))
+			if err == nil || err.Error() != prefix+tt.want {
+				t.Fatalf("err = %v, want %q", err, prefix+tt.want)
+			}
+		})
+	}
+}
+
 func TestParseCatalog_Services(t *testing.T) {
 	const raw = `services:
   front:

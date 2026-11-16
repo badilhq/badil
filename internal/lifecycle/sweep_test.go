@@ -116,6 +116,7 @@ type fakeAPI struct {
 	*metrics.Metrics
 
 	label      string
+	argocdURL  string
 	catalogErr error
 	prLabels   map[string][]string
 	prHeadRef  map[string]string
@@ -223,7 +224,7 @@ func (f *fakeAPI) FetchServiceCatalog(context.Context) (*gitops.ServiceCatalog, 
 	if f.catalogErr != nil {
 		return nil, f.catalogErr
 	}
-	return &gitops.ServiceCatalog{Label: f.label}, nil
+	return &gitops.ServiceCatalog{Label: f.label, ArgoCDURL: f.argocdURL}, nil
 }
 
 func (f *fakeAPI) FanOutPRComments(_ context.Context, vals preview.PreviewValues, body string) error {

@@ -3,6 +3,7 @@ package preview
 import (
 	"cmp"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -34,11 +35,13 @@ const pinnedImageNote = "> ⏳ A pinned service starts once CI has pushed the im
 // written host, if any. When excluded is not empty, a line after the lists
 // names the catalog services and dependencies left out of the preview
 // (Catalog.Excluded). When at least one service is pinned, a note follows
-// saying a pinned service starts once CI has pushed its image. The trailing
-// line links to the gitops commit that recorded the change.
+// saying a pinned service starts once CI has pushed its image. When argocdURL
+// (the catalog's preview.argocdURL) is set, a line links to the Argo CD
+// application list filtered on the preview (ArgoCDAppsURL). The trailing line
+// links to the gitops commit that recorded the change.
 func BuildSummary(
-	slug string, values PreviewValues, urls URLConfig, branches map[string]string, commitMessage, commitURL string,
-	excluded ...string,
+	slug string, values PreviewValues, urls URLConfig, argocdURL string, branches map[string]string,
+	commitMessage, commitURL string, excluded ...string,
 ) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## 🚀 Preview: `%s`\n\n", slug)
@@ -91,9 +94,20 @@ func BuildSummary(
 	if pinned {
 		b.WriteString("\n" + pinnedImageNote + "\n")
 	}
+	if argocdURL != "" {
+		fmt.Fprintf(&b, "\n🔎 [All apps in Argo CD](%s)\n", ArgoCDAppsURL(argocdURL, slug))
+	}
 	b.WriteString("\n---\n")
 	fmt.Fprintf(&b, "🔗 [%s](%s)", commitMessage, commitURL)
 	return b.String()
+}
+
+// ArgoCDAppsURL returns the Argo CD UI's application list at argocdURL (no
+// trailing slash) filtered on the label selector
+// app.kubernetes.io/instance=<slug>, which every service and dependency
+// Application of the preview carries.
+func ArgoCDAppsURL(argocdURL, slug string) string {
+	return argocdURL + "/applications?labels=" + url.QueryEscape("app.kubernetes.io/instance="+slug)
 }
 
 // BuildTeardownSummary renders the comment badil leaves on a PR once its

@@ -293,6 +293,21 @@ func TestDeploy_PreviewURLsInSummary(t *testing.T) {
 	}
 }
 
+func TestDeploy_ArgoCDLinkInSummary(t *testing.T) {
+	yml := servicesWithPreview + "  argocdURL: https://argocd.example.com/\n"
+	fg := &fakeGitops{badilYAML: yml, writeResult: previewWriteResult()}
+	rec := postDeploy(t, newTestServer(t, fg), previewBody(), "test-token")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	const want = "\n🔎 [All apps in Argo CD]" +
+		"(https://argocd.example.com/applications?labels=app.kubernetes.io%2Finstance%3Dfeature-pricing)\n\n---\n"
+	if !strings.Contains(fg.capturedSummary, want) {
+		t.Errorf("summary missing %q, got:\n%s", want, fg.capturedSummary)
+	}
+}
+
 func TestDeploy_PreviewURLsDefaultToHTTPS(t *testing.T) {
 	yml := strings.Replace(servicesWithPreview, "  tls: false\n", "", 1)
 	fg := &fakeGitops{badilYAML: yml, writeResult: previewWriteResult()}
