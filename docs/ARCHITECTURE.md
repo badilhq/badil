@@ -16,13 +16,15 @@ Self-hosted, single-tenant. Everything runs in the user's cluster; badil talks t
 
  label removed or pull_request closed ──► badil serve (async) ── unpins the PR's services, or deletes previews/<slug>/values.yaml ──► ArgoCD prunes
  badil cleanup (CronJob) ── deletes stale previews/<slug>/, unpins closed PRs, and open PRs whose label moved, conflicts or is gone ──► ArgoCD prunes
+ GitHub ── push to the gitops default branch changing badil.yaml ──► POST /webhooks/github ── async sync of every preview ──► gitops repo
+ POST /v1/sync ── syncs every preview, or one, with badil.yaml ──► gitops repo
 ```
 
 ## Components
 
 | Component | Where | Notes |
 |---|---|---|
-| `badil serve` | this repo | chi HTTP server: `/healthz`, `/v1/deploy`, `/webhooks/github`, `/webhooks/argocd` (optional) |
+| `badil serve` | this repo | chi HTTP server: `/healthz`, `/v1/deploy`, `/v1/sync`, `/webhooks/github`, `/webhooks/argocd` (optional) |
 | `badil cleanup` | this repo | One-shot, CronJob (hourly). Per preview, the first matching rule: no pinned service → delete; `CLEANUP_TTL` set and no deploy within it → delete; otherwise unpin closed PRs, and open PRs whose label moved, conflicts or is gone (see [Cleanup sweep](#cleanup-sweep)) |
 | `badil bootstrap-app` / `verify-app` | this repo | Create a GitHub App via the manifest flow / check credentials |
 | `preview-env` chart | this repo, [`charts/preview-env`](../charts/preview-env) | Renders AppProject, Namespace, one ArgoCD Application per service and per dependency; the AppProject and Applications in the namespace set by `argocdNamespace` (default `argocd`); Application annotations `preview.badil.dev/*` carry the PR metadata |
@@ -153,7 +155,7 @@ dependencies:                   # required, may be empty: dependencies of badil.
 The file is self-contained: a renderer needs only it to know each service's repo, revision, image tag and chart settings, each dependency's chart, version and values, and the namespace metadata. Contract v1beta1:
 
 - **Strict.** Every object is closed: an unknown field at any level of an entry, of `chart`, of `metadata` or of `namespace` is rejected. `apiVersion` must be `badil.dev/v1beta1`. Every field has the type shown; a null value is rejected, as is a pinned entry without `metadata` or `metadata` without `commitSha`.
-- **Written on every deploy, teardown and sweep.** Each deploy write, and the cleanup sweep's sync (step 4 of [Cleanup sweep](#cleanup-sweep)), project the file on the catalog as it is then: `apiVersion`, `gitopsRepoURL`, `namespace`, every service of `services` in catalog order with its `repoURL`, `branch`, `chart`, `imageTag` and `host` (a missing one added as a branch-tracking entry), then the pinned entries of services no longer in `services` that have a `repoURL`, unchanged except `host`, recomputed from `preview.expose`, then every dependency of `badil.yaml` in its order, with its `host`. When an entry of `badil.yaml` declares `needs`, only the pinned entries and what they need are kept (see [Needs](#needs)). A `badil.yaml` change is written on the next deploy, even for an unchanged SHA, and in every preview by the next sweep, one commit per preview; the PR comment is refreshed only when the services, the dependencies or hosts change. See [Pinned and branch-tracking services](#pinned-and-branch-tracking-services) for removed services. Teardowns unpin, then project the file on `badil.yaml`, in the same commit, so an unpinned entry gets its branch-tracking `imageTag` at once. When `badil.yaml` cannot be read or parsed, such a teardown writes nothing and fails: the file keeps the PR's pin, and the next event of that PR or the next sweep retries it. A teardown that deletes the preview does not read `badil.yaml`.
+- **Written on every deploy, teardown and sweep.** Each deploy write, and the cleanup sweep's sync (step 4 of [Cleanup sweep](#cleanup-sweep)), project the file on the catalog as it is then: `apiVersion`, `gitopsRepoURL`, `namespace`, every service of `services` in catalog order with its `repoURL`, `branch`, `chart`, `imageTag` and `host` (a missing one added as a branch-tracking entry), then the pinned entries of services no longer in `services` that have a `repoURL`, unchanged except `host`, recomputed from `preview.expose`, then every dependency of `badil.yaml` in its order, with its `host`. When an entry of `badil.yaml` declares `needs`, only the pinned entries and what they need are kept (see [Needs](#needs)). A `badil.yaml` change is written on the next deploy, even for an unchanged SHA, and in every preview by the push that changed it, `POST /v1/sync` or the next sweep (see [Config sync](#config-sync)), one commit per preview; the PR comment is refreshed only when the services, the dependencies or hosts change. See [Pinned and branch-tracking services](#pinned-and-branch-tracking-services) for removed services. Teardowns unpin, then project the file on `badil.yaml`, in the same commit, so an unpinned entry gets its branch-tracking `imageTag` at once. When `badil.yaml` cannot be read or parsed, such a teardown writes nothing and fails: the file keeps the PR's pin, and the next event of that PR or the next sweep retries it. A teardown that deletes the preview does not read `badil.yaml`.
 - **Validated by the chart.** `preview-env` ships `values.schema.json`, generated from badil's Go types (`make schema`), and Helm validates the values (the preview file and `argocdNamespace`) against it on every render; a violation fails the render with the field's JSON pointer, for example `at '': missing property 'apiVersion'`. CI fails when the schema is out of date. The root is closed: a key other than `apiVersion`, `gitopsRepoURL`, `namespace`, `services`, `dependencies` and `argocdNamespace` fails the render, and a missing `gitopsRepoURL` or `dependencies` fails it too.
 
 ## Per-preview URLs
@@ -295,10 +297,19 @@ POST /v1/deploy
   → { "preview_slug", "gitops_commit_url", "warnings": [...] }
   → 409 { "error": "preview limit (<max>) reached" }   # preview.maxPreviews reached and previews/<slug>/ does not exist
 
+POST /v1/sync
+  Authorization: Bearer $BADIL_DEPLOY_TOKEN
+  empty body or {} → every preview; { "slug": "<slug>" } → that preview   # unknown field → 400
+  → { "synced": [<slugs rewritten>], "unchanged": <count>, "failed": [<slugs>] }
+  → 400 { "error": "invalid slug" }               # empty, or not its own slugified form (e.g. ../x)
+  → 404 { "error": "preview <slug> not found" }   # no previews/<slug>/values.yaml
+  → 503 { "error": "badil.yaml unavailable: …" }  # badil.yaml can't be read or parsed
+
 POST /webhooks/github
   X-Hub-Signature-256 verified (401 on mismatch)
   installation ≠ GITHUB_INSTALLATION_ID (ping exempt) → 403
   pull_request opened/reopened/synchronize/labeled/unlabeled/closed → async reconcile; other actions → log only
+  push to GITOPS_REPO's default branch, not a deletion → async config sync (see Config sync); other pushes → log only
   other events → structured log only
   parse failures / handler panics → logged, 200
 
@@ -400,13 +411,22 @@ The sweep runs in the server every `CLEANUP_INTERVAL` when it is set, starting o
 
 4. **Sync with `badil.yaml`**: every preview that rules 1 and 2 did not match is re-read after rule 3 (whose teardowns may have changed or deleted it) and rewritten as its projection on the catalog (see [Gitops repo contract](#gitops-repo-contract)) when it differs, in one commit `chore(preview): sync <slug> with badil.yaml`, with SHA optimistic locking + 409 retry; a file that already matches is not written. A preview whose rule 1-2 delete is cancelled by the re-check skips this step: the deploy that cancelled it already wrote the projection. A rewrite is logged (`preview synced`) and counted in `badil_sweep_previews_synced_total`. When it changed the list of services, the list of dependencies or a host, the open PRs' comments are refreshed.
 
-A `badil.yaml` change (a service added, removed or renamed, a `repo`, `branch`, `preview.domain` or `expose` change) therefore reaches every preview within one sweep interval, without a push. A mistaken edit propagates the same way, except that pinned entries of a removed service stay until their PR leaves; a git revert of `badil.yaml` undoes it at the next sweep.
+A `badil.yaml` change (a service added, removed or renamed, a `repo`, `branch`, `preview.domain` or `expose` change) therefore reaches every preview within one sweep interval, without a push. With the App subscribed to `push`, it reaches them at once (see [Config sync](#config-sync)); the sweep stays the safety net. A mistaken edit propagates the same way, except that pinned entries of a removed service stay until their PR leaves; a git revert of `badil.yaml` undoes it at the next sweep.
 
 After a catalog edit, one sweep makes one commit per preview whose file differs, and updates the comment of each open PR of the previews whose services, dependencies or hosts changed, all within the GitHub App's rate limit; `badil_sweep_previews_synced_total` shows the volume. A failed sync write counts as a failed preview and is retried by the next sweep. A failed comment refresh is logged (`preview sync comment failed`) and not retried, so that comment stays stale until the PR's next deploy or teardown, as for every comment fan-out.
 
 Rules 1 and 2 re-check their condition on the freshly read file, and again after every 409, so a deploy landing during the sweep cancels the delete. A failing preview read, rule 1–2 delete or step 4 sync is logged and the sweep goes on; the command then exits 1 and the Job fails without retrying (`backoffLimit: 0`). A failing closed-PR teardown is only logged. The next scheduled run retries both. Comment fan-outs (deploy, teardown, expiry) skip closed PRs, so a closed PR keeps its teardown comment.
 
 Known limit: the GitHub contents API lists at most 1,000 entries per directory, so the sweep sees at most 1,000 previews.
+
+## Config sync
+
+Two triggers run the sweep's step 4 (rewrite, `preview synced` log, `badil_sweep_previews_synced_total`, comment refresh) outside the sweep, without its rules 1-3:
+
+- **Push.** A verified `push` delivery is acted on only when `repository.full_name` is `GITOPS_REPO` (case-insensitive), `ref` is `refs/heads/<repository.default_branch>` and `deleted` is false; any other push logs `config sync skipped` with its reason. Every push is answered 200. In the background, badil reads `badil.yaml`'s blob SHA on the default branch; when it equals the SHA of the last push sync (kept in memory, empty at startup), it stops (`config sync skipped`, reason `badil.yaml unchanged`). badil's own deploy, teardown and sync commits are pushes too, and stop there. Otherwise every preview is synced with that content and its SHA kept, also when a preview failed (the sweep retries it) or the content can't be parsed (the same content would fail again). A `badil.yaml` that can't be read keeps no SHA, so the next push retries.
+- **`POST /v1/sync`** (see [HTTP API](#http-api)) syncs every preview, or the one its body names, and answers when done. It ignores and keeps the push SHA.
+
+One config sync runs at a time in the server: pushes arriving while a push sync waits to run collapse into it (`config sync collapsed`), while `/v1/sync` calls each wait their turn and get their own answer, in no guaranteed order. A run is capped at 10 minutes (the sweep's bound), counted from when it starts running. It does not wait for reconciles nor block them, and the sweep's own step 4 runs beside it; SHA optimistic locking keeps concurrent writes safe. Shutdown waits for a push sync like for reconciles (up to 25s). Each run logs `config sync finished` (with `synced`, `unchanged` and `failed` counts) or `config sync failed`, a failed preview logs `config sync preview failed`, and the run is counted in `badil_config_syncs_total`. A large `badil.yaml` change makes the same burst of commits and comments as a sweep.
 
 badil never touches data stores; see [Preview data](#preview-data).
 
@@ -426,7 +446,7 @@ CLEANUP_INTERVAL            # serve, optional: Go duration of at least 1m (e.g. 
 CLEANUP_TTL                 # cleanup, and serve when CLEANUP_INTERVAL is set, optional: Go duration (e.g. 168h); unset disables expiry
 ```
 
-GitHub App permissions: Contents R/W, Pull requests W, Metadata R. Subscribed event: `pull_request` (installation events are delivered automatically).
+GitHub App permissions: Contents R/W, Pull requests W, Metadata R. Subscribed events: `pull_request` and `push` (installation events are delivered automatically).
 
 ## Metrics
 
@@ -438,7 +458,7 @@ Every label has a closed set of values. Go runtime (`go_*`) and process (`proces
 
 | Metric | Type | Labels | |
 |---|---|---|---|
-| `badil_webhook_deliveries_total` | counter | `event`, `status` | Webhook deliveries. `event` is `ping`, `installation`, `installation_repositories`, `pull_request` or `other` once the signature is verified, `unverified` before. `status` is the HTTP status: `200`, `401` or `403`. |
+| `badil_webhook_deliveries_total` | counter | `event`, `status` | Webhook deliveries. `event` is `ping`, `installation`, `installation_repositories`, `pull_request`, `push` or `other` once the signature is verified, `unverified` before. `status` is the HTTP status: `200`, `401` or `403`. |
 | `badil_reconciles_total` | counter | `outcome` | One per pull request reconcile: `failed` (catalog, PR or preview read error, preview list error, or no service write succeeded and at least one failed), else `skipped`, else `deployed` (a service write succeeded), else `torn_down`. |
 | `badil_reconcile_skips_total` | counter | `reason` | Skipped reconciles by reason: `other label`, `not labeled`, `repo not in catalog`, `fork pr`, `service held by another pr`, `preview limit reached`, `conflicting preview labels`, `already deployed`. |
 | `badil_teardowns_total` | counter | `trigger`, `result` | Teardowns of a PR from a preview. `trigger` is `webhook` or `sweep`; `result` is `deleted`, `unpinned`, `noop` (nothing pinned) or `error`. |
@@ -446,7 +466,8 @@ Every label has a closed set of values. Go runtime (`go_*`) and process (`proces
 | `badil_sweep_runs_total` | counter | `result` | In-server sweep runs, `ok` or `error`. A run cancelled by shutdown is not counted. |
 | `badil_sweep_last_success_timestamp_seconds` | gauge | | Unix time of the last successful in-server sweep. |
 | `badil_sweep_previews_deleted_total` | counter | `rule` | Previews deleted by the sweep: `no_pin` (rule 1) or `ttl` (rule 2). |
-| `badil_sweep_previews_synced_total` | counter | | Previews rewritten by the in-server sweep to match `badil.yaml` (step 4). |
+| `badil_sweep_previews_synced_total` | counter | | Previews rewritten by the in-server sweep (step 4) or a config sync to match `badil.yaml`. |
+| `badil_config_syncs_total` | counter | `trigger`, `result` | Config sync runs (see [Config sync](#config-sync)). `trigger` is `push` or `api` (`/v1/sync`, every preview or one); `result` is `error` when `badil.yaml` can't be read or parsed, the previews can't be listed or a preview failed, `ok` otherwise. A push stopped by an unchanged `badil.yaml` is not counted. |
 | `badil_previews` | gauge | | Previews in the gitops repo: listed at server startup, incremented when a deploy creates a preview, decremented when a teardown or sweep deletes one, and reset by each in-server sweep. |
 | `badil_preview_spinup_seconds` | histogram | `catalog_service` | Spin-up time of a pinned service, from badil's gitops write to its Application synced and Healthy (see [Spin-up endpoint](#spin-up-endpoint)). Buckets: 15, 30, 60, 120, 180, 300, 600, 900, 1800 s. `catalog_service` is a catalog service; it is not named `service` because that collides with the `service` target label Prometheus adds when scraping through a ServiceMonitor. |
 | `badil_argocd_events_total` | counter | `result` | Events accepted by `/webhooks/argocd`: `recorded` (a spin-up was observed) or `ignored`. 400 and 401 answers are not counted. |

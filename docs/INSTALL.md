@@ -76,6 +76,7 @@ Choose the https host GitHub will call, e.g. `https://badil.example.com`, and cr
      --gitops-repo "$GITOPS"
    ```
 3. Install the App on the gitops repo and every service repo, all under that one account. badil accepts webhooks from that single installation only.
+   The App subscribes to `pull_request` and `push`. An App created before `push` was added does not receive it: in the App settings, **Permissions & events** → **Subscribe to events**, tick **Push** and click **Save changes**. `push` needs Contents read, which the App already has, so installations approve nothing. Without it, a `badil.yaml` change reaches previews only at their next deploy or sweep, or through `POST /v1/sync`.
 4. In the same directory, list the installations:
 
    ```bash
@@ -120,7 +121,7 @@ helm install badil oci://ghcr.io/badilhq/charts/badil -n badil \
 ```
 
 - Without `--version`, Helm installs the latest chart. Add `--version X.Y.Z` to pin a release (do so in production), and take the step 3 example files from the same `vX.Y.Z` tag. The image tag defaults to the chart `appVersion`.
-- The Ingress also exposes `POST /v1/deploy`, the manual trigger, protected by the `deploy-token` bearer token (see [README](../README.md)), and `POST /webhooks/argocd`, protected by the optional `argocd-webhook-token` bearer token.
+- The Ingress also exposes `POST /v1/deploy`, the manual trigger, and `POST /v1/sync`, which syncs every preview (or one) with `badil.yaml` at once, both protected by the `deploy-token` bearer token (see [README](../README.md)), and `POST /webhooks/argocd`, protected by the optional `argocd-webhook-token` bearer token.
 - `cleanup.ttl` (e.g. `168h`) is optional: it also deletes previews with no deploy for that long.
 - The cleanup sweep runs in the server every hour by default (`cleanup.interval`, `1h`): it deletes stale previews and rewrites every kept preview to match `badil.yaml`, and exports its metrics (with the Prometheus Operator, scrape them with `metrics.serviceMonitor.enabled=true` and `metrics.serviceMonitor.labels` matching its selector, e.g. `release: <kube-prometheus-stack release>`). `cleanup.enabled=true` switches it to an hourly CronJob without metrics and turns the in-server sweep off.
 - Keep `replicaCount: 1`.

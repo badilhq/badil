@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -17,6 +19,16 @@ func TestDefaultAppName(t *testing.T) {
 	}
 	if flag := bootstrapAppCmd().Flags().Lookup("name"); !re.MatchString(flag.DefValue) {
 		t.Fatalf("--name default = %q, want match %s", flag.DefValue, re)
+	}
+}
+
+func TestPrintPlanListsEvents(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	printPlan(&out, bootstrapOpts{appName: "badil-dev"}, "https://d.example.com/webhooks/github")
+	if want := "events:      pull_request, push "; !strings.Contains(out.String(), want) {
+		t.Errorf("plan = %q, want it to contain %q", out.String(), want)
 	}
 }
 
