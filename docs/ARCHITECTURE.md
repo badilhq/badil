@@ -33,7 +33,7 @@ Self-hosted, single-tenant. Everything runs in the user's cluster; badil talks t
 ## Gitops repo contract
 
 ```
-badil.yaml                       # read by badil only: services, their chart settings and image tag format, dependencies, namespace metadata, optional preview block
+badil.yaml                       # read by badil only: services, their chart settings and image tag format, dependencies, needs, namespace metadata, optional preview block
 previews/<slug>/values.yaml      # written by badil, read by preview-env: apiVersion badil.dev/v1beta1, self-contained
 ```
 
@@ -57,8 +57,10 @@ services:                       # required, non-empty: the service catalog, in c
       hostParam: ingress.hostname   # default "app.ingress.host": Helm parameter set to the preview host
       valueFiles:               # default none: extra values files, applied in order
         - values-preview.yaml
+    needs: [postgres]           # optional: the services and dependencies it calls (see Needs)
   front:
     repo: https://github.com/acme/front.git
+    needs: [backend-1]
 dependencies:                   # optional: upstream charts deployed in every preview, in this order
   postgres:
     chart: oci://registry-1.docker.io/bitnamicharts/postgresql   # an oci:// chart reference: repo must be absent
@@ -70,6 +72,7 @@ dependencies:                   # optional: upstream charts deployed in every pr
     chart: mailpit              # the chart name in repo
     version: 0.20.0
     hostParam: ingress.hostname # required when exposed: Helm parameter set to the preview host
+    # needs: [...]              # optional on a dependency too
 preview:                        # optional: preview label, preview cap and per-preview URLs (URLs off without domain)
   label: preview                # optional, default "preview": the PR label that creates the preview
   maxPreviews: 10               # optional, default no cap: deploys that would create a preview past it are refused
@@ -96,6 +99,7 @@ badil reads `badil.yaml` on every deploy, reconcile, teardown that keeps the pre
   Argo CD replaces the branch-tracking variables with the revision it syncs. `/v1/deploy` accepts any `commit_sha`: send the full SHA, or a `{sha7}`/`{sha8}` tag will not match the one CI pushed.
 - `services.<name>.chart` keys are all optional: badil writes each into the preview file with its default applied. `path`, `imageTagParam` and `hostParam` must be non-empty strings, and `valueFiles` a non-empty list of non-empty strings. A null `chart` or a null key is rejected; omit it to use the defaults.
 - `dependencies.<name>` needs `chart` and `version`, non-empty strings (quote a version YAML reads as a number, such as `"1.0"`). A `chart` starting with `oci://` is an OCI chart reference and `repo` must be absent; any other `chart` is a chart name and `repo`, an `https://` Helm repository URL, is required. `values` is any mapping, `valueFiles` a non-empty list of non-empty strings and `hostParam` a non-empty string; an exposed dependency without `hostParam` is rejected, as no Helm parameter is known to set its host. A dependency name must be unique and must not be a service name: both become `<slug>-<name>` Applications. See [Dependencies](#dependencies).
+- `services.<name>.needs` and `dependencies.<name>.needs` are non-empty lists of names of services or dependencies of `badil.yaml`. An unknown name, a repeated name, the entry's own name and an empty list are rejected, with the key's path (for example `badil.yaml: services.front.needs: "cache" is neither a service nor a dependency`). Cycles are allowed. See [Needs](#needs).
 - `namespace.labels` and `namespace.annotations` are added to every preview Namespace, after the chart's own (`app.kubernetes.io/name`, `app.kubernetes.io/instance`, `app.kubernetes.io/part-of`, `app.kubernetes.io/managed-by`, and the annotation `argocd.argoproj.io/sync-wave`). Keys and values are strings (an empty value is allowed); a null, a number or a boolean is rejected, as is a key the chart sets. An empty block writes nothing.
 - `preview.label` must be a non-empty string; it is matched case-insensitively, like GitHub label names. `<label>:<name>` labels name the preview (see the label flow below).
 - `preview.maxPreviews` must be a YAML integer of at least 1; a string (`"3"`), `0`, a negative number or a float is rejected, and a null or empty value means unset. It does not need `preview.domain`. See Preview cap in the [HTTP API](#http-api) section.
@@ -149,7 +153,7 @@ dependencies:                   # required, may be empty: dependencies of badil.
 The file is self-contained: a renderer needs only it to know each service's repo, revision, image tag and chart settings, each dependency's chart, version and values, and the namespace metadata. Contract v1beta1:
 
 - **Strict.** Every object is closed: an unknown field at any level of an entry, of `chart`, of `metadata` or of `namespace` is rejected. `apiVersion` must be `badil.dev/v1beta1`. Every field has the type shown; a null value is rejected, as is a pinned entry without `metadata` or `metadata` without `commitSha`.
-- **Written on every deploy, teardown and sweep.** Each deploy write, and the cleanup sweep's sync (step 4 of [Cleanup sweep](#cleanup-sweep)), project the file on the catalog as it is then: `apiVersion`, `gitopsRepoURL`, `namespace`, every service of `services` in catalog order with its `repoURL`, `branch`, `chart`, `imageTag` and `host` (a missing one added as a branch-tracking entry), then the pinned entries of services no longer in `services` that have a `repoURL`, unchanged except `host`, recomputed from `preview.expose`, then every dependency of `badil.yaml` in its order, with its `host`. A `badil.yaml` change is written on the next deploy, even for an unchanged SHA, and in every preview by the next sweep, one commit per preview; the PR comment is refreshed only when the services, the dependencies or hosts change. See [Pinned and branch-tracking services](#pinned-and-branch-tracking-services) for removed services. Teardowns unpin, then project the file on `badil.yaml`, in the same commit, so an unpinned entry gets its branch-tracking `imageTag` at once. When `badil.yaml` cannot be read or parsed, such a teardown writes nothing and fails: the file keeps the PR's pin, and the next event of that PR or the next sweep retries it. A teardown that deletes the preview does not read `badil.yaml`.
+- **Written on every deploy, teardown and sweep.** Each deploy write, and the cleanup sweep's sync (step 4 of [Cleanup sweep](#cleanup-sweep)), project the file on the catalog as it is then: `apiVersion`, `gitopsRepoURL`, `namespace`, every service of `services` in catalog order with its `repoURL`, `branch`, `chart`, `imageTag` and `host` (a missing one added as a branch-tracking entry), then the pinned entries of services no longer in `services` that have a `repoURL`, unchanged except `host`, recomputed from `preview.expose`, then every dependency of `badil.yaml` in its order, with its `host`. When an entry of `badil.yaml` declares `needs`, only the pinned entries and what they need are kept (see [Needs](#needs)). A `badil.yaml` change is written on the next deploy, even for an unchanged SHA, and in every preview by the next sweep, one commit per preview; the PR comment is refreshed only when the services, the dependencies or hosts change. See [Pinned and branch-tracking services](#pinned-and-branch-tracking-services) for removed services. Teardowns unpin, then project the file on `badil.yaml`, in the same commit, so an unpinned entry gets its branch-tracking `imageTag` at once. When `badil.yaml` cannot be read or parsed, such a teardown writes nothing and fails: the file keeps the PR's pin, and the next event of that PR or the next sweep retries it. A teardown that deletes the preview does not read `badil.yaml`.
 - **Validated by the chart.** `preview-env` ships `values.schema.json`, generated from badil's Go types (`make schema`), and Helm validates the values (the preview file and `argocdNamespace`) against it on every render; a violation fails the render with the field's JSON pointer, for example `at '': missing property 'apiVersion'`. CI fails when the schema is out of date. The root is closed: a key other than `apiVersion`, `gitopsRepoURL`, `namespace`, `services`, `dependencies` and `argocdNamespace` fails the render, and a missing `gitopsRepoURL` or `dependencies` fails it too.
 
 ## Per-preview URLs
@@ -182,7 +186,7 @@ The image tag parameter is passed with `forceString: true`, so a digits-only sho
 
 In both modes the Application's `repoURL` is the entry's `repoURL`, and the AppProject's `sourceRepos` are the distinct `repoURL`s of the file's entries.
 
-Every preview lists every service of `badil.yaml`: a service added to it appears in every preview as a branch-tracking entry at the next write (deploy, sweep, or a teardown that keeps the preview). A service removed from `badil.yaml` leaves a preview according to its mode:
+Every preview lists every service of `badil.yaml` (only the pinned ones and what they need when `badil.yaml` declares `needs`, see [Needs](#needs)): a service added to it appears in every preview as a branch-tracking entry at the next write (deploy, sweep, or a teardown that keeps the preview). A service removed from `badil.yaml` leaves a preview according to its mode:
 
 - **Branch-tracking** entries are dropped by the next write, and Argo CD prunes their Application.
 - **Pinned** entries stay, with their last `name`, `repoURL`, `branch`, `commitSha`, `imageTag`, `chart` and `metadata`, and keep running at their SHA until their PR leaves the preview: its teardown unpins them and drops them in the same commit, or deletes the file when no pin remains. This protects the previews of open PRs from an accidental removal. A kept entry keeps its `host` while its name is still in `preview.expose`.
@@ -205,7 +209,7 @@ References: [Helm build environment in Argo CD](https://argo-cd.readthedocs.io/e
 
 ## Dependencies
 
-`dependencies` of `badil.yaml` are upstream charts deployed in every preview next to the services: a database, a cache, a mail catcher. They are never pinned, get no image tag, and need no git repo of their own. badil writes them into every preview file, in `badil.yaml` order, on every deploy, teardown that keeps the preview, and sweep sync: a dependency added to or removed from `badil.yaml` reaches every preview by its next write, and the PR comment is refreshed.
+`dependencies` of `badil.yaml` are upstream charts deployed in every preview (only in those whose pinned services need them when `badil.yaml` declares `needs`, see [Needs](#needs)) next to the services: a database, a cache, a mail catcher. They are never pinned, get no image tag, and need no git repo of their own. badil writes them into every preview file, in `badil.yaml` order, on every deploy, teardown that keeps the preview, and sweep sync: a dependency added to or removed from `badil.yaml` reaches every preview by its next write, and the PR comment is refreshed.
 
 `preview-env` ([`dependencies.yaml`](../charts/preview-env/templates/dependencies.yaml)) renders one Application `<slug>-<name>` per dependency, in the preview namespace, from its chart source:
 
@@ -226,6 +230,29 @@ Name collision: a dependency name is never a service name of `badil.yaml`, which
 AppProject limit: the per-preview AppProject allows only the preview namespace as destination and only `Namespace` as a cluster-scoped kind, for dependencies as for services. Argo CD refuses a chart that renders cluster-scoped resources (a ClusterRole, a CRD) or targets another namespace: pick a chart, or values, that render only namespaced resources in the release namespace. badil does not work around it.
 
 A private chart registry or Helm repository needs an Argo CD repository credential, which you set up: badil passes no credential.
+
+## Needs
+
+`needs` trims a preview to what its PRs use. A service or dependency of `badil.yaml` may list the services and dependencies it calls:
+
+```yaml
+services:
+  front:    {repo: …, needs: [backend]}
+  backend:  {repo: …, needs: [postgres, redis]}
+  payments: {repo: …, needs: [backend, kafka, postgres]}
+  search:   {repo: …, needs: [elasticsearch]}
+dependencies:
+  postgres: {…}
+  redis: {…}
+  kafka: {…}
+  elasticsearch: {…}
+```
+
+- **Activation.** When no entry of `badil.yaml` declares `needs`, every preview runs every service and dependency. As soon as one entry declares it, every preview runs only its included set: its pinned entries (catalog services, and kept pinned entries of services removed from `badil.yaml`), plus every service and dependency in the transitive `needs` of its pinned catalog services. A kept pinned entry of a removed service has no `needs`. Cycles are followed once.
+- **Projection.** Every write projects the file on `badil.yaml` (deploy, teardown that keeps the preview, sweep sync), so the set is computed on each: included services in catalog order, then kept pinned entries of removed services, then included dependencies in `badil.yaml` order, hosts only for included parts. A part left out is absent from the preview file: `preview-env` renders no Application for it and Argo CD prunes it. A shared preview grows when a PR joins and shrinks when one leaves: closing the `payments` PR of a preview also pinned by `front` drops `payments` and `kafka` in the teardown commit.
+- **User responsibility.** badil does not infer `needs`. A missing entry gives a preview without a part the code calls.
+- **PR comment.** After the service and dependency lists, separated by a blank line, a line names the catalog services then the dependencies left out, in `badil.yaml` order, only when there is at least one. With only `front` pinned in the example: ``Not in this preview: `payments`, `search`, `kafka`, `elasticsearch` ``. It comes before the pinned-image note.
+- **Staleness.** The line is derived from `badil.yaml` minus the included set, and is refreshed only by a deploy, or by a write that changes the ordered service or dependency names or a host. A `badil.yaml` change that alters only the left-out set (a new service or dependency that no pinned part needs) leaves the preview file unchanged: the sweep writes nothing and existing comments keep the old line until the PR's next deploy.
 
 ## Service repo contract
 
