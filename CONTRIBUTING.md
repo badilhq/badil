@@ -38,7 +38,6 @@ Chart versioning:
 - Never hand-edit `version`/`appVersion` in `charts/badil/Chart.yaml`; the release sets both.
 - A PR that changes `charts/preview-apps` or `charts/app` must bump that chart's `version` (enforced by the required `lint` check of the `Charts` workflow).
 - Merged bumps are published to `oci://ghcr.io/badilhq/charts` on the next push to `main`.
-- A chart published for the first time is private on GHCR; an org owner sets it Public in its package settings.
 - If the image or chart publish of a release fails, re-run the failed jobs of that Release run: later pushes don't retry it.
 
 ## License
