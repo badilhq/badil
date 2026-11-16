@@ -4,4 +4,9 @@ services:
   - name: api
     repoURL: https://github.com/acme/platform.git
     branch: main
+    imageTag: ${ARGOCD_APP_REVISION}
+    chart:
+      path: k8s/
+      imageTagParam: app.image.tag
+      hostParam: app.ingress.host
     image: x

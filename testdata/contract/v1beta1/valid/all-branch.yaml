@@ -1,9 +1,20 @@
-# Every service tracks its branch: no commitSha, no host, no metadata.
+# Every service tracks its branch: no commitSha, no host, no metadata. api's
+# image tag is a short SHA with a prefix, which Argo CD substitutes.
 apiVersion: badil.dev/v1beta1
 services:
   - name: api
     repoURL: https://github.com/acme/platform.git
     branch: main
+    imageTag: sha-${ARGOCD_APP_REVISION_SHORT}
+    chart:
+      path: k8s/
+      imageTagParam: app.image.tag
+      hostParam: app.ingress.host
   - name: front
     repoURL: https://github.com/acme/front.git
     branch: main
+    imageTag: ${ARGOCD_APP_REVISION}
+    chart:
+      path: k8s/
+      imageTagParam: app.image.tag
+      hostParam: app.ingress.host

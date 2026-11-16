@@ -1,11 +1,23 @@
-# Three services from two repos: api pinned by a PR, with a host; front
-# tracking its branch, with a host; worker tracking its branch, without one.
+# Three services from two repos: api pinned by a PR, with a host, its chart
+# under deploy/chart with a values file; front tracking its branch, with a
+# host on a custom parameter; worker tracking its branch, without one. The
+# preview Namespace gets an extra label.
 apiVersion: badil.dev/v1beta1
+namespace:
+  labels:
+    team: platform
 services:
   - name: api
     repoURL: https://github.com/acme/platform.git
     branch: main
     commitSha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+    imageTag: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+    chart:
+      path: deploy/chart
+      imageTagParam: app.image.tag
+      hostParam: app.ingress.host
+      valueFiles:
+        - values-preview.yaml
     host: api-feature-pricing.preview.example.com
     metadata:
       pr-author: octocat
@@ -18,7 +30,17 @@ services:
   - name: front
     repoURL: https://github.com/acme/front.git
     branch: main
+    imageTag: ${ARGOCD_APP_REVISION}
+    chart:
+      path: k8s/
+      imageTagParam: image.tag
+      hostParam: ingress.hostname
     host: front-feature-pricing.preview.example.com
   - name: worker
     repoURL: https://github.com/acme/platform.git
     branch: develop
+    imageTag: ${ARGOCD_APP_REVISION}
+    chart:
+      path: k8s/
+      imageTagParam: app.image.tag
+      hostParam: app.ingress.host

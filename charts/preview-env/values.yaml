@@ -1,12 +1,10 @@
-# Input contract: values.schema.json validates the merged values on every
-# render. apiVersion and services come from the preview file badil writes at
-# previews/<slug>/values.yaml; serviceCharts and previewNamespace from the
-# gitops repo's preview-env.yaml. Any other root key (such as serviceRepos or
-# preview, which badil reads from badil.yaml) fails rendering, as does
-# serviceCharts.<name>.branch. A null serviceCharts entry or field, a null
-# previewNamespace, labels or annotations, and a null field of a services
-# entry are rejected. A null serviceCharts falls back to its default ({}); a
-# null argocdNamespace is rejected as missing.
+# Input contract: values.schema.json validates the values on every render.
+# They are the preview file badil writes at previews/<slug>/values.yaml
+# (apiVersion, namespace, services) and argocdNamespace. Any other root key
+# fails rendering. badil writes every chart setting and the image tag of each
+# service into the preview file, from the gitops repo's badil.yaml: this chart
+# has no defaults for them. A null field of a services entry, of its chart or
+# of namespace is rejected.
 
 # argocdNamespace: the namespace Argo CD runs in. The AppProject and every
 # service Application are created there. Must be a Kubernetes namespace name.
@@ -15,16 +13,32 @@ argocdNamespace: argocd
 # apiVersion: required, badil.dev/v1beta1. There is no default: a preview file
 # without it (written by an older badil) fails rendering.
 #
+# namespace: optional extra metadata of the preview Namespace, present when
+# badil.yaml sets it. Values are strings. A label the chart already sets
+# (app.kubernetes.io/name, app.kubernetes.io/instance,
+# app.kubernetes.io/part-of, app.kubernetes.io/managed-by) or the annotation
+# argocd.argoproj.io/sync-wave fails rendering.
+#
 # services: one entry per service of the preview, in catalog order. Unknown
 # fields are rejected.
 #
 # apiVersion: badil.dev/v1beta1
+# namespace:
+#   labels: {pod-security.kubernetes.io/enforce: baseline}
+#   annotations: {}
 # services:
 #   - name: backend-1                                    # required
 #     repoURL: https://github.com/acme/backend-1.git     # required: the service's git URL, the Application source and an AppProject sourceRepo
 #     branch: main                                       # required: targetRevision when not pinned
-#     commitSha: "abc123"         # optional — pinned to commit SHA (used as targetRevision and the image tag); requires metadata
-#     host: "backend-1-feature-pricing.example.com"   # optional, written by badil for exposed services; becomes the host parameter (default app.ingress.host)
+#     commitSha: "abc123"         # optional — pinned to this commit (targetRevision); requires metadata
+#     imageTag: "abc123"          # required: the value of the image tag parameter, passed as a string as written
+#     chart:                      # required
+#       path: k8s/                # required: chart path in the service repo
+#       imageTagParam: app.image.tag    # required: Helm parameter set to imageTag
+#       hostParam: app.ingress.host     # required: Helm parameter set to host
+#       valueFiles:               # optional: extra values files, applied in order
+#         - values-preview.yaml
+#     host: "backend-1-feature-pricing.example.com"   # optional, written by badil for exposed services; becomes the hostParam parameter
 #     metadata:                    # optional — present exactly when commitSha is; every key required
 #       pr-author: "octocat"
 #       pr-url: "https://github.com/badilhq/demo-backend-1/pull/42"
@@ -33,25 +47,16 @@ argocdNamespace: argocd
 #       updated-at: "2026-02-18T16:00:00Z"
 #       vcs.ref.name: "feature/add-pricing"
 #       cicd.pipeline.run.url: "https://github.com/badilhq/demo-backend-1/actions/runs/12345"
-#   - name: backend-2              # no commitSha → tracks its branch at $ARGOCD_APP_REVISION, no metadata
+#   - name: backend-2              # no commitSha → tracks its branch, no metadata
 #     repoURL: https://github.com/acme/backend-2.git
 #     branch: main
-
-services: []
-
-# serviceCharts: optional per-service chart settings, read from the gitops
-# repo's preview-env.yaml. Every key is optional; a service without an entry uses
-# every default. A null entry or a null field is rejected; omit the entry or
-# the field to use the defaults. String values must be non-empty strings:
-# quote YAML 1.1 booleans such as yes, no, on, off.
+#     imageTag: "sha-${ARGOCD_APP_REVISION_SHORT}"   # Argo CD substitutes the deployed revision
+#     chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
 #
-# serviceCharts:
-#   backend-1:
-#     path: deploy/helm           # default "k8s/": chart path in the service repo
-#     imageTagParam: image.tag    # default "app.image.tag": Helm parameter set to the image tag
-#     hostParam: ingress.hostname # default "app.ingress.host": Helm parameter set to the preview host
-#     valueFiles:                 # default none: extra values files, applied in order
-#       - values-preview.yaml
+# imageTag is passed with forceString: true, so a digits-only short SHA stays
+# a string. On a branch-tracking entry it holds ${ARGOCD_APP_REVISION},
+# ${ARGOCD_APP_REVISION_SHORT} or ${ARGOCD_APP_REVISION_SHORT_8}, which Argo CD
+# replaces with the revision it deploys.
 #
 # Argo CD resolves each valueFiles entry: a relative path is joined to the
 # chart path, a path starting with "/" is joined to the service repo root, and a
@@ -62,32 +67,5 @@ services: []
 # hostParam is passed as a Helm --set, so a list-indexed name such as
 # ingress.hosts[0].host replaces the chart's default list: the full list (with
 # its paths) and ingress.enabled: true must then come from a file in valueFiles.
-serviceCharts: {}
 
-# previewNamespace: optional extra metadata for the preview Namespace, read
-# from the gitops repo's preview-env.yaml. A null previewNamespace, labels or
-# annotations is rejected; omit it instead. Values must be strings: quote
-# YAML 1.1 booleans such as yes, no, on, off. Quote such keys too: Helm reads
-# an unquoted key y or n as true or false. A label the chart already sets
-# (app.kubernetes.io/name, app.kubernetes.io/instance,
-# app.kubernetes.io/part-of, app.kubernetes.io/managed-by) or the annotation
-# argocd.argoproj.io/sync-wave fails rendering.
-#
-# previewNamespace:
-#   labels: {}        # extra Namespace labels, string values
-#   annotations: {}   # extra Namespace annotations, string values
-
-# Ingress hosts come from each service entry's host, written by badil from
-# the preview block of the gitops repo's badil.yaml, and are passed as the
-# Helm parameter app.ingress.host (or the service's serviceCharts hostParam).
-# An entry without host gets no ingress host.
-# The preview block is badil's input, in badil.yaml; this chart does not read
-# it and rejects it in its values:
-#
-# preview:
-#   domain: 127.0.0.1.nip.io      # lowercase bare domain, parent of every preview host
-#   tls: false                    # optional, default true; only picks https/http in badil's PR-comment links
-#   expose:                       # services that get a host; others get none
-#     front: {}                   # entry value: empty, {} or {path: ...}
-#     backend-1:
-#       path: /docs               # optional, default "/"; only used in badil's PR-comment links
+services: []

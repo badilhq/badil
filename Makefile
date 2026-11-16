@@ -19,10 +19,11 @@ schema:
 
 # Regenerates the preview-env renders of the valid contract fixtures in
 # testdata/contract/v1beta1/preview-env, which the Charts workflow diffs against.
+# Each fixture is rendered alone, as the ApplicationSet passes a preview file.
 contract-golden:
 	for f in testdata/contract/v1beta1/valid/*.yaml; do \
 		n=$$(basename "$$f" .yaml); \
-		helm template "$$n" charts/preview-env -f testdata/contract/v1beta1/preview-env.yaml -f "$$f" \
+		helm template "$$n" charts/preview-env -f "$$f" --set argocdNamespace=argocd \
 			> "testdata/contract/v1beta1/preview-env/$$n.golden.yaml" || exit 1; \
 	done
 

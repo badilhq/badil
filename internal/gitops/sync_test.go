@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/preview"
 )
 
 // staleBranchFile is pinnedFile with backend-2 tracking the branch old.
@@ -38,7 +39,47 @@ func TestSyncPreviewWithRetry(t *testing.T) {
 			wantChanged: true, wantNotify: true, wantGets: 1, wantPuts: 1,
 			wantWritten: []string{
 				"  - name: front\n    repoURL: https://github.com/acme/front.git\n    branch: main\n" +
+					"    imageTag: ${ARGOCD_APP_REVISION}\n" + defaultChartYAML +
 					"  - name: backend-2\n",
+			},
+		},
+		{
+			name: "chart settings change", files: []string{pinnedFile()},
+			catalog: func(c *gitops.ServiceCatalog) {
+				c.Charts = map[string]preview.ChartSettings{
+					"backend-2": {Path: "deploy/helm", ValueFiles: []string{"values-preview.yaml"}},
+				}
+			},
+			wantChanged: true, wantGets: 1, wantPuts: 1,
+			wantWritten: []string{
+				"    branch: main\n    imageTag: ${ARGOCD_APP_REVISION}\n    chart:\n      path: deploy/helm\n" +
+					"      imageTagParam: app.image.tag\n      hostParam: app.ingress.host\n" +
+					"      valueFiles:\n        - values-preview.yaml\n",
+			},
+		},
+		{
+			name: "image tag format change", files: []string{pinnedFile()},
+			catalog: func(c *gitops.ServiceCatalog) {
+				c.ImageTag = "sha-{sha7}"
+				c.ImageTags = map[string]string{"backend-2": "{sha8}-amd64"}
+			},
+			wantChanged: true, wantGets: 1, wantPuts: 1,
+			wantWritten: []string{
+				"    commitSha: abc1234567890\n    imageTag: sha-abc1234\n",
+				"    branch: main\n    imageTag: ${ARGOCD_APP_REVISION_SHORT_8}-amd64\n",
+			},
+		},
+		{
+			name:  "namespace change",
+			files: []string{pinnedFile()},
+			catalog: func(c *gitops.ServiceCatalog) {
+				c.Namespace = &preview.NamespaceMetadata{Labels: map[string]string{"team": "platform"}}
+			},
+			wantChanged: true,
+			wantGets:    1,
+			wantPuts:    1,
+			wantWritten: []string{
+				"apiVersion: badil.dev/v1beta1\nnamespace:\n  labels:\n    team: platform\nservices:\n",
 			},
 		},
 		{

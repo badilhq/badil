@@ -6,14 +6,15 @@ From an empty cluster to a first preview. Contract details live in [ARCHITECTURE
 
 - A Kubernetes cluster with Argo CD 3.1 or later (OCI chart source, Beta since v3.1.0), in any namespace. The `preview-env` chart creates its AppProject and Applications in the namespace set by its `argocdNamespace` value (default `argocd`, `preview-env` 0.7.0 or later). When Argo CD runs elsewhere, set that namespace in the places [Adapt to your org](../examples/argocd/README.md#adapt-to-your-org) lists, and read `-n argocd` in the commands of this guide as your Argo CD namespace.
 - An ingress controller with TLS for the badil webhook URL (GitHub calls it over https), plus wildcard DNS when preview URLs are used.
-- A GitHub gitops repo, and service repos whose CI pushes images tagged with the full commit SHA, all under the one account (user or org) the App is installed on.
+- A GitHub gitops repo, and service repos whose CI pushes images tagged as the `imageTag` format of `badil.yaml` renders the commit SHA (the full SHA by default), all under the one account (user or org) the App is installed on. `/v1/deploy` must send the full SHA for a `{sha7}` or `{sha8}` tag to match the one CI pushed.
 - Service images pullable from the preview namespaces: `preview-env` creates each namespace fresh, with no `imagePullSecrets`. Use public images, node-level registry credentials, or pull secrets set by the service chart.
 - `kubectl`, Helm 3.8+ and Go 1.26+ (for the `badil` CLI).
 
 ## 2. Gitops repo
 
-- Commit at the root a `badil.yaml`, starting from [`examples/argocd/badil.yaml`](../examples/argocd/badil.yaml) (`services` required, `preview` optional), and a `preview-env.yaml`, starting from [`examples/argocd/preview-env.yaml`](../examples/argocd/preview-env.yaml) (`serviceCharts` and `previewNamespace` optional; the file may be `{}`).
-- `previewNamespace` (optional, in `preview-env.yaml`) adds labels and annotations to every preview Namespace, for example a Pod Security level (`pod-security.kubernetes.io/enforce: baseline`) or cost-allocation labels. Values must be strings; a key the chart already sets fails the render.
+- Commit at the root a `badil.yaml`, starting from [`examples/argocd/badil.yaml`](../examples/argocd/badil.yaml) (`services` required; `imageTag`, `namespace`, `preview` and each service's `branch`, `imageTag` and `chart` optional). It is the only preview config: badil writes the chart settings and image tags into each preview file.
+- `imageTag` (optional, default `"{sha}"`) is the image tag format CI tags images with, for example `"sha-{sha7}"`; a service can override it.
+- `namespace` (optional) adds labels and annotations to every preview Namespace, for example a Pod Security level (`pod-security.kubernetes.io/enforce: baseline`) or cost-allocation labels. Values must be strings; badil rejects a key the chart already sets.
 - Each `services.<name>.repo` URL in `badil.yaml` must be `https://github.com/<owner>/<repo>` (with or without `.git`), or the label flow never matches it.
 - Contract: ARCHITECTURE [Gitops repo contract](ARCHITECTURE.md#gitops-repo-contract).
 - badil creates `previews/` itself; a missing directory reads as no previews.
@@ -233,8 +234,8 @@ badil sets no quota or network policy on previews. To cap each preview's resourc
 ## 7. Service repos
 
 - Create the `preview` label (or your custom `preview.label`) in each service repo, e.g. `gh label create preview --repo <owner>/<repo>`. Create any `preview:<name>` label yourself in each repo too: badil never creates labels.
-- CI must push the image tagged with the full commit SHA: ARCHITECTURE [Pinned and branch-tracking services](ARCHITECTURE.md#pinned-and-branch-tracking-services).
-- Chart contract and `serviceCharts` overrides (in `preview-env.yaml`): ARCHITECTURE [Service repo contract](ARCHITECTURE.md#service-repo-contract).
+- CI must push the image tagged as the service's `imageTag` format renders the commit SHA (the full SHA by default): ARCHITECTURE [Pinned and branch-tracking services](ARCHITECTURE.md#pinned-and-branch-tracking-services).
+- Chart contract and the `services.<name>.chart` settings (in `badil.yaml`): ARCHITECTURE [Service repo contract](ARCHITECTURE.md#service-repo-contract).
 
 ## 8. First preview
 
@@ -252,18 +253,13 @@ Set `preview.domain` in `badil.yaml`, create a wildcard DNS record `*.<domain>` 
 
 ## 10. Upgrade
 
-1. When the gitops repo still has `services.yaml`: commit `badil.yaml` and `preview-env.yaml` at its root before upgrading badil (which fails every deploy and reconcile without `badil.yaml`), and keep `services.yaml` until step 5: the running badil and the deployed ApplicationSet still read it. Each `serviceRepos.<name>` URL becomes `services.<name>.repo`, each `serviceCharts.<name>.branch` becomes `services.<name>.branch`, and the `preview` block moves as is to `badil.yaml`; `serviceCharts` (without `branch`) and `previewNamespace` go to `preview-env.yaml`, `{}` when neither is set. See ARCHITECTURE [Gitops repo contract](ARCHITECTURE.md#gitops-repo-contract).
-2. Upgrade badil, with the values of the installed release:
+1. Upgrade badil, with the values of the installed release:
 
    ```bash
    helm get values badil -n badil -o yaml > badil-values.yaml
    helm upgrade badil oci://ghcr.io/badilhq/charts/badil -n badil --version X.Y.Z -f badil-values.yaml
    ```
-3. Right after step 2, bump the chart: set the ApplicationSet's `preview-env` `targetRevision` and its `valueFiles` (`$values/preview-env.yaml`, then the preview file) to the ones in the new tag's [`examples/argocd/applicationset-previews.yaml`](../examples/argocd/applicationset-previews.yaml), and re-apply it. When upgrading from `preview-env` 0.9.0: until then, 0.9.0 refuses each file the new badil has rewritten, and Argo CD shows `at '/apiVersion': value must be 'badil.dev/v1'` on its Application.
-4. When upgrading to `preview-env` 0.10.0 from an earlier version: wait for one sweep (at most `cleanup.interval`, `1h` by default, or one CronJob `schedule` run with `cleanup.enabled=true`; with `cleanup.interval` empty and the CronJob off, no sweep runs and nothing is rewritten): the sync rewrites every file that has a pin to `badil.dev/v1beta1` (files with `badil.dev/v1` or with no `apiVersion`), and the sweep deletes the others. `preview-env` 0.10.0 refuses files whose `apiVersion` is not `badil.dev/v1beta1`. Until a file is rewritten, Argo CD shows its render error on the preview's Application, as in the ARCHITECTURE [upgrade block](ARCHITECTURE.md#gitops-repo-contract):
-   - `at '/apiVersion': value must be 'badil.dev/v1beta1'`: `preview-env` 0.10.0, a `badil.dev/v1` file.
-   - `missing property 'apiVersion'`: `preview-env` 0.10.0, a file written before 0.18.0.
-5. When step 1 applied: delete `services.yaml` from the gitops repo once the ApplicationSet is re-applied.
+2. Set the ApplicationSet's `preview-env` `targetRevision` and `valueFiles` to the ones in the new tag's [`examples/argocd/applicationset-previews.yaml`](../examples/argocd/applicationset-previews.yaml), and re-apply it: Argo CD does not manage the ApplicationSet.
 
 ## 11. Troubleshooting
 

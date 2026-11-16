@@ -5,3 +5,8 @@ services:
     repoURL: https://github.com/acme/platform.git
     branch: main
     commitSha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+    imageTag: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+    chart:
+      path: k8s/
+      imageTagParam: app.image.tag
+      hostParam: app.ingress.host

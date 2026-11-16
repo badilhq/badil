@@ -3,3 +3,8 @@ apiVersion: badil.dev/v1beta1
 services:
   - name: api
     branch: main
+    imageTag: ${ARGOCD_APP_REVISION}
+    chart:
+      path: k8s/
+      imageTagParam: app.image.tag
+      hostParam: app.ingress.host

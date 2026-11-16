@@ -70,7 +70,7 @@ badil verify-app      # check GitHub App credentials, list installations
 badil version         # print the version (also badil --version)
 ```
 
-badil reads its service catalog and `preview` block from `badil.yaml` in the gitops repo; `preview-env` reads its chart settings from `preview-env.yaml` (see ARCHITECTURE [Gitops repo contract](docs/ARCHITECTURE.md#gitops-repo-contract)).
+badil reads its whole preview config from `badil.yaml` in the gitops repo (service catalog, chart settings, image tag format, namespace metadata, `preview` block) and writes everything `preview-env` needs into each preview file (see ARCHITECTURE [Gitops repo contract](docs/ARCHITECTURE.md#gitops-repo-contract)).
 
 Configuration (env):
 

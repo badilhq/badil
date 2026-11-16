@@ -1,4 +1,4 @@
-{{- $pn := .Values.previewNamespace | default dict }}
+{{- $pn := .Values.namespace | default dict }}
 apiVersion: v1
 kind: Namespace
 metadata:

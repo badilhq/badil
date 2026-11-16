@@ -282,10 +282,11 @@ type WriteResult struct {
 // commitSha, the rest tracking their branch).
 //
 // After every build or merge, preview.ApplyCatalog then preview.ApplyHosts
-// project the file on catalog: apiVersion, every catalog service in catalog
-// order (a missing one added as a branch-tracking entry) with its repoURL,
-// branch and host, then the pinned entries of services no longer in it; their
-// unpinned entries are dropped. The written file follows the current catalog.
+// project the file on catalog: apiVersion and namespace, every catalog
+// service in catalog order (a missing one added as a branch-tracking entry)
+// with its repoURL, branch, chart, imageTag and host, then the pinned entries
+// of services no longer in it; their unpinned entries are dropped. The
+// written file follows the current catalog.
 //
 // With skipUnchanged, when the file exists and the values to write differ
 // from it only in serviceName's updated-at (preview.EqualExceptUpdatedAt),
@@ -318,11 +319,20 @@ func (c *Client) WritePreviewWithRetry(
 	return res, err
 }
 
-// applyCatalog returns vals projected on catalog: every catalog service in
-// catalog order with its repoURL and branch, then the pinned entries of removed
-// services (preview.ApplyCatalog), then hosts (preview.ApplyHosts).
+// applyCatalog returns vals projected on catalog: the namespace metadata,
+// every catalog service in catalog order with its repoURL, branch, chart and
+// imageTag, then the pinned entries of removed services
+// (preview.ApplyCatalog), then hosts (preview.ApplyHosts).
 func applyCatalog(vals preview.PreviewValues, slug string, catalog *ServiceCatalog) preview.PreviewValues {
-	projected := preview.ApplyCatalog(vals, catalog.Services, catalog.Repos, catalog.Branches)
+	projected := preview.ApplyCatalog(vals, preview.Catalog{
+		Services:  catalog.Services,
+		Repos:     catalog.Repos,
+		Branches:  catalog.Branches,
+		ImageTag:  catalog.ImageTag,
+		ImageTags: catalog.ImageTags,
+		Charts:    catalog.Charts,
+		Namespace: catalog.Namespace,
+	})
 	return preview.ApplyHosts(projected, slug, catalog.URLs)
 }
 
@@ -393,8 +403,12 @@ type TeardownResult struct {
 }
 
 // TeardownPreviewWithRetry unpins every service of previews/<slug>/values.yaml
-// deployed by the PR owner/repo#prNumber. The file is updated when other pins
-// remain and deleted otherwise. On a 409 conflict the file is re-fetched, the
+// deployed by the PR owner/repo#prNumber. The file is deleted when no pin
+// remains. Otherwise it is updated, projected on badil.yaml after the unpin
+// (applyCatalog), so that an unpinned entry gets its branch-tracking imageTag
+// in the same commit: badil.yaml is read once, before the first update, and a
+// read or parse error fails the teardown with nothing written. A deletion
+// does not read badil.yaml. On a 409 conflict the file is re-fetched, the
 // unpin re-applied and update vs delete decided again, up to MaxWriteRetries
 // attempts. A missing file (on read, re-fetch or delete) or a PR that pinned
 // nothing is a no-op: an empty TeardownResult and a nil error.
@@ -425,6 +439,7 @@ func (c *Client) teardownPreviewWithRetry(
 		return nil, err
 	}
 
+	var catalog *ServiceCatalog
 	for attempt := 1; attempt <= MaxWriteRetries; attempt++ {
 		vals, removed, pinned := preview.UnpinPR(*existing, owner, repo, prNumber)
 		if len(removed) == 0 {
@@ -433,6 +448,12 @@ func (c *Client) teardownPreviewWithRetry(
 		result := &TeardownResult{Removed: removed, Deleted: !pinned}
 		var writeErr error
 		if pinned {
+			if catalog == nil {
+				if catalog, err = c.FetchServiceCatalog(ctx); err != nil {
+					return nil, fmt.Errorf("teardown %s: %w", previewPath(slug), err)
+				}
+			}
+			vals = applyCatalog(vals, slug, catalog)
 			result.Values = vals
 			result.CommitMessage = fmt.Sprintf("chore(preview): remove %s from %s", strings.Join(removed, ", "), slug)
 			result.CommitURL, writeErr = c.WritePreview(ctx, slug, vals, sha, result.CommitMessage)

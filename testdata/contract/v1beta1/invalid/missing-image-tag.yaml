@@ -1,0 +1,10 @@
+# want: at '/services/0': missing property 'imageTag'
+apiVersion: badil.dev/v1beta1
+services:
+  - name: api
+    repoURL: https://github.com/acme/platform.git
+    branch: main
+    chart:
+      path: k8s/
+      imageTagParam: app.image.tag
+      hostParam: app.ingress.host

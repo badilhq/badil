@@ -1,10 +1,16 @@
-# Two services from one repo, both pinned by the same PR.
+# Two services from one repo, both pinned by the same PR, their image tag the
+# first 8 characters of the SHA with a suffix.
 apiVersion: badil.dev/v1beta1
 services:
   - name: api
     repoURL: https://github.com/acme/platform.git
     branch: main
     commitSha: "f00dbabe0123456789abcdef0123456789abcdef"
+    imageTag: f00dbabe-amd64
+    chart:
+      path: k8s/
+      imageTagParam: app.image.tag
+      hostParam: app.ingress.host
     metadata:
       pr-author: hubot
       pr-url: https://github.com/acme/platform/pull/7
@@ -17,6 +23,11 @@ services:
     repoURL: https://github.com/acme/platform.git
     branch: main
     commitSha: "f00dbabe0123456789abcdef0123456789abcdef"
+    imageTag: f00dbabe-amd64
+    chart:
+      path: k8s/
+      imageTagParam: app.image.tag
+      hostParam: app.ingress.host
     metadata:
       pr-author: hubot
       pr-url: https://github.com/acme/platform/pull/7

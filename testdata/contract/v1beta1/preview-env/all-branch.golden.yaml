@@ -9,7 +9,6 @@ metadata:
     app.kubernetes.io/instance: all-branch
     app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
-    "team": "platform"
   annotations:
     argocd.argoproj.io/sync-wave: "-2"
 
@@ -64,14 +63,13 @@ spec:
   source:
     repoURL: "https://github.com/acme/platform.git"
     targetRevision: "main"
-    path: "deploy/chart"
+    path: "k8s/"
     helm:
       releaseName: api
-      valueFiles:
-        - "values-preview.yaml"
       parameters:
         - name: "app.image.tag"
-          value: "$ARGOCD_APP_REVISION"
+          value: "sha-${ARGOCD_APP_REVISION_SHORT}"
+          forceString: true
   destination:
     server: https://kubernetes.default.svc
     namespace: all-branch
@@ -110,7 +108,8 @@ spec:
       releaseName: front
       parameters:
         - name: "app.image.tag"
-          value: "$ARGOCD_APP_REVISION"
+          value: "${ARGOCD_APP_REVISION}"
+          forceString: true
   destination:
     server: https://kubernetes.default.svc
     namespace: all-branch

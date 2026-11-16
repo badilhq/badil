@@ -533,6 +533,13 @@ func TestFanOutPRComments_UpdateAndCreate(t *testing.T) {
 	}
 }
 
+// defaultChartYAML is the chart block of an entry whose service sets no chart
+// settings in the catalog.
+const defaultChartYAML = "    chart:\n" +
+	"      path: k8s/\n" +
+	"      imageTagParam: app.image.tag\n" +
+	"      hostParam: app.ingress.host\n"
+
 // pinnedFile is previews/slug/values.yaml as a deploy of sampleInputs with
 // hostURLs writes it, except updated-at, which is older. Its replacer
 // arguments are applied to it.
@@ -543,6 +550,11 @@ services:
     repoURL: https://github.com/acme/backend-1.git
     branch: main
     commitSha: abc1234567890
+    imageTag: abc1234567890
+    chart:
+      path: k8s/
+      imageTagParam: app.image.tag
+      hostParam: app.ingress.host
     host: backend-1-slug.127.0.0.1.nip.io
     metadata:
       pr-author: octocat
@@ -555,6 +567,11 @@ services:
   - name: backend-2
     repoURL: https://github.com/acme/backend-2.git
     branch: main
+    imageTag: ${ARGOCD_APP_REVISION}
+    chart:
+      path: k8s/
+      imageTagParam: app.image.tag
+      hostParam: app.ingress.host
 `
 	return strings.NewReplacer(replace...).Replace(file)
 }
@@ -782,13 +799,19 @@ func TestWritePreviewWithRetry_Created(t *testing.T) {
 // TestWritePreviewWithRetry_FollowsCatalog checks that a deploy update writes
 // apiVersion and every catalog service in catalog order with its repoURL and
 // branch from the catalog, then keeps a pinned entry of a removed service as
-// it is, and drops an unpinned one and a pinned one without repoURL.
+// it is (its imageTag and chart as last written), and drops an unpinned one
+// and a pinned one without repoURL.
 func TestWritePreviewWithRetry_FollowsCatalog(t *testing.T) {
 	const file = `services:
   - name: gone-pinned
     repoURL: https://github.com/acme/gone-pinned.git
     branch: release
     commitSha: fff
+    imageTag: v-fff
+    chart:
+      path: deploy/
+      imageTagParam: image.tag
+      hostParam: ingress.host
     metadata:
       pr-author: octocat
       pr-url: https://github.com/acme/gone-pinned/pull/9
@@ -828,6 +851,8 @@ func TestWritePreviewWithRetry_FollowsCatalog(t *testing.T) {
 		"    repoURL: https://github.com/acme/backend-1.git\n" +
 		"    branch: main\n" +
 		"    commitSha: abc1234567890\n" +
+		"    imageTag: abc1234567890\n" +
+		defaultChartYAML +
 		"    host: backend-1-slug.127.0.0.1.nip.io\n" +
 		"    metadata:\n" +
 		"      pr-author: octocat\n" +
@@ -840,10 +865,17 @@ func TestWritePreviewWithRetry_FollowsCatalog(t *testing.T) {
 		"  - name: backend-2\n" +
 		"    repoURL: https://github.com/acme/backend-2.git\n" +
 		"    branch: develop\n" +
+		"    imageTag: ${ARGOCD_APP_REVISION}\n" +
+		defaultChartYAML +
 		"  - name: gone-pinned\n" +
 		"    repoURL: https://github.com/acme/gone-pinned.git\n" +
 		"    branch: release\n" +
 		"    commitSha: fff\n" +
+		"    imageTag: v-fff\n" +
+		"    chart:\n" +
+		"      path: deploy/\n" +
+		"      imageTagParam: image.tag\n" +
+		"      hostParam: ingress.host\n" +
 		"    metadata:\n" +
 		"      pr-author: octocat\n" +
 		"      pr-url: https://github.com/acme/gone-pinned/pull/9\n" +
@@ -885,6 +917,7 @@ func TestWritePreviewWithRetry_AddsMissingService(t *testing.T) {
 	got, _ := s.written.Load().(string)
 	if !strings.Contains(got, "      cicd.pipeline.run.url: https://github.com/acme/backend-1/actions/runs/1\n"+
 		"  - name: front\n    repoURL: https://github.com/acme/front.git\n    branch: main\n"+
+		"    imageTag: ${ARGOCD_APP_REVISION}\n"+defaultChartYAML+
 		"  - name: backend-2\n") {
 		t.Errorf("written content missing front between backend-1 and backend-2:\n%s", got)
 	}
@@ -913,5 +946,38 @@ func TestWritePreviewWithRetry_BranchChangeWritten(t *testing.T) {
 		"  - name: backend-2\n    repoURL: https://github.com/acme/backend-2.git\n    branch: develop\n",
 	) {
 		t.Errorf("written content missing backend-2 on develop:\n%s", got)
+	}
+}
+
+// TestWritePreviewWithRetry_RendererSettings checks that a deploy writes the
+// catalog's namespace metadata and, on every entry, its chart settings with
+// their defaults applied and its image tag format expanded.
+func TestWritePreviewWithRetry_RendererSettings(t *testing.T) {
+	const sha = "f913b6cb1a2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f"
+	s := &writeServer{}
+	c := s.start(t)
+	catalog := testCatalog("backend-1", "backend-2")
+	catalog.ImageTag = "sha-{sha7}"
+	catalog.Charts = map[string]preview.ChartSettings{
+		"backend-1": {Path: "deploy/helm", ImageTagParam: "image.tag", ValueFiles: []string{"values-preview.yaml"}},
+	}
+	catalog.Namespace = &preview.NamespaceMetadata{Labels: map[string]string{"team": "platform"}}
+
+	if _, err := c.WritePreviewWithRetry(
+		context.Background(), "slug", catalog, "backend-1", sha, sampleInputs(), "create", "update", false,
+	); err != nil {
+		t.Fatalf("WritePreviewWithRetry: %v", err)
+	}
+	written, _ := s.written.Load().(string)
+	for _, want := range []string{
+		"apiVersion: badil.dev/v1beta1\nnamespace:\n  labels:\n    team: platform\nservices:\n",
+		"    commitSha: " + sha + "\n    imageTag: sha-f913b6c\n    chart:\n      path: deploy/helm\n" +
+			"      imageTagParam: image.tag\n      hostParam: app.ingress.host\n" +
+			"      valueFiles:\n        - values-preview.yaml\n",
+		"    branch: main\n    imageTag: sha-${ARGOCD_APP_REVISION_SHORT}\n" + defaultChartYAML,
+	} {
+		if !strings.Contains(written, want) {
+			t.Errorf("written content missing %q:\n%s", want, written)
+		}
 	}
 }

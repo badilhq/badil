@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"maps"
 	"reflect"
 	"slices"
 	"testing"
@@ -33,10 +34,15 @@ func TestGenerate_KeyConstraints(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
+	props, ok := at(t, s, "properties").(map[string]any)
+	if !ok {
+		t.Fatal("properties is not an object")
+	}
+	keys := slices.Sorted(maps.Keys(props))
 	entry := at(t, s, "properties", "services", "items")
 	metadata := at(t, entry, "properties", "metadata")
-	chart := at(t, s, "properties", "serviceCharts", "additionalProperties")
-	ns := at(t, s, "properties", "previewNamespace")
+	chart := at(t, entry, "properties", "chart")
+	ns := at(t, s, "properties", "namespace")
 	tests := []struct {
 		name string
 		got  any
@@ -44,6 +50,7 @@ func TestGenerate_KeyConstraints(t *testing.T) {
 	}{
 		{"no $id", s["$id"], nil},
 		{"draft", s["$schema"], "https://json-schema.org/draft/2020-12/schema"},
+		{"root properties", keys, []string{"apiVersion", "argocdNamespace", "namespace", "services"}},
 		{"root required", s["required"], []any{"apiVersion", "services", "argocdNamespace"}},
 		{"root closed", s["additionalProperties"], false},
 		{"apiVersion const", at(t, s, "properties", "apiVersion", "const"), "badil.dev/v1beta1"},
@@ -53,7 +60,12 @@ func TestGenerate_KeyConstraints(t *testing.T) {
 			"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$",
 		},
 		{"service entry closed", at(t, entry, "additionalProperties"), false},
-		{"service entry required", at(t, entry, "required"), []any{"name", "repoURL", "branch"}},
+		{
+			"service entry required",
+			at(t, entry, "required"),
+			[]any{"name", "repoURL", "branch", "imageTag", "chart"},
+		},
+		{"imageTag non-empty", at(t, entry, "properties", "imageTag", "minLength"), 1.0},
 		{
 			"service entry dependentRequired",
 			at(t, entry, "dependentRequired"),
@@ -69,14 +81,17 @@ func TestGenerate_KeyConstraints(t *testing.T) {
 			},
 		},
 		{"metadata not nullable", at(t, metadata, "type"), "object"},
-		{"service chart closed", at(t, chart, "additionalProperties"), false},
-		{"service chart type", at(t, chart, "type"), "object"},
-		{"service chart optional", at(t, chart, "required"), nil},
-		{"service chart without branch", at(t, chart, "properties", "branch"), nil},
-		{"service chart path non-empty", at(t, chart, "properties", "path", "minLength"), 1.0},
+		{"chart closed", at(t, chart, "additionalProperties"), false},
+		{"chart type", at(t, chart, "type"), "object"},
+		{"chart required", at(t, chart, "required"), []any{"path", "imageTagParam", "hostParam"}},
+		{"chart path non-empty", at(t, chart, "properties", "path", "minLength"), 1.0},
+		{"chart imageTagParam non-empty", at(t, chart, "properties", "imageTagParam", "minLength"), 1.0},
+		{"chart hostParam non-empty", at(t, chart, "properties", "hostParam", "minLength"), 1.0},
+		{"valueFiles non-empty", at(t, chart, "properties", "valueFiles", "minItems"), 1.0},
 		{"valueFiles items non-empty", at(t, chart, "properties", "valueFiles", "items", "minLength"), 1.0},
-		{"previewNamespace closed", at(t, ns, "additionalProperties"), false},
-		{"previewNamespace type", at(t, ns, "type"), "object"},
+		{"namespace closed", at(t, ns, "additionalProperties"), false},
+		{"namespace type", at(t, ns, "type"), "object"},
+		{"namespace optional", at(t, ns, "required"), nil},
 		{
 			"labels values",
 			at(t, ns, "properties", "labels", "additionalProperties"),
@@ -133,7 +148,7 @@ func TestGenerateContract_RootConstraints(t *testing.T) {
 	}{
 		{"no $id", s["$id"], nil},
 		{"draft", s["$schema"], "https://json-schema.org/draft/2020-12/schema"},
-		{"root properties", keys, []string{"apiVersion", "services"}},
+		{"root properties", keys, []string{"apiVersion", "namespace", "services"}},
 		{"root required", s["required"], []any{"apiVersion", "services"}},
 		{"root closed", s["additionalProperties"], false},
 		{"apiVersion const", at(t, s, "properties", "apiVersion", "const"), "badil.dev/v1beta1"},
