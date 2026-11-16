@@ -19,6 +19,11 @@ services:
     repoURL: https://github.com/acme/backend-1.git
     branch: main
     commitSha: abc1234567890
+    imageTag: abc1234567890
+    chart:
+      path: k8s/
+      imageTagParam: app.image.tag
+      hostParam: app.ingress.host
     metadata:
       pr-author: octocat
       pr-url: https://github.com/acme/backend-1/pull/42
@@ -30,9 +35,21 @@ services:
   - name: backend-2
     repoURL: https://github.com/acme/backend-2.git
     branch: develop
+    imageTag: ${ARGOCD_APP_REVISION}
+    chart:
+      path: k8s/
+      imageTagParam: app.image.tag
+      hostParam: app.ingress.host
   - name: front
     repoURL: https://github.com/acme/front
     branch: main
+    imageTag: ${ARGOCD_APP_REVISION}
+    chart:
+      path: deploy/chart
+      imageTagParam: app.image.tag
+      hostParam: app.ingress.host
+      valueFiles:
+        - values-preview.yaml
 `
 
 func encodeValues(t *testing.T, v any) []byte {

@@ -9,7 +9,6 @@ metadata:
     app.kubernetes.io/instance: two-pinned
     app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
-    "team": "platform"
   annotations:
     argocd.argoproj.io/sync-wave: "-2"
 
@@ -70,14 +69,13 @@ spec:
   source:
     repoURL: "https://github.com/acme/platform.git"
     targetRevision: "f00dbabe0123456789abcdef0123456789abcdef"
-    path: "deploy/chart"
+    path: "k8s/"
     helm:
       releaseName: api
-      valueFiles:
-        - "values-preview.yaml"
       parameters:
         - name: "app.image.tag"
-          value: "f00dbabe0123456789abcdef0123456789abcdef"
+          value: "f00dbabe-amd64"
+          forceString: true
   destination:
     server: https://kubernetes.default.svc
     namespace: two-pinned
@@ -123,7 +121,8 @@ spec:
       releaseName: worker
       parameters:
         - name: "app.image.tag"
-          value: "f00dbabe0123456789abcdef0123456789abcdef"
+          value: "f00dbabe-amd64"
+          forceString: true
   destination:
     server: https://kubernetes.default.svc
     namespace: two-pinned

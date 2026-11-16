@@ -5,6 +5,33 @@
       "type": "string",
       "const": "badil.dev/v1beta1"
     },
+    "namespace": {
+      "properties": {
+        "labels": {
+          "properties": {
+            "app.kubernetes.io/name": false,
+            "app.kubernetes.io/instance": false,
+            "app.kubernetes.io/part-of": false,
+            "app.kubernetes.io/managed-by": false
+          },
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "annotations": {
+          "properties": {
+            "argocd.argoproj.io/sync-wave": false
+          },
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "services": {
       "items": {
         "properties": {
@@ -19,6 +46,41 @@
           },
           "commitSha": {
             "type": "string"
+          },
+          "imageTag": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chart": {
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "imageTagParam": {
+                "type": "string",
+                "minLength": 1
+              },
+              "hostParam": {
+                "type": "string",
+                "minLength": 1
+              },
+              "valueFiles": {
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "type": "array",
+                "minItems": 1
+              }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "path",
+              "imageTagParam",
+              "hostParam"
+            ]
           },
           "host": {
             "type": "string"
@@ -65,7 +127,9 @@
         "required": [
           "name",
           "repoURL",
-          "branch"
+          "branch",
+          "imageTag",
+          "chart"
         ],
         "dependentRequired": {
           "commitSha": [

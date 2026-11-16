@@ -32,21 +32,35 @@ type teardownRequest struct {
 	content string
 }
 
-// teardownGitHub fakes the contents API for previews/feature-x/values.yaml.
-// GETs are answered from gets in order (the last one repeats); PUT and DELETE
-// get the next status from writes (200 once the list is exhausted).
+// teardownGitHub fakes the contents API for previews/feature-x/values.yaml
+// and badil.yaml. GETs of the values file are answered from gets in order (the
+// last one repeats); PUT and DELETE get the next status from writes (200 once
+// the list is exhausted). GETs of badil.yaml are counted and answered with
+// badil, or a 404 when it is empty.
 type teardownGitHub struct {
-	t      *testing.T
-	mu     sync.Mutex
-	gets   []fileState
-	writes []int
-	nGet   int
-	seen   []teardownRequest
+	t         *testing.T
+	mu        sync.Mutex
+	gets      []fileState
+	writes    []int
+	badil     string
+	nGet      int
+	badilGets int
+	seen      []teardownRequest
 }
 
 func (g *teardownGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if r.Method == http.MethodGet && r.URL.Path == "/repos/acme/gitops/contents/badil.yaml" {
+		g.badilGets++
+		if g.badil == "" {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, `{"message":"Not Found"}`)
+			return
+		}
+		_, _ = io.WriteString(w, encodeContent("badil.yaml", "sha-badil", g.badil))
+		return
+	}
 	if r.URL.Path != teardownPath {
 		g.t.Errorf("unexpected path %s %s", r.Method, r.URL.Path)
 		w.WriteHeader(http.StatusTeapot)
@@ -102,6 +116,12 @@ func (g *teardownGitHub) requests() []teardownRequest {
 	return slices.Clone(g.seen)
 }
 
+func (g *teardownGitHub) catalogReads() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.badilGets
+}
+
 func runTeardown(t *testing.T, g *teardownGitHub) (*gitops.TeardownResult, error) {
 	t.Helper()
 	g.t = t
@@ -126,28 +146,52 @@ services:
     branch: main
 `
 
+// teardownBadil is the badil.yaml of the previews of these tests: image tags
+// formatted sha-{sha7}, backend-1 on branch release and exposed.
+const teardownBadil = `imageTag: "sha-{sha7}"
+services:
+  backend-1:
+    repo: https://github.com/acme/backend-1.git
+    branch: release
+  backend-2:
+    repo: https://github.com/acme/backend-2.git
+  front:
+    repo: https://github.com/acme/front.git
+preview:
+  domain: 127.0.0.1.nip.io
+  expose:
+    backend-1: {}
+`
+
 // pr42AndPR7 is a preview pinned by acme/backend-1#42 and acme/backend-2#7.
 const pr42AndPR7 = `apiVersion: badil.dev/v1beta1
 services:
   - name: backend-1
     repoURL: https://github.com/acme/backend-1.git
     branch: release
-    commitSha: aaa
+    commitSha: aaaaaaaaaa
+    imageTag: sha-aaaaaaa
+    chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
+    host: backend-1-feature-x.127.0.0.1.nip.io
     metadata:
       pr-url: https://github.com/acme/backend-1/pull/42
   - name: backend-2
     repoURL: https://github.com/acme/backend-2.git
     branch: main
-    commitSha: bbb
+    commitSha: bbbbbbbbbb
+    imageTag: sha-bbbbbbb
+    chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
     metadata:
       pr-url: https://github.com/acme/backend-2/pull/7
   - name: front
     repoURL: https://github.com/acme/front.git
     branch: main
+    imageTag: sha-${ARGOCD_APP_REVISION_SHORT}
+    chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
 `
 
 func TestTeardown_UpdateWhenPinsRemain(t *testing.T) {
-	g := &teardownGitHub{gets: []fileState{{sha: "blob-1", body: pr42AndPR7}}}
+	g := &teardownGitHub{gets: []fileState{{sha: "blob-1", body: pr42AndPR7}}, badil: teardownBadil}
 	result, err := runTeardown(t, g)
 	if err != nil {
 		t.Fatalf("TeardownPreviewWithRetry: %v", err)
@@ -160,16 +204,22 @@ func TestTeardown_UpdateWhenPinsRemain(t *testing.T) {
 	if reqs[0].message != wantMsg || reqs[0].sha != "blob-1" {
 		t.Errorf("PUT message/sha = %q/%q, want %q/blob-1", reqs[0].message, reqs[0].sha, wantMsg)
 	}
-	// apiVersion and every entry's repoURL and branch are kept.
+	// The unpinned backend-1 is projected on badil.yaml in the same commit:
+	// its branch-tracking imageTag, chart and host.
 	wantBody := "apiVersion: badil.dev/v1beta1\n" +
 		"services:\n" +
 		"  - name: backend-1\n" +
 		"    repoURL: https://github.com/acme/backend-1.git\n" +
 		"    branch: release\n" +
+		"    imageTag: sha-${ARGOCD_APP_REVISION_SHORT}\n" +
+		defaultChartYAML +
+		"    host: backend-1-feature-x.127.0.0.1.nip.io\n" +
 		"  - name: backend-2\n" +
 		"    repoURL: https://github.com/acme/backend-2.git\n" +
 		"    branch: main\n" +
-		"    commitSha: bbb\n" +
+		"    commitSha: bbbbbbbbbb\n" +
+		"    imageTag: sha-bbbbbbb\n" +
+		defaultChartYAML +
 		"    metadata:\n" +
 		"      pr-author: \"\"\n" +
 		"      pr-url: " + pr7URL + "\n" +
@@ -180,7 +230,9 @@ func TestTeardown_UpdateWhenPinsRemain(t *testing.T) {
 		"      cicd.pipeline.run.url: \"\"\n" +
 		"  - name: front\n" +
 		"    repoURL: https://github.com/acme/front.git\n" +
-		"    branch: main\n"
+		"    branch: main\n" +
+		"    imageTag: sha-${ARGOCD_APP_REVISION_SHORT}\n" +
+		defaultChartYAML
 	if reqs[0].content != wantBody {
 		t.Errorf("PUT content mismatch\n got:\n%s\nwant:\n%s", reqs[0].content, wantBody)
 	}
@@ -190,8 +242,59 @@ func TestTeardown_UpdateWhenPinsRemain(t *testing.T) {
 	if result.CommitMessage != wantMsg || !strings.HasSuffix(result.CommitURL, "/c0ffee") {
 		t.Errorf("result message/url = %q/%q", result.CommitMessage, result.CommitURL)
 	}
-	if len(result.Values.Services) != 3 || result.Values.Services[1].CommitSha != "bbb" {
-		t.Errorf("result.Values = %+v, want backend-2 still pinned", result.Values)
+	if len(result.Values.Services) != 3 || result.Values.Services[1].CommitSha != "bbbbbbbbbb" ||
+		result.Values.Services[0].ImageTag != "sha-${ARGOCD_APP_REVISION_SHORT}" {
+		t.Errorf("result.Values = %+v, want the written file", result.Values)
+	}
+	if n := g.catalogReads(); n != 1 {
+		t.Errorf("badil.yaml reads = %d, want 1", n)
+	}
+}
+
+func TestTeardown_UnreadableBadilYAML(t *testing.T) {
+	cases := []struct {
+		name  string
+		badil string
+		want  string
+	}{
+		{name: "missing", want: "teardown previews/feature-x/values.yaml: gitops: not found"},
+		{
+			name:  "malformed",
+			badil: "services:\n  backend-1: {repo: r, imageTag: latest}\n",
+			want:  "teardown previews/feature-x/values.yaml: badil.yaml: services.backend-1.imageTag must be",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g := &teardownGitHub{gets: []fileState{{sha: "blob-1", body: pr42AndPR7}}, badil: tc.badil}
+			result, err := runTeardown(t, g)
+			if err == nil || !strings.HasPrefix(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want prefix %q", err, tc.want)
+			}
+			if result != nil {
+				t.Errorf("result = %+v, want nil", result)
+			}
+			if reqs := g.requests(); len(reqs) != 0 {
+				t.Errorf("requests = %+v, want no write", reqs)
+			}
+		})
+	}
+}
+
+func TestTeardown_ReadsBadilYAMLOnceAcrossConflicts(t *testing.T) {
+	g := &teardownGitHub{
+		gets:   []fileState{{sha: "blob-1", body: pr42AndPR7}, {sha: "blob-2", body: pr42AndPR7}},
+		writes: []int{http.StatusConflict, http.StatusConflict},
+		badil:  teardownBadil,
+	}
+	if _, err := runTeardown(t, g); err != nil {
+		t.Fatalf("TeardownPreviewWithRetry: %v", err)
+	}
+	if reqs := g.requests(); len(reqs) != gitops.MaxWriteRetries || reqs[2].sha != "blob-2" {
+		t.Errorf("requests = %+v, want %d PUTs, the last at blob-2", reqs, gitops.MaxWriteRetries)
+	}
+	if n := g.catalogReads(); n != 1 {
+		t.Errorf("badil.yaml reads = %d, want 1", n)
 	}
 }
 
@@ -217,6 +320,9 @@ func TestTeardown_DeleteWhenNoPinRemains(t *testing.T) {
 	}
 	if result.Values.Services != nil {
 		t.Errorf("result.Values = %+v, want empty on delete", result.Values)
+	}
+	if n := g.catalogReads(); n != 0 {
+		t.Errorf("badil.yaml reads = %d, want 0 for a deletion", n)
 	}
 }
 
@@ -256,7 +362,7 @@ func TestTeardown_NoOps(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			g := &teardownGitHub{gets: tc.gets, writes: tc.writes}
+			g := &teardownGitHub{gets: tc.gets, writes: tc.writes, badil: teardownBadil}
 			result, err := runTeardown(t, g)
 			if err != nil {
 				t.Fatalf("TeardownPreviewWithRetry: %v", err)
@@ -277,6 +383,7 @@ func TestTeardown_DeleteConflictBecomesUpdate(t *testing.T) {
 	g := &teardownGitHub{
 		gets:   []fileState{{sha: "blob-1", body: onlyPR42}, {sha: "blob-2", body: pr42AndPR7}},
 		writes: []int{http.StatusConflict},
+		badil:  teardownBadil,
 	}
 	result, err := runTeardown(t, g)
 	if err != nil {
@@ -292,7 +399,7 @@ func TestTeardown_DeleteConflictBecomesUpdate(t *testing.T) {
 	if reqs[1].method != http.MethodPut || reqs[1].sha != "blob-2" {
 		t.Errorf("retry = %s at %s, want PUT at blob-2", reqs[1].method, reqs[1].sha)
 	}
-	if !strings.Contains(reqs[1].content, "commitSha: bbb") {
+	if !strings.Contains(reqs[1].content, "commitSha: bbbbbbbbbb") {
 		t.Errorf("retry dropped PR #7's pin:\n%s", reqs[1].content)
 	}
 	if result.Deleted || result.CommitMessage != "chore(preview): remove backend-1 from feature-x" {

@@ -6,6 +6,13 @@ const APIVersion = "badil.dev/v1beta1"
 // DefaultBranch is the branch a service tracks when the catalog sets none.
 const DefaultBranch = "main"
 
+// Chart settings a service gets when the catalog does not set them.
+const (
+	DefaultChartPath     = "k8s/"
+	DefaultImageTagParam = "app.image.tag"
+	DefaultHostParam     = "app.ingress.host"
+)
+
 // DeployInputs collects the per-deploy values needed to build or update a
 // preview environment's values.yaml.
 type DeployInputs struct {
@@ -23,26 +30,34 @@ type DeployInputs struct {
 // ServiceEntry is one item in PreviewValues.Services. RepoURL and Branch are
 // the service's git URL and the branch it tracks when not pinned. CommitSha
 // and Metadata are set together, only on a pinned entry: the service is then
-// deployed at CommitSha, which is also its image tag. Host is the ingress
-// host badil computed for an exposed service, and is empty otherwise.
+// deployed at CommitSha. ImageTag is the image tag of the service, its
+// format expanded (ExpandImageTag), and Chart how its chart is rendered.
+// Host is the ingress host badil computed for an exposed service, and is
+// empty otherwise.
 type ServiceEntry struct {
-	Name      string    `yaml:"name"`
-	RepoURL   string    `yaml:"repoURL"`
-	Branch    string    `yaml:"branch"`
-	CommitSha string    `yaml:"commitSha,omitempty"`
-	Host      string    `yaml:"host,omitempty"`
-	Metadata  *Metadata `yaml:"metadata,omitempty"`
+	Name      string        `yaml:"name"`
+	RepoURL   string        `yaml:"repoURL"`
+	Branch    string        `yaml:"branch"`
+	CommitSha string        `yaml:"commitSha,omitempty"`
+	ImageTag  string        `yaml:"imageTag"`
+	Chart     ChartSettings `yaml:"chart"`
+	Host      string        `yaml:"host,omitempty"`
+	Metadata  *Metadata     `yaml:"metadata,omitempty"`
 }
 
 // PreviewValues is the root document persisted at previews/<slug>/values.yaml.
+// Namespace is the extra metadata of the preview Namespace, nil when
+// badil.yaml sets none.
 type PreviewValues struct {
-	APIVersion string         `yaml:"apiVersion"`
-	Services   []ServiceEntry `yaml:"services"`
+	APIVersion string             `yaml:"apiVersion"`
+	Namespace  *NamespaceMetadata `yaml:"namespace,omitempty"`
+	Services   []ServiceEntry     `yaml:"services"`
 }
 
 // ChartSettings is how a service's chart is rendered: the chart path in the
 // service repo, the Helm parameters set to the image tag and to the preview
-// host, and extra values files applied in order.
+// host, and extra values files applied in order. In a preview file every
+// field but ValueFiles is set.
 type ChartSettings struct {
 	Path          string   `yaml:"path"`
 	ImageTagParam string   `yaml:"imageTagParam"`

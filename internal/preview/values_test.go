@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -161,21 +162,23 @@ func TestEqualExceptUpdatedAt(t *testing.T) {
 	services := []string{"backend-1", "front"}
 	base := preview.ApplyCatalog(
 		preview.BuildPreviewValues(in.ServiceName, in.CommitSha, services, in),
-		services, catalogRepos(), nil,
+		preview.Catalog{Services: services, Repos: catalogRepos(), Namespace: sampleNamespace()},
 	)
 	base.Services[1] = preview.ServiceEntry{
 		Name: "front", RepoURL: "https://github.com/acme/front", Branch: "main",
-		CommitSha: "f00", Host: "front.example.com",
+		CommitSha: "f00", ImageTag: "f00", Chart: valueFilesChart(), Host: "front.example.com",
 		Metadata: &preview.Metadata{PRURL: "https://github.com/acme/front/pull/7", UpdatedAt: "2026-05-26T09:00:00Z"},
 	}
 	clone := func() preview.PreviewValues {
 		out := base
+		out.Namespace = sampleNamespace()
 		out.Services = slices.Clone(base.Services)
 		for i := range out.Services {
 			if md := out.Services[i].Metadata; md != nil {
 				cp := *md
 				out.Services[i].Metadata = &cp
 			}
+			out.Services[i].Chart.ValueFiles = slices.Clone(out.Services[i].Chart.ValueFiles)
 		}
 		return out
 	}
@@ -203,6 +206,11 @@ func TestEqualExceptUpdatedAt(t *testing.T) {
 		{name: "api version", change: func(v *preview.PreviewValues) { v.APIVersion = "" }},
 		{name: "repo url", change: func(v *preview.PreviewValues) { v.Services[1].RepoURL = "https://example.com/x" }},
 		{name: "branch", change: func(v *preview.PreviewValues) { v.Services[0].Branch = "develop" }},
+		{name: "image tag", change: func(v *preview.PreviewValues) { v.Services[0].ImageTag = "x" }},
+		{name: "chart path", change: func(v *preview.PreviewValues) { v.Services[1].Chart.Path = "x" }},
+		{name: "chart value file", change: func(v *preview.PreviewValues) { v.Services[1].Chart.ValueFiles[0] = "x" }},
+		{name: "namespace label", change: func(v *preview.PreviewValues) { v.Namespace.Labels["team"] = "x" }},
+		{name: "namespace removed", change: func(v *preview.PreviewValues) { v.Namespace = nil }},
 		{
 			name:   "pipeline run url",
 			change: func(v *preview.PreviewValues) { v.Services[0].Metadata.PipelineRunURL = "x" },
@@ -231,10 +239,14 @@ func TestEqual(t *testing.T) {
 		return preview.PreviewValues{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{
 			{
 				Name: "backend-1", RepoURL: "https://github.com/acme/backend-1.git", Branch: "main",
-				CommitSha: "abc", Metadata: &preview.Metadata{UpdatedAt: "2026-05-26T09:00:00Z"},
+				CommitSha: "abc", ImageTag: "abc", Chart: valueFilesChart(),
+				Metadata: &preview.Metadata{UpdatedAt: "2026-05-26T09:00:00Z"},
 			},
-			{Name: "front", RepoURL: "https://github.com/acme/front", Branch: "main", Host: "front.example.com"},
-		}}
+			{
+				Name: "front", RepoURL: "https://github.com/acme/front", Branch: "main",
+				ImageTag: "${ARGOCD_APP_REVISION}", Chart: defaultChart(), Host: "front.example.com",
+			},
+		}, Namespace: sampleNamespace()}
 	}
 
 	tests := []struct {
@@ -249,6 +261,26 @@ func TestEqual(t *testing.T) {
 		{name: "branch", change: func(v *preview.PreviewValues) { v.Services[1].Branch = "develop" }},
 		{name: "repo url", change: func(v *preview.PreviewValues) { v.Services[1].RepoURL = "x" }},
 		{name: "commit sha", change: func(v *preview.PreviewValues) { v.Services[0].CommitSha = "x" }},
+		{name: "image tag", change: func(v *preview.PreviewValues) { v.Services[1].ImageTag = "x" }},
+		{name: "chart path", change: func(v *preview.PreviewValues) { v.Services[1].Chart.Path = "x" }},
+		{
+			name:   "chart image tag param",
+			change: func(v *preview.PreviewValues) { v.Services[1].Chart.ImageTagParam = "x" },
+		},
+		{name: "chart host param", change: func(v *preview.PreviewValues) { v.Services[1].Chart.HostParam = "x" }},
+		{name: "chart value files", change: func(v *preview.PreviewValues) { v.Services[0].Chart.ValueFiles = nil }},
+		{
+			name:   "chart value files empty",
+			change: func(v *preview.PreviewValues) { v.Services[1].Chart.ValueFiles = []string{} },
+			want:   true,
+		},
+		{name: "namespace removed", change: func(v *preview.PreviewValues) { v.Namespace = nil }},
+		{name: "namespace annotation", change: func(v *preview.PreviewValues) { v.Namespace.Annotations = nil }},
+		{
+			name:   "namespace copy",
+			change: func(v *preview.PreviewValues) { v.Namespace = sampleNamespace() },
+			want:   true,
+		},
 		{name: "metadata removed", change: func(v *preview.PreviewValues) { v.Services[0].Metadata = nil }},
 		{
 			name:   "order",
@@ -554,10 +586,13 @@ func TestApplyHosts_YAML(t *testing.T) {
 	in := preview.PreviewValues{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{
 		{
 			Name: "backend-1", RepoURL: "https://github.com/acme/backend-1.git", Branch: "main",
-			CommitSha: "abc", Metadata: &preview.Metadata{PRAuthor: "octocat"},
+			CommitSha: "abc", ImageTag: "abc", Chart: defaultChart(), Metadata: &preview.Metadata{PRAuthor: "octocat"},
 		},
-		{Name: "backend-2", RepoURL: "https://github.com/acme/backend-2.git", Branch: "develop"},
-	}}
+		{
+			Name: "backend-2", RepoURL: "https://github.com/acme/backend-2.git", Branch: "develop",
+			ImageTag: "${ARGOCD_APP_REVISION}", Chart: valueFilesChart(),
+		},
+	}, Namespace: sampleNamespace()}
 	vals := preview.ApplyHosts(in, "feature-pricing", hostURLs())
 
 	var buf bytes.Buffer
@@ -569,11 +604,21 @@ func TestApplyHosts_YAML(t *testing.T) {
 	_ = enc.Close()
 
 	want := "apiVersion: badil.dev/v1beta1\n" +
+		"namespace:\n" +
+		"  labels:\n" +
+		"    team: platform\n" +
+		"  annotations:\n" +
+		"    owner: platform\n" +
 		"services:\n" +
 		"  - name: backend-1\n" +
 		"    repoURL: https://github.com/acme/backend-1.git\n" +
 		"    branch: main\n" +
 		"    commitSha: abc\n" +
+		"    imageTag: abc\n" +
+		"    chart:\n" +
+		"      path: k8s/\n" +
+		"      imageTagParam: app.image.tag\n" +
+		"      hostParam: app.ingress.host\n" +
 		"    host: backend-1-feature-pricing.127.0.0.1.nip.io\n" +
 		"    metadata:\n" +
 		"      pr-author: octocat\n" +
@@ -585,7 +630,14 @@ func TestApplyHosts_YAML(t *testing.T) {
 		"      cicd.pipeline.run.url: \"\"\n" +
 		"  - name: backend-2\n" +
 		"    repoURL: https://github.com/acme/backend-2.git\n" +
-		"    branch: develop\n"
+		"    branch: develop\n" +
+		"    imageTag: ${ARGOCD_APP_REVISION}\n" +
+		"    chart:\n" +
+		"      path: k8s/\n" +
+		"      imageTagParam: app.image.tag\n" +
+		"      hostParam: app.ingress.host\n" +
+		"      valueFiles:\n" +
+		"        - values-preview.yaml\n"
 	if got := buf.String(); got != want {
 		t.Errorf("yaml mismatch\n got:\n%s\nwant:\n%s", got, want)
 	}
@@ -663,53 +715,209 @@ func TestApplyHosts_KeepsAPIVersion(t *testing.T) {
 	}
 }
 
+// defaultChart is the chart settings of a service the catalog sets none for.
+func defaultChart() preview.ChartSettings {
+	return preview.ChartSettings{Path: "k8s/", ImageTagParam: "app.image.tag", HostParam: "app.ingress.host"}
+}
+
+// valueFilesChart is defaultChart with one values file.
+func valueFilesChart() preview.ChartSettings {
+	c := defaultChart()
+	c.ValueFiles = []string{"values-preview.yaml"}
+	return c
+}
+
+// sampleNamespace is a namespace block with one label and one annotation.
+func sampleNamespace() *preview.NamespaceMetadata {
+	return &preview.NamespaceMetadata{
+		Labels:      map[string]string{"team": "platform"},
+		Annotations: map[string]string{"owner": "platform"},
+	}
+}
+
+func TestEqual_NamespaceNilAndEmpty(t *testing.T) {
+	for name, ns := range map[string]*preview.NamespaceMetadata{
+		"empty":      {},
+		"empty maps": {Labels: map[string]string{}, Annotations: map[string]string{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			a := preview.PreviewValues{APIVersion: preview.APIVersion}
+			b := preview.PreviewValues{APIVersion: preview.APIVersion, Namespace: ns}
+			if !preview.Equal(a, b) || !preview.Equal(b, a) {
+				t.Errorf("Equal(nil, %+v) = false, want true", ns)
+			}
+		})
+	}
+}
+
+func TestExpandImageTag(t *testing.T) {
+	const sha = "f913b6cb1a2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f"
+	tests := []struct {
+		format, commitSha, want string
+	}{
+		{"{sha}", sha, sha},
+		{"{sha7}", sha, "f913b6c"},
+		{"{sha8}", sha, "f913b6cb"},
+		{"sha-{sha7}", sha, "sha-f913b6c"},
+		{"{sha8}-amd64", sha, "f913b6cb-amd64"},
+		{"v1.{sha}_x", sha, "v1." + sha + "_x"},
+		{"{sha7}", "abc12", "abc12"},
+		{"{sha8}", "abc1234", "abc1234"},
+		{"{sha}", "abc", "abc"},
+		{"{sha}", "", "${ARGOCD_APP_REVISION}"},
+		{"{sha7}", "", "${ARGOCD_APP_REVISION_SHORT}"},
+		{"{sha8}", "", "${ARGOCD_APP_REVISION_SHORT_8}"},
+		{"sha-{sha7}", "", "sha-${ARGOCD_APP_REVISION_SHORT}"},
+		{"{sha8}-amd64", "", "${ARGOCD_APP_REVISION_SHORT_8}-amd64"},
+		{"", sha, sha},
+		{"", "", "${ARGOCD_APP_REVISION}"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.format+"/"+tt.commitSha, func(t *testing.T) {
+			if got := preview.ExpandImageTag(tt.format, tt.commitSha); got != tt.want {
+				t.Errorf("ExpandImageTag(%q, %q) = %q, want %q", tt.format, tt.commitSha, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidImageTagFormat(t *testing.T) {
+	for format, want := range map[string]bool{
+		"{sha}":                           true,
+		"sha-{sha7}":                      true,
+		"{sha8}-amd64":                    true,
+		strings.Repeat("a", 88) + "{sha}": true,
+		strings.Repeat("a", 89) + "{sha}": false,
+		"":                                false,
+		"latest":                          false,
+		"{sha}{sha}":                      false,
+		"{SHA}":                           false,
+		"-{sha}":                          false,
+		"a:{sha}":                         false,
+	} {
+		if got := preview.ValidImageTagFormat(format); got != want {
+			t.Errorf("ValidImageTagFormat(%q) = %v, want %v", format, got, want)
+		}
+	}
+}
+
 func TestApplyCatalog(t *testing.T) {
 	md := &preview.Metadata{PRURL: "https://github.com/acme/backend-1/pull/42"}
 	goneMD := &preview.Metadata{PRURL: "https://github.com/acme/gone/pull/9", UpdatedAt: "2026-05-26T09:00:00Z"}
+	goneChart := preview.ChartSettings{Path: "old/", ImageTagParam: "old.tag", HostParam: "old.host"}
 	in := preview.PreviewValues{Services: []preview.ServiceEntry{
 		{
 			Name: "gone-pinned", RepoURL: "https://github.com/acme/gone-pinned", Branch: "release",
-			CommitSha: "x", Metadata: goneMD,
+			CommitSha: "x", ImageTag: "old-x", Chart: goneChart, Metadata: goneMD,
 		},
-		{Name: "front", RepoURL: "https://stale.example.com/front", Branch: "stale", Host: "front.example.com"},
+		{
+			Name: "front", RepoURL: "https://stale.example.com/front", Branch: "stale", Host: "front.example.com",
+			ImageTag: "stale", Chart: goneChart,
+		},
 		{Name: "gone"},
 		{Name: "gone-pinned-no-repo", CommitSha: "y", Metadata: md},
-		{Name: "backend-1", CommitSha: "abc", Metadata: md},
+		{Name: "backend-1", CommitSha: "abc1234567890", Metadata: md},
 	}}
 
-	got := preview.ApplyCatalog(in, catalogServices(), catalogRepos(), map[string]string{"backend-2": "develop"})
+	got := preview.ApplyCatalog(in, preview.Catalog{
+		Services:  catalogServices(),
+		Repos:     catalogRepos(),
+		Branches:  map[string]string{"backend-2": "develop"},
+		ImageTag:  "sha-{sha7}",
+		ImageTags: map[string]string{"backend-2": "{sha8}-amd64"},
+		Charts: map[string]preview.ChartSettings{
+			"backend-1": {Path: "deploy/helm", ValueFiles: []string{"values-preview.yaml"}},
+			"front":     {ImageTagParam: "image.tag", HostParam: "ingress.hostname"},
+		},
+		Namespace: sampleNamespace(),
+	})
 
 	if got.APIVersion != preview.APIVersion {
 		t.Errorf("APIVersion = %q, want %q", got.APIVersion, preview.APIVersion)
 	}
+	if !reflect.DeepEqual(got.Namespace, sampleNamespace()) {
+		t.Errorf("Namespace = %+v, want %+v", got.Namespace, sampleNamespace())
+	}
 	want := []preview.ServiceEntry{
 		{
 			Name: "backend-1", RepoURL: "https://github.com/acme/backend-1.git", Branch: "main",
-			CommitSha: "abc", Metadata: md,
+			CommitSha: "abc1234567890", ImageTag: "sha-abc1234", Metadata: md,
+			Chart: preview.ChartSettings{
+				Path: "deploy/helm", ImageTagParam: "app.image.tag", HostParam: "app.ingress.host",
+				ValueFiles: []string{"values-preview.yaml"},
+			},
 		},
-		{Name: "backend-2", RepoURL: "https://github.com/acme/backend-2.git", Branch: "develop"},
+		{
+			Name: "backend-2", RepoURL: "https://github.com/acme/backend-2.git", Branch: "develop",
+			ImageTag: "${ARGOCD_APP_REVISION_SHORT_8}-amd64", Chart: defaultChart(),
+		},
 		{
 			Name: "front", RepoURL: "https://github.com/acme/front", Branch: "main",
-			Host: "front.example.com",
+			ImageTag: "sha-${ARGOCD_APP_REVISION_SHORT}", Host: "front.example.com",
+			Chart: preview.ChartSettings{Path: "k8s/", ImageTagParam: "image.tag", HostParam: "ingress.hostname"},
 		},
 		{
 			Name: "gone-pinned", RepoURL: "https://github.com/acme/gone-pinned", Branch: "release",
-			CommitSha: "x", Metadata: goneMD,
+			CommitSha: "x", ImageTag: "old-x", Chart: goneChart, Metadata: goneMD,
 		},
 	}
 	if !reflect.DeepEqual(got.Services, want) {
 		t.Errorf("Services = %+v, want %+v", got.Services, want)
 	}
-	if in.APIVersion != "" || len(in.Services) != 5 || in.Services[1].RepoURL != "https://stale.example.com/front" ||
+	if in.APIVersion != "" || in.Namespace != nil || len(in.Services) != 5 ||
+		in.Services[1].RepoURL != "https://stale.example.com/front" || in.Services[1].ImageTag != "stale" ||
 		in.Services[0].Name != "gone-pinned" {
 		t.Errorf("input mutated: %+v", in)
+	}
+}
+
+func TestApplyCatalog_Defaults(t *testing.T) {
+	in := preview.PreviewValues{Namespace: sampleNamespace(), Services: []preview.ServiceEntry{
+		{Name: "backend-1", CommitSha: "abc1234567890"},
+	}}
+
+	got := preview.ApplyCatalog(in, preview.Catalog{Services: []string{"backend-1", "front"}, Repos: catalogRepos()})
+
+	if got.Namespace != nil {
+		t.Errorf("Namespace = %+v, want nil when the catalog sets none", got.Namespace)
+	}
+	want := []preview.ServiceEntry{
+		{
+			Name: "backend-1", RepoURL: "https://github.com/acme/backend-1.git", Branch: "main",
+			CommitSha: "abc1234567890", ImageTag: "abc1234567890", Chart: defaultChart(),
+		},
+		{
+			Name: "front", RepoURL: "https://github.com/acme/front", Branch: "main",
+			ImageTag: "${ARGOCD_APP_REVISION}", Chart: defaultChart(),
+		},
+	}
+	if !reflect.DeepEqual(got.Services, want) {
+		t.Errorf("Services = %+v, want %+v", got.Services, want)
+	}
+}
+
+func TestApplyCatalog_UnpinnedEntryTracksItsBranch(t *testing.T) {
+	const pr42 = "https://github.com/acme/backend-1/pull/42"
+	cat := preview.Catalog{Services: catalogServices(), Repos: catalogRepos(), ImageTag: "sha-{sha7}"}
+	pinnedVals := preview.ApplyCatalog(preview.PreviewValues{Services: []preview.ServiceEntry{
+		pinned("backend-1", "f913b6cb1a2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f", pr42),
+	}}, cat)
+	if tag := pinnedVals.Services[0].ImageTag; tag != "sha-f913b6c" {
+		t.Fatalf("pinned ImageTag = %q, want sha-f913b6c", tag)
+	}
+
+	unpinned, _, _ := preview.UnpinPR(pinnedVals, "acme", "backend-1", 42)
+	got := preview.ApplyCatalog(unpinned, cat)
+
+	if tag := got.Services[0].ImageTag; tag != "sha-${ARGOCD_APP_REVISION_SHORT}" {
+		t.Errorf("unpinned ImageTag = %q, want sha-${ARGOCD_APP_REVISION_SHORT}", tag)
 	}
 }
 
 func TestApplyCatalog_AddsMissingServicesInCatalogOrder(t *testing.T) {
 	in := preview.PreviewValues{Services: []preview.ServiceEntry{{Name: "front"}}}
 
-	got := preview.ApplyCatalog(in, catalogServices(), catalogRepos(), nil)
+	got := preview.ApplyCatalog(in, preview.Catalog{Services: catalogServices(), Repos: catalogRepos()})
 
 	names := make([]string, 0, len(got.Services))
 	for _, svc := range got.Services {
@@ -718,7 +926,10 @@ func TestApplyCatalog_AddsMissingServicesInCatalogOrder(t *testing.T) {
 	if !slices.Equal(names, catalogServices()) {
 		t.Fatalf("names = %v, want %v", names, catalogServices())
 	}
-	want := preview.ServiceEntry{Name: "backend-2", RepoURL: "https://github.com/acme/backend-2.git", Branch: "main"}
+	want := preview.ServiceEntry{
+		Name: "backend-2", RepoURL: "https://github.com/acme/backend-2.git", Branch: "main",
+		ImageTag: "${ARGOCD_APP_REVISION}", Chart: defaultChart(),
+	}
 	if !reflect.DeepEqual(got.Services[1], want) {
 		t.Errorf("Services[1] = %+v, want %+v", got.Services[1], want)
 	}
@@ -741,15 +952,16 @@ func TestApplyCatalog_KeepsFirstEntryOfDuplicates(t *testing.T) {
 		{Name: "gone", RepoURL: "https://github.com/acme/gone.git", Branch: "main", CommitSha: "bbb"},
 	}}
 
-	got := preview.ApplyCatalog(
-		in,
-		[]string{"front"},
-		map[string]string{"front": "https://github.com/acme/front.git"},
-		nil,
-	)
+	got := preview.ApplyCatalog(in, preview.Catalog{
+		Services: []string{"front"},
+		Repos:    map[string]string{"front": "https://github.com/acme/front.git"},
+	})
 
 	want := []preview.ServiceEntry{
-		{Name: "front", RepoURL: "https://github.com/acme/front.git", Branch: "main", CommitSha: "f1"},
+		{
+			Name: "front", RepoURL: "https://github.com/acme/front.git", Branch: "main", CommitSha: "f1",
+			ImageTag: "f1", Chart: defaultChart(),
+		},
 		first,
 	}
 	if !reflect.DeepEqual(got.Services, want) {
@@ -759,7 +971,7 @@ func TestApplyCatalog_KeepsFirstEntryOfDuplicates(t *testing.T) {
 
 func TestApplyCatalog_KeepsAPIVersion(t *testing.T) {
 	in := preview.PreviewValues{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{{Name: "front"}}}
-	got := preview.ApplyCatalog(in, catalogServices(), catalogRepos(), nil)
+	got := preview.ApplyCatalog(in, preview.Catalog{Services: catalogServices(), Repos: catalogRepos()})
 	if got.APIVersion != preview.APIVersion {
 		t.Errorf("APIVersion = %q, want %q", got.APIVersion, preview.APIVersion)
 	}

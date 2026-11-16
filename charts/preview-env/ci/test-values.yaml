@@ -4,6 +4,11 @@ services:
     repoURL: "https://github.com/acme/backend-1.git"
     branch: master
     commitSha: "abc123"
+    imageTag: "abc123"
+    chart:
+      path: k8s/
+      imageTagParam: image.tag
+      hostParam: app.ingress.host
     host: backend-1-x.example.com
     metadata:
       pr-author: octocat
@@ -13,7 +18,3 @@ services:
       updated-at: "2026-05-26T10:00:00Z"
       vcs.ref.name: feature/x
       cicd.pipeline.run.url: ""
-
-serviceCharts:
-  backend-1:
-    imageTagParam: image.tag
