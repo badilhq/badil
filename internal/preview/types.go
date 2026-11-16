@@ -115,7 +115,7 @@ type NamespaceMetadata struct {
 }
 
 // ReservedNamespaceLabels returns the preview Namespace labels the
-// preview-env chart sets, which NamespaceMetadata.Labels cannot hold.
+// preview-apps chart sets, which NamespaceMetadata.Labels cannot hold.
 func ReservedNamespaceLabels() []string {
 	return []string{
 		"app.kubernetes.io/name",
@@ -126,7 +126,7 @@ func ReservedNamespaceLabels() []string {
 }
 
 // ReservedNamespaceAnnotations returns the preview Namespace annotations the
-// preview-env chart sets, which NamespaceMetadata.Annotations cannot hold.
+// preview-apps chart sets, which NamespaceMetadata.Annotations cannot hold.
 func ReservedNamespaceAnnotations() []string {
 	return []string{"argocd.argoproj.io/sync-wave"}
 }

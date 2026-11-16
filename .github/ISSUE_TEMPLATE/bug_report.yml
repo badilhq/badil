@@ -13,8 +13,8 @@ body:
     id: chart-versions
     attributes:
       label: Chart versions
-      description: Versions of the badil and preview-env charts.
-      placeholder: "badil 0.15.0, preview-env 0.6.0"
+      description: Versions of the badil and preview-apps charts.
+      placeholder: "badil 0.20.0, preview-apps 0.13.0"
     validations:
       required: true
   - type: input

@@ -1,9 +1,9 @@
-// Command schemagen writes the JSON Schema of the preview-env chart's values,
+// Command schemagen writes the JSON Schema of the preview-apps chart's values,
 // generated from internal/chartvalues.Values, and the JSON Schema of the
 // preview values contract, generated from internal/preview.PreviewValues.
 package main
 
-//go:generate go run . -out ../../charts/preview-env/values.schema.json -contract-out ../../schema/preview.v1beta1.schema.json
+//go:generate go run . -out ../../charts/preview-apps/values.schema.json -contract-out ../../schema/preview.v1beta1.schema.json
 
 import (
 	"encoding/json"

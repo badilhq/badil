@@ -515,7 +515,7 @@ func parseStringMap(path string, n *yaml.Node, reserved []string) (map[string]st
 		case key == "":
 			return fmt.Errorf("%s: keys must be non-empty strings", path)
 		case slices.Contains(reserved, key):
-			return fmt.Errorf("%s is set by the preview-env chart and cannot be overridden", keyPath)
+			return fmt.Errorf("%s is set by the preview-apps chart and cannot be overridden", keyPath)
 		case !stringScalar(val):
 			return fmt.Errorf("%s must be a string", keyPath)
 		}

@@ -1,5 +1,5 @@
-// Package chartvalues holds the Go types of the preview-env chart's values,
-// from which cmd/schemagen generates charts/preview-env/values.schema.json.
+// Package chartvalues holds the Go types of the preview-apps chart's values,
+// from which cmd/schemagen generates charts/preview-apps/values.schema.json.
 package chartvalues
 
 import (
@@ -11,7 +11,7 @@ import (
 // NamespacePattern matches a Kubernetes namespace name (an RFC 1123 label).
 const NamespacePattern = `^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`
 
-// Values is the input of the preview-env chart: a preview values file and
+// Values is the input of the preview-apps chart: a preview values file and
 // the ApplicationSet's argocdNamespace. No other root key is allowed.
 type Values struct {
 	preview.PreviewValues `yaml:",inline"`

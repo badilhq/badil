@@ -5,7 +5,7 @@ metadata:
   name: {{ $.Release.Name }}-{{ .name }}
   namespace: {{ $.Values.argocdNamespace | quote }}
   labels:
-    {{- include "preview-env.labels" (dict "name" .name "instance" $.Release.Name) | nindent 4 }}
+    {{- include "preview-apps.labels" (dict "name" .name "instance" $.Release.Name) | nindent 4 }}
   annotations:
     argocd.argoproj.io/sync-wave: "0"
     preview.badil.dev/vcs.ref.revision: {{ .commitSha | default "" | quote }}
@@ -19,7 +19,7 @@ metadata:
     preview.badil.dev/vcs.ref.name: {{ index .metadata "vcs.ref.name" | quote }}
     preview.badil.dev/cicd.pipeline.run.url: {{ index .metadata "cicd.pipeline.run.url" | quote }}
     {{- end }}
-  {{- include "preview-env.finalizers" . | nindent 2 }}
+  {{- include "preview-apps.finalizers" . | nindent 2 }}
 spec:
   project: {{ $.Release.Name }}
   source:
@@ -42,6 +42,6 @@ spec:
         - name: {{ .chart.hostParam | quote }}
           value: {{ .host | quote }}
         {{- end }}
-  {{- include "preview-env.applicationSync" $.Release.Name | nindent 2 }}
+  {{- include "preview-apps.applicationSync" $.Release.Name | nindent 2 }}
 ---
 {{- end }}

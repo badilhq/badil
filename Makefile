@@ -12,19 +12,19 @@ test:
 lint:
 	golangci-lint run ./...
 
-# Regenerates charts/preview-env/values.schema.json from internal/chartvalues
+# Regenerates charts/preview-apps/values.schema.json from internal/chartvalues
 # and schema/preview.v1beta1.schema.json from internal/preview.
 schema:
 	go generate ./cmd/schemagen
 
-# Regenerates the preview-env renders of the valid contract fixtures in
-# testdata/contract/v1beta1/preview-env, which the Charts workflow diffs against.
+# Regenerates the preview-apps renders of the valid contract fixtures in
+# testdata/contract/v1beta1/preview-apps, which the Charts workflow diffs against.
 # Each fixture is rendered alone, as the ApplicationSet passes a preview file.
 contract-golden:
 	for f in testdata/contract/v1beta1/valid/*.yaml; do \
 		n=$$(basename "$$f" .yaml); \
-		helm template "$$n" charts/preview-env -f "$$f" \
-			> "testdata/contract/v1beta1/preview-env/$$n.golden.yaml" || exit 1; \
+		helm template "$$n" charts/preview-apps -f "$$f" \
+			> "testdata/contract/v1beta1/preview-apps/$$n.golden.yaml" || exit 1; \
 	done
 
 docker-build:

@@ -80,7 +80,7 @@ badil verify-app      # check GitHub App credentials, list installations
 badil version         # print the version (also badil --version)
 ```
 
-badil reads its whole preview config from `badil.yaml` in the gitops repo (service catalog, chart settings, image tag format, dependencies, namespace metadata, `preview` block) and writes everything `preview-env` needs into each preview file (see ARCHITECTURE [Gitops repo contract](docs/ARCHITECTURE.md#gitops-repo-contract)).
+badil reads its whole preview config from `badil.yaml` in the gitops repo (service catalog, chart settings, image tag format, dependencies, namespace metadata, `preview` block) and writes everything `preview-apps` needs into each preview file (see ARCHITECTURE [Gitops repo contract](docs/ARCHITECTURE.md#gitops-repo-contract)).
 
 Configuration (env):
 
@@ -105,7 +105,7 @@ Local setup: [DEVELOPMENT.md](DEVELOPMENT.md).
 | Chart | Purpose |
 |---|---|
 | [`charts/badil`](charts/badil) | Installs the badil server; the cleanup sweep runs in the server hourly by default, the cleanup CronJob is disabled by default |
-| [`charts/preview-env`](charts/preview-env) | One preview: AppProject, Namespace, one ArgoCD Application per service and per dependency |
+| [`charts/preview-apps`](charts/preview-apps) | One preview: AppProject, Namespace, one ArgoCD Application per service and per dependency |
 | [`charts/app`](charts/app) | Generic service chart; service charts wrap it as a dependency aliased `app` |
 
 Install: [docs/INSTALL.md](docs/INSTALL.md); ArgoCD wiring: [examples/argocd](examples/argocd/README.md). Charts are published to `oci://ghcr.io/badilhq/charts`; see [CONTRIBUTING.md](CONTRIBUTING.md#releases) for how versions are set.

@@ -1,10 +1,10 @@
 # Preview contract
 
-badil and the renderer of a preview never talk to each other: badil writes one file per preview into the gitops repo, and a renderer turns it into running workloads. This page is that file's contract, `badil.dev/v1beta1`, and what a renderer must do with it. [`preview-env`](../charts/preview-env), driven by the example [ApplicationSet](../examples/argocd/applicationset-previews.yaml), is the renderer badil ships; any other renderer that follows this page works with badil unchanged.
+badil and the renderer of a preview never talk to each other: badil writes one file per preview into the gitops repo, and a renderer turns it into running workloads. This page is that file's contract, `badil.dev/v1beta1`, and what a renderer must do with it. [`preview-apps`](../charts/preview-apps), driven by the example [ApplicationSet](../examples/argocd/applicationset-previews.yaml), is the renderer badil ships; any other renderer that follows this page works with badil unchanged.
 
 ## Versioning
 
-`v1beta1` is a beta: a later version (`v1beta2`, or `v1`) may change the file incompatibly. Each such change ships with a `preview-env` version that accepts only the new `apiVersion`, and badil's cleanup sweep rewrites every preview file that has a pin to it within one sweep after badil is upgraded (the same sweep deletes files without a pin). A renderer refuses an `apiVersion` it does not support.
+`v1beta1` is a beta: a later version (`v1beta2`, or `v1`) may change the file incompatibly. Each such change ships with a `preview-apps` version that accepts only the new `apiVersion`, and badil's cleanup sweep rewrites every preview file that has a pin to it within one sweep after badil is upgraded (the same sweep deletes files without a pin). A renderer refuses an `apiVersion` it does not support.
 
 ## Files
 
@@ -134,7 +134,7 @@ A renderer of `badil.dev/v1beta1`:
 5. Passes `host`, when present, to the parameter `chart.hostParam`.
 6. Deploys each dependency, in the preview namespace with its `name` as release name, from `chart.repoURL` at `chart.version`: the OCI chart reference, or the chart `chart.name` of the Helm repository. It passes `values` as the chart's values, applies `valueFiles` in order from `gitopsRepoURL` at its default branch, passes `host`, when present, to the parameter `hostParam`, and sets no image tag.
 7. Adds `namespace.labels` and `namespace.annotations`, when present, to the preview namespace.
-8. Deletes everything of the preview when its directory disappears, its data included: `preview-env` deletes the preview namespace, which is how per-preview data is dropped.
+8. Deletes everything of the preview when its directory disappears, its data included: `preview-apps` deletes the preview namespace, which is how per-preview data is dropped.
 9. Rejects a file whose `apiVersion` it does not support, instead of rendering it.
 
 ## What badil never does
@@ -147,11 +147,11 @@ A renderer of `badil.dev/v1beta1`:
 
 - Replace the template of the example ApplicationSet, or the whole ApplicationSet, with your renderer: Kustomize, your own app-of-apps, or another tool that watches `previews/*/values.yaml` in the gitops repo.
 - Validate every file with [`schema/preview.v1beta1.schema.json`](../schema/preview.v1beta1.schema.json) before rendering it, so an unsupported `apiVersion` or an invalid file is refused, not half-deployed.
-- Test against [`testdata/contract/v1beta1/`](../testdata/contract/v1beta1): every file of `valid/` must render and every file of `invalid/` must be refused. The `preview-env/` goldens show what `preview-env` renders from each valid file alone.
+- Test against [`testdata/contract/v1beta1/`](../testdata/contract/v1beta1): every file of `valid/` must render and every file of `invalid/` must be refused. The `preview-apps/` goldens show what `preview-apps` renders from each valid file alone.
 
 ### ApplicationSet without Helm
 
-An ApplicationSet alone can produce one Application per service: a matrix of a git files generator over `previews/*/values.yaml` and a [list generator](https://github.com/argoproj/argo-cd/blob/v3.6.1/docs/operator-manual/applicationset/Generators-List.md#dynamically-generated-elements) fed by `elementsYaml: "{{ .services | toJson }}"`. It loses two things `preview-env` provides:
+An ApplicationSet alone can produce one Application per service: a matrix of a git files generator over `previews/*/values.yaml` and a [list generator](https://github.com/argoproj/argo-cd/blob/v3.6.1/docs/operator-manual/applicationset/Generators-List.md#dynamically-generated-elements) fed by `elementsYaml: "{{ .services | toJson }}"`. It loses two things `preview-apps` provides:
 
 - **No per-preview AppProject.** An ApplicationSet creates Applications only, so every preview shares one AppProject.
 - **Namespaces outlive their previews.** A namespace created by `CreateNamespace=true` is not deleted with its Applications. One Application of the preview must own it, through [`managedNamespaceMetadata`](https://github.com/argoproj/argo-cd/blob/v3.6.1/docs/user-guide/sync-options.md#namespace-metadata) with an `argocd.argoproj.io/tracking-id` annotation; otherwise the namespace, and the data in it, stays after badil deletes the preview, which breaks obligation 8.

@@ -67,15 +67,15 @@ jobs:
             exit 1
           fi
 
-      - name: Render preview-env with badil values
+      - name: Render preview-apps with badil values
         run: |
-          out=$(helm template preview-x charts/preview-env -f internal/preview/testdata/values.golden.yaml)
+          out=$(helm template preview-x charts/preview-apps -f internal/preview/testdata/values.golden.yaml)
           echo "$out" | grep -q 'preview.badil.dev/pr-url'
 
-      - name: Render preview-env with an unknown root key fails
+      - name: Render preview-apps with an unknown root key fails
         run: |
           if out=$(printf 'serviceRepos:\n  backend-1: https://github.com/acme/backend-1.git\n' \
-            | helm template preview-x charts/preview-env -f - -f internal/preview/testdata/values.golden.yaml 2>&1); then
+            | helm template preview-x charts/preview-apps -f - -f internal/preview/testdata/values.golden.yaml 2>&1); then
             echo '::error::expected render to fail with serviceRepos at the root'
             exit 1
           fi
@@ -86,9 +86,9 @@ jobs:
             exit 1
           fi
 
-      - name: Render preview-env with YAML 1.1 ambiguous metadata
+      - name: Render preview-apps with YAML 1.1 ambiguous metadata
         run: |
-          out=$(helm template preview-x charts/preview-env -f - <<'EOF'
+          out=$(helm template preview-x charts/preview-apps -f - <<'EOF'
           apiVersion: badil.dev/v1beta1
           gitopsRepoURL: https://github.com/acme/gitops.git
           services:
@@ -120,10 +120,10 @@ jobs:
             exit 1
           fi
 
-      - name: Render preview-env Argo CD namespace
+      - name: Render preview-apps Argo CD namespace
         run: |
           ns() {
-            helm template preview-x charts/preview-env -f charts/preview-env/ci/test-values.yaml "$@" \
+            helm template preview-x charts/preview-apps -f charts/preview-apps/ci/test-values.yaml "$@" \
               | yq -N '.kind + " " + (.metadata.namespace // "-") + " " + ((.spec.destination.namespace // .spec.destinations[0].namespace) // "-")'
           }
           got=$(ns)
@@ -144,7 +144,7 @@ jobs:
             printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
             exit 1
           fi
-          if out=$(helm template preview-x charts/preview-env -f charts/preview-env/ci/test-values.yaml --set argocdNamespace= 2>&1); then
+          if out=$(helm template preview-x charts/preview-apps -f charts/preview-apps/ci/test-values.yaml --set argocdNamespace= 2>&1); then
             echo '::error::expected render to fail with an empty argocdNamespace'
             exit 1
           fi
@@ -154,7 +154,7 @@ jobs:
             printf 'got: %s\n' "$out"
             exit 1
           fi
-          if out=$(printf 'argocdNamespace: null\n' | helm template preview-x charts/preview-env -f charts/preview-env/ci/test-values.yaml -f - 2>&1); then
+          if out=$(printf 'argocdNamespace: null\n' | helm template preview-x charts/preview-apps -f charts/preview-apps/ci/test-values.yaml -f - 2>&1); then
             echo '::error::expected render to fail with a null argocdNamespace'
             exit 1
           fi
@@ -164,7 +164,7 @@ jobs:
             printf 'got: %s\n' "$out"
             exit 1
           fi
-          got=$(helm template preview-x charts/preview-env -f charts/preview-env/ci/test-values.yaml --set-string argocdNamespace=0123 \
+          got=$(helm template preview-x charts/preview-apps -f charts/preview-apps/ci/test-values.yaml --set-string argocdNamespace=0123 \
             | grep -E '^kind: |^  namespace: ')
           want='kind: Namespace
           kind: AppProject
@@ -177,10 +177,10 @@ jobs:
             exit 1
           fi
 
-      - name: Render preview-env Namespace metadata
+      - name: Render preview-apps Namespace metadata
         run: |
           meta() {
-            helm template preview-x charts/preview-env -f charts/preview-env/ci/test-values.yaml -f - \
+            helm template preview-x charts/preview-apps -f charts/preview-apps/ci/test-values.yaml -f - \
               | yq -N 'select(.kind == "Namespace") | .metadata | ([.labels | to_entries[] | "label " + .key + "=" + .value] + [.annotations | to_entries[] | "annotation " + .key + "=" + .value]) | .[]'
           }
           got=$(meta < /dev/null)
@@ -217,10 +217,10 @@ jobs:
             exit 1
           fi
 
-      - name: Render preview-env with invalid namespace metadata fails
+      - name: Render preview-apps with invalid namespace metadata fails
         run: |
           while IFS='|' read -r bad msg; do
-            if out=$(helm template preview-x charts/preview-env -f charts/preview-env/ci/test-values.yaml -f - 2>&1 <<EOF
+            if out=$(helm template preview-x charts/preview-apps -f charts/preview-apps/ci/test-values.yaml -f - 2>&1 <<EOF
           namespace:
             $bad
           EOF
@@ -340,10 +340,10 @@ jobs:
           echo "$out" | grep -q 'value: "1234567"'
           echo "$out" | grep -q 'value: "87654321"'
 
-      - name: Render preview-env with invalid chart settings or image tag fails
+      - name: Render preview-apps with invalid chart settings or image tag fails
         run: |
           while IFS='|' read -r bad msg; do
-            if out=$(helm template preview-x charts/preview-env -f - 2>&1 <<EOF
+            if out=$(helm template preview-x charts/preview-apps -f - 2>&1 <<EOF
           apiVersion: badil.dev/v1beta1
           gitopsRepoURL: https://github.com/acme/gitops.git
           services:
@@ -376,13 +376,13 @@ jobs:
         run: |
           for f in testdata/contract/v1beta1/valid/*.yaml; do
             n=$(basename "$f" .yaml)
-            golden="testdata/contract/v1beta1/preview-env/$n.golden.yaml"
-            if ! out=$(helm template "$n" charts/preview-env -f "$f"); then
-              echo "::error::preview-env failed to render $f"
+            golden="testdata/contract/v1beta1/preview-apps/$n.golden.yaml"
+            if ! out=$(helm template "$n" charts/preview-apps -f "$f"); then
+              echo "::error::preview-apps failed to render $f"
               exit 1
             fi
             if ! echo "$out" | diff -u "$golden" -; then
-              echo "::error::preview-env output differs from $golden: regenerate with make contract-golden"
+              echo "::error::preview-apps output differs from $golden: regenerate with make contract-golden"
               exit 1
             fi
           done
@@ -395,7 +395,7 @@ jobs:
               echo "::error::$f has no '# want: ' line"
               exit 1
             fi
-            if out=$(helm template "$(basename "$f" .yaml)" charts/preview-env -f "$f" 2>&1); then
+            if out=$(helm template "$(basename "$f" .yaml)" charts/preview-apps -f "$f" 2>&1); then
               echo "::error::expected render of $f to fail"
               exit 1
             fi

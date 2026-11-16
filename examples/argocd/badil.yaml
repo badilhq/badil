@@ -1,6 +1,6 @@
 # badil's configuration, at the root of the gitops repo: the only preview
 # config. badil reads it and writes the chart settings, image tags and
-# namespace metadata into each preview file; the preview-env chart reads only
+# namespace metadata into each preview file; the preview-apps chart reads only
 # the preview file. Unknown keys and nulls are rejected at every level.
 
 # Image tag format CI tags images with (optional, default "{sha}", the full
@@ -9,7 +9,7 @@
 # imageTag: "sha-{sha7}"
 
 # Extra preview Namespace labels and annotations (optional): string values; a
-# key the preview-env chart already sets is rejected.
+# key the preview-apps chart already sets is rejected.
 # namespace:
 #   labels:
 #     pod-security.kubernetes.io/enforce: baseline

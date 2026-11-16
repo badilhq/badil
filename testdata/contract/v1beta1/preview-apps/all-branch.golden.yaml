@@ -1,27 +1,27 @@
 ---
-# Source: preview-env/templates/namespace.yaml
+# Source: preview-apps/templates/namespace.yaml
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: two-pinned
+  name: all-branch
   labels:
-    app.kubernetes.io/name: two-pinned
-    app.kubernetes.io/instance: two-pinned
+    app.kubernetes.io/name: all-branch
+    app.kubernetes.io/instance: all-branch
     app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "-2"
 
 ---
-# Source: preview-env/templates/appproject.yaml
+# Source: preview-apps/templates/appproject.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
-  name: two-pinned
+  name: all-branch
   namespace: "argocd"
   labels:
-    app.kubernetes.io/name: two-pinned
-    app.kubernetes.io/instance: two-pinned
+    app.kubernetes.io/name: all-branch
+    app.kubernetes.io/instance: all-branch
     app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
   annotations:
@@ -29,56 +29,50 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  description: "Preview environment: two-pinned"
+  description: "Preview environment: all-branch"
   sourceRepos:
     - "https://github.com/acme/platform.git"
+    - "https://github.com/acme/front.git"
   destinations:
-    - namespace: two-pinned
+    - namespace: all-branch
       server: https://kubernetes.default.svc
   clusterResourceWhitelist:
     - group: ""
       kind: Namespace
 
 ---
-# Source: preview-env/templates/application.yaml
+# Source: preview-apps/templates/application.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: two-pinned-api
+  name: all-branch-api
   namespace: "argocd"
   labels:
     app.kubernetes.io/name: api
-    app.kubernetes.io/instance: two-pinned
+    app.kubernetes.io/instance: all-branch
     app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "0"
-    preview.badil.dev/vcs.ref.revision: "f00dbabe0123456789abcdef0123456789abcdef"
+    preview.badil.dev/vcs.ref.revision: ""
     preview.badil.dev/host: ""
-    preview.badil.dev/pr-author: "hubot"
-    preview.badil.dev/pr-url: "https://github.com/acme/platform/pull/7"
-    preview.badil.dev/pr-number: "7"
-    preview.badil.dev/created-at: "2026-06-01T09:00:00Z"
-    preview.badil.dev/updated-at: "2026-06-01T09:00:00Z"
-    preview.badil.dev/vcs.ref.name: "fix/retries"
-    preview.badil.dev/cicd.pipeline.run.url: "https://github.com/acme/platform/actions/runs/2002"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: two-pinned
+  project: all-branch
   source:
     repoURL: "https://github.com/acme/platform.git"
-    targetRevision: "f00dbabe0123456789abcdef0123456789abcdef"
+    targetRevision: "main"
     path: "k8s/"
     helm:
       releaseName: api
       parameters:
         - name: "app.image.tag"
-          value: "f00dbabe-amd64"
+          value: "sha-${ARGOCD_APP_REVISION_SHORT}"
           forceString: true
   destination:
     server: https://kubernetes.default.svc
-    namespace: two-pinned
+    namespace: all-branch
   syncPolicy:
     automated:
       prune: true
@@ -87,45 +81,38 @@ spec:
       - CreateNamespace=false
 
 ---
-# Source: preview-env/templates/application.yaml
+# Source: preview-apps/templates/application.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: two-pinned-worker
+  name: all-branch-front
   namespace: "argocd"
   labels:
-    app.kubernetes.io/name: worker
-    app.kubernetes.io/instance: two-pinned
+    app.kubernetes.io/name: front
+    app.kubernetes.io/instance: all-branch
     app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "0"
-    preview.badil.dev/vcs.ref.revision: "f00dbabe0123456789abcdef0123456789abcdef"
+    preview.badil.dev/vcs.ref.revision: ""
     preview.badil.dev/host: ""
-    preview.badil.dev/pr-author: "hubot"
-    preview.badil.dev/pr-url: "https://github.com/acme/platform/pull/7"
-    preview.badil.dev/pr-number: "7"
-    preview.badil.dev/created-at: "2026-06-01T09:00:00Z"
-    preview.badil.dev/updated-at: "2026-06-01T09:00:00Z"
-    preview.badil.dev/vcs.ref.name: "fix/retries"
-    preview.badil.dev/cicd.pipeline.run.url: "https://github.com/acme/platform/actions/runs/2002"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: two-pinned
+  project: all-branch
   source:
-    repoURL: "https://github.com/acme/platform.git"
-    targetRevision: "f00dbabe0123456789abcdef0123456789abcdef"
+    repoURL: "https://github.com/acme/front.git"
+    targetRevision: "main"
     path: "k8s/"
     helm:
-      releaseName: worker
+      releaseName: front
       parameters:
         - name: "app.image.tag"
-          value: "f00dbabe-amd64"
+          value: "${ARGOCD_APP_REVISION}"
           forceString: true
   destination:
     server: https://kubernetes.default.svc
-    namespace: two-pinned
+    namespace: all-branch
   syncPolicy:
     automated:
       prune: true

@@ -7,7 +7,7 @@ import (
 )
 
 // MaxSlugLen is the longest slug Slugify returns. It is Helm's release-name
-// limit: Argo CD renders the preview-env chart with the slug as release name
+// limit: Argo CD renders the preview-apps chart with the slug as release name
 // (the ApplicationSet's releaseName), and Helm rejects names over 53
 // characters.
 const MaxSlugLen = 53
