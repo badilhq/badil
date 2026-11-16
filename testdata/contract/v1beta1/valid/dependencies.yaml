@@ -1,14 +1,15 @@
-# One pinned service and two dependencies: postgres, an OCI chart with values
-# and a values file from the gitops repo; mailpit, a chart of a Helm
-# repository, exposed through its hostParam.
+# One pinned service, its image tag a digits-only short SHA that renders as a
+# string, and two dependencies: postgres, an OCI chart with values and a values
+# file from the gitops repo; mailpit, a chart of a Helm repository, exposed
+# through its hostParam.
 apiVersion: badil.dev/v1beta1
 gitopsRepoURL: https://github.com/acme/gitops.git
 services:
   - name: api
     repoURL: https://github.com/acme/platform.git
     branch: main
-    commitSha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
-    imageTag: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+    commitSha: "0123456789abcdef0123456789abcdef01234567"
+    imageTag: "0123456"
     chart:
       path: k8s/
       imageTagParam: app.image.tag
