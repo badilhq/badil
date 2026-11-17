@@ -1,4 +1,9 @@
-# badil
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.png">
+    <img alt="badil" src="docs/assets/logo-light.png" width="232">
+  </picture>
+</h1>
 
 Per-pull-request preview environments for teams running Kubernetes and ArgoCD. Self-hosted, open source.
 
