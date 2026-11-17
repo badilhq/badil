@@ -1,4 +1,5 @@
-# Expected results of the triggers in ../../github-deployments-values.yaml.
+# Expected results of the triggers in ../../notifications-values.yaml and
+# ../../github-deployments-values.yaml.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -13,6 +14,7 @@ metadata:
     test.badil.dev/on-preview-degraded: "false"
     test.badil.dev/on-preview-sync-error: "true"
     test.badil.dev/on-preview-unpinned: "false"
+    test.badil.dev/on-preview-healthy: "false"
 spec:
   project: feature-x
   source:

@@ -1,0 +1,31 @@
+# Expected results of the triggers in ../../notifications-values.yaml and
+# ../../github-deployments-values.yaml.
+# The sync at the pinned SHA has just ended, before the refresh that follows
+# it: reconciledAt predates finishedAt, so health still describes the pods
+# from before the sync, and has not changed since before the sync started.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: feature-x-api
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/instance: feature-x
+  annotations:
+    preview.badil.dev/vcs.ref.revision: "2222222222222222222222222222222222222222"
+    test.badil.dev/on-preview-deployed: "false"
+    test.badil.dev/on-preview-degraded: "false"
+    test.badil.dev/on-preview-sync-error: "false"
+    test.badil.dev/on-preview-unpinned: "false"
+    test.badil.dev/on-preview-healthy: "false"
+spec:
+  project: feature-x
+  source:
+    repoURL: https://github.com/acme/api.git
+    targetRevision: "2222222222222222222222222222222222222222"
+    path: k8s/
+status:
+  reconciledAt: "2026-11-17T04:22:27Z"
+  health: {status: Healthy, lastTransitionTime: "2026-11-17T04:21:23Z"}
+  sync: {status: Synced, revision: "2222222222222222222222222222222222222222", comparedTo: {source: {targetRevision: "2222222222222222222222222222222222222222"}}}
+  operationState: {phase: Succeeded, startedAt: "2026-11-17T04:22:23Z", finishedAt: "2026-11-17T04:22:28Z", syncResult: {revision: "2222222222222222222222222222222222222222"}}
