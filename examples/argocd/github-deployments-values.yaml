@@ -115,9 +115,10 @@ notifications:
   triggers:
     # Fires once per sync at the pinned SHA of a pinned service's Application:
     # oncePer is the synced revision and the id of the sync history's last
-    # entry, so a re-pin at the same SHA posts success again (the engine never
-    # clears a oncePer key), and so does any further successful sync at that
-    # SHA, on the same deployment. The last test waits for the sync at the
+    # entry, so a re-pin at the same SHA posts success again once Argo CD syncs
+    # it (the engine never clears a oncePer key), and so does any further
+    # successful sync at that SHA, on the same deployment. A pin or re-pin that
+    # runs no sync (rendered manifests unchanged) posts nothing. The last test waits for the sync at the
     # pinned SHA: right after a pin, operationState still describes the
     # previous sync (main's SHA when the service tracked main). startsWith
     # keeps a short SHA sent to /v1/deploy working.
