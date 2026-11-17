@@ -1,7 +1,8 @@
 BINARY := badil
 CMD := ./cmd/badil
+VERSION ?= dev
 
-.PHONY: build test lint schema contract-golden docker-build dev-bootstrap dev-verify dev-serve dev-cleanup
+.PHONY: build test lint schema contract-golden template docker-build dev-bootstrap dev-verify dev-serve dev-cleanup
 
 build:
 	CGO_ENABLED=0 go build -o $(BINARY) $(CMD)
@@ -26,6 +27,10 @@ contract-golden:
 		helm template "$$n" charts/preview-apps -f "$$f" \
 			> "testdata/contract/v1beta1/preview-apps/$$n.golden.yaml" || exit 1; \
 	done
+
+# Builds the gitops repo template into dist/template/ for VERSION (default dev).
+template:
+	scripts/build-template.sh $(VERSION)
 
 docker-build:
 	docker build -t $(BINARY):latest .

@@ -1,0 +1,66 @@
+# The commented lines are copied from examples/argocd/badil.yaml of badil and kept in step with it.
+
+# badil's configuration, at the root of the gitops repo: the only preview
+# config. badil reads it and writes the chart settings, image tags and
+# namespace metadata into each preview file; the preview-apps chart reads only
+# the preview file. Unknown keys and nulls are rejected at every level.
+
+# Image tag format CI tags images with (optional, default "{sha}", the full
+# commit SHA): an optional prefix, one of {sha}, {sha7} or {sha8}, an optional
+# suffix. Quote it: an unquoted {sha} is a YAML mapping.
+# imageTag: "sha-{sha7}"
+
+# Extra preview Namespace labels and annotations (optional): string values; a
+# key the preview-apps chart already sets is rejected.
+# namespace:
+#   labels:
+#     pod-security.kubernetes.io/enforce: baseline
+#   annotations: {}
+
+# Service catalog (required, at least one service). The order is the catalog
+# order of every preview.
+services:
+  my-service:
+    repo: "https://github.com/YOUR-ORG/my-service.git"  # required: the service's git URL
+    # branch: main                # optional, default "main": branch of unpinned services
+    # imageTag: "{sha8}-amd64"    # optional: overrides the root imageTag
+    # chart:                      # optional, every key optional
+    #   path: deploy/helm         # default "k8s/": chart path in the service repo
+    #   imageTagParam: image.tag  # default "app.image.tag": Helm parameter set to the image tag
+    #   hostParam: ingress.hostname   # default "app.ingress.host": Helm parameter set to the preview host
+    #   valueFiles:               # default none: extra values files; relative to path, "/" from the repo root, URLs fetched remotely
+    #     - values-preview.yaml
+    # needs: [postgres]           # optional: services and dependencies it calls; once any entry sets needs,
+    #                             # a preview runs only its pinned services and what they need
+    # paths: ["api/**", "libs/common/**"]   # optional: globs of the files of its repo that belong to it;
+    #                             # a labelled PR pins it only when it changes one of them
+
+# Upstream charts deployed in every preview (optional), in this order, each as
+# an Argo CD Application created before the services. Never pinned, no image
+# tag. A name must not be a service name. The chart limits and private
+# registries: docs/ARCHITECTURE.md#dependencies.
+# dependencies:
+#   postgres:
+#     chart: oci://registry-1.docker.io/bitnamicharts/postgresql   # an oci:// chart reference: no repo
+#     version: 16.4.2             # required; quote one YAML reads as a number ("1.0")
+#     values: {auth: {password: preview}}   # optional: any mapping, the chart's values
+#     valueFiles: [deps/postgres.yaml]      # optional: paths from the gitops repo root
+#   mailpit:
+#     repo: https://jouve.github.io/charts  # required when chart is not oci://: an https:// Helm repository
+#     chart: mailpit              # the chart name in repo
+#     version: 0.20.0
+#     hostParam: ingress.hostname # required when exposed: Helm parameter set to the preview host
+#     needs: [postgres]           # optional: a dependency can need others too
+
+# Per-preview URLs (optional): each exposed service or dependency gets the
+# ingress host <name>-<slug>.<domain> and a link in the PR comment.
+# preview:
+#   label: preview                # optional, default "preview": the PR label that creates the preview; "preview:<name>" picks its name
+#   maxPreviews: 10               # optional, default no cap: a deploy that would create a preview past it is refused
+#   argocdURL: https://argocd.example.com   # optional: the Argo CD UI; the PR comment links the preview's Applications
+#   domain: previews.example.com  # lowercase bare domain; needs a wildcard DNS record for *.<domain>
+#   tls: true                     # optional, default true: https links (ingress TLS stays in the service chart)
+#   expose:
+#     front: {}
+#     backend-1:
+#       path: /docs               # optional, default "/": PR-comment link only

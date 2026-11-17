@@ -1,6 +1,7 @@
 # Binaries
 /badil
 /bin/
+/dist/
 
 # Go
 vendor/

@@ -37,6 +37,26 @@ jobs:
 
       - run: go build ./...
 
+      - name: Gitops repo template
+        run: |
+          make template
+          for f in README.md badil.yaml previews/.gitkeep argocd/appproject-previews.yaml argocd/applicationset-previews.yaml; do
+            if [ ! -f "dist/template/$f" ]; then
+              echo "::error::dist/template/$f is missing"
+              exit 1
+            fi
+          done
+          if grep -rn 'badilhq/demo-gitops' dist/template; then
+            echo "::error::dist/template references badilhq/demo-gitops"
+            exit 1
+          fi
+          for f in appproject-previews.yaml applicationset-previews.yaml; do
+            if ! grep -qF 'https://github.com/YOUR-ORG/YOUR-GITOPS-REPO.git' "dist/template/argocd/$f"; then
+              echo "::error::dist/template/argocd/$f lacks the gitops repo placeholder"
+              exit 1
+            fi
+          done
+
       - name: JSON schemas up to date
         run: |
           go generate ./cmd/schemagen
