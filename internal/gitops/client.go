@@ -498,21 +498,12 @@ func (c *Client) TeardownPreviewWithRetry(
 	prNumber int,
 ) (*TeardownResult, error) {
 	start := time.Now()
-	res, err := c.teardownPreviewWithRetry(ctx, slug, owner, repo, prNumber)
-	c.observe("teardown", start, err)
-	return res, err
-}
-
-// teardownPreviewWithRetry is TeardownPreviewWithRetry, untimed.
-func (c *Client) teardownPreviewWithRetry(
-	ctx context.Context,
-	slug, owner, repo string,
-	prNumber int,
-) (*TeardownResult, error) {
 	unpin := func(vals preview.PreviewValues) (preview.PreviewValues, []string, bool) {
 		return preview.UnpinPR(vals, owner, repo, prNumber)
 	}
-	return c.unpinWithRetry(ctx, "teardown", slug, unpin, false)
+	res, err := c.unpinWithRetry(ctx, "teardown", slug, unpin, false)
+	c.observe("teardown", start, err)
+	return res, err
 }
 
 // UnpinServicesWithRetry unpins, in previews/<slug>/values.yaml, the entries

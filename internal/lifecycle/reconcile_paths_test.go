@@ -196,12 +196,8 @@ func TestReconcile_PathsListingFails(t *testing.T) {
 			if len(logs) != 1 || logs[0]["err"].String() != "files boom" {
 				t.Errorf("reconcile failed logs = %v", logs)
 			}
-			if fallback := capture.find(
-				slog.LevelWarn,
-				"preview reconcile fell back to payload teardown",
-			); len(
-				fallback,
-			) != 0 {
+			fallback := capture.find(slog.LevelWarn, "preview reconcile fell back to payload teardown")
+			if len(fallback) != 0 {
 				t.Errorf("payload teardown logs = %v, want none", fallback)
 			}
 			assertMetrics(t, f.Metrics, map[string]float64{`badil_reconciles_total{outcome="failed"}`: 1},

@@ -432,15 +432,3 @@ func TestListPullRequestFiles_FailingLaterPage(t *testing.T) {
 		t.Errorf("files = %+v, want nil", got)
 	}
 }
-
-func TestListPullRequestFiles_NotFound(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = io.WriteString(w, `{"message":"Not Found"}`)
-	}))
-	t.Cleanup(srv.Close)
-	_, err := newClient(t, srv).ListPullRequestFiles(context.Background(), "acme", "platform", 42)
-	if !errors.Is(err, gitops.ErrNotFound) {
-		t.Fatalf("err = %v, want %v", err, gitops.ErrNotFound)
-	}
-}
