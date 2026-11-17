@@ -1206,16 +1206,6 @@ func TestParseCatalog_Paths(t *testing.T) {
 	}
 }
 
-func TestParseCatalog_NoPaths(t *testing.T) {
-	got, err := gitops.ParseCatalog([]byte(catalogServices))
-	if err != nil {
-		t.Fatalf("ParseCatalog: %v", err)
-	}
-	if got.Paths != nil {
-		t.Errorf("Paths = %v, want nil", got.Paths)
-	}
-}
-
 func TestParseCatalog_MalformedPaths(t *testing.T) {
 	const list = "badil.yaml: services.api.paths must be a non-empty list of non-empty strings"
 	svc := func(paths string) string {

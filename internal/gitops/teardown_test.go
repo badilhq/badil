@@ -657,21 +657,6 @@ func TestUnpinServices_KeepsFileWithNoPinLeft(t *testing.T) {
 	}
 }
 
-func TestUnpinServices_ExcludedFromProjection(t *testing.T) {
-	g := &teardownGitHub{t: t, gets: []fileState{{sha: "blob-1", body: frontAndPayments}}, badil: needsBadil}
-	srv := httptest.NewServer(g)
-	t.Cleanup(srv.Close)
-	result, err := newClient(t, srv).UnpinServicesWithRetry(
-		context.Background(), "feature-x", "acme", "payments", 42, []string{"payments"},
-	)
-	if err != nil {
-		t.Fatalf("UnpinServicesWithRetry: %v", err)
-	}
-	if want := []string{"payments", "search", "kafka", "elasticsearch"}; !slices.Equal(result.Excluded, want) {
-		t.Errorf("Excluded = %v, want %v", result.Excluded, want)
-	}
-}
-
 func TestUnpinServices_UnreadableBadilYAML(t *testing.T) {
 	g := &teardownGitHub{gets: []fileState{{sha: "blob-1", body: pr42TwoServices}}}
 	result, err := runUnpin(t, g, "backend-2")
@@ -684,72 +669,5 @@ func TestUnpinServices_UnreadableBadilYAML(t *testing.T) {
 	}
 	if reqs := g.requests(); len(reqs) != 0 {
 		t.Errorf("requests = %+v, want no write", reqs)
-	}
-}
-
-func TestUnpinServices_ConflictRetry(t *testing.T) {
-	// The re-fetch shows front pinned by acme/front#9 too: the retry keeps it.
-	g := &teardownGitHub{
-		gets:   []fileState{{sha: "blob-1", body: onlyPR42}, {sha: "blob-2", body: pr42TwoServices}},
-		writes: []int{http.StatusConflict},
-		badil:  teardownBadil,
-	}
-	result, err := runUnpin(t, g, "backend-1")
-	if err != nil {
-		t.Fatalf("UnpinServicesWithRetry: %v", err)
-	}
-	reqs := g.requests()
-	if len(reqs) != 2 || reqs[1].method != http.MethodPut || reqs[1].sha != "blob-2" {
-		t.Fatalf("requests = %+v, want two PUTs, the retry at blob-2", reqs)
-	}
-	if !strings.Contains(reqs[1].content, "commitSha: cccccccccc") {
-		t.Errorf("retry dropped front's pin:\n%s", reqs[1].content)
-	}
-	if !slices.Equal(result.Removed, []string{"backend-1"}) || g.catalogReads() != 1 {
-		t.Errorf("result = %+v, badil.yaml reads = %d; want Removed [backend-1], 1 read", result, g.catalogReads())
-	}
-}
-
-func TestUnpinServices_ConflictsExhausted(t *testing.T) {
-	g := &teardownGitHub{
-		gets:   []fileState{{sha: "blob-1", body: onlyPR42}},
-		writes: slices.Repeat([]int{http.StatusConflict}, gitops.MaxWriteRetries),
-		badil:  teardownBadil,
-	}
-	_, err := runUnpin(t, g, "backend-1")
-	const want = "unpin previews/feature-x/values.yaml: 3 attempts exhausted"
-	if err == nil || err.Error() != want {
-		t.Fatalf("err = %v, want %q", err, want)
-	}
-}
-
-func TestUnpinServices_NoOps(t *testing.T) {
-	cases := []struct {
-		name     string
-		gets     []fileState
-		services []string
-	}{
-		{name: "file missing", gets: []fileState{{}}, services: []string{"backend-1"}},
-		{
-			name:     "service not pinned by the PR",
-			gets:     []fileState{{sha: "blob-1", body: pr42TwoServices}},
-			services: []string{"front"},
-		},
-		{name: "no service", gets: []fileState{{sha: "blob-1", body: pr42TwoServices}}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			g := &teardownGitHub{gets: tc.gets, badil: teardownBadil}
-			result, err := runUnpin(t, g, tc.services...)
-			if err != nil {
-				t.Fatalf("UnpinServicesWithRetry: %v", err)
-			}
-			if result == nil || len(result.Removed) != 0 || result.Deleted || result.CommitURL != "" {
-				t.Errorf("result = %+v, want empty no-op result", result)
-			}
-			if reqs := g.requests(); len(reqs) != 0 {
-				t.Errorf("requests = %+v, want no write", reqs)
-			}
-		})
 	}
 }

@@ -33,12 +33,13 @@ type deployCall struct {
 }
 
 // reconcileFake is an in-memory ReconcileAPI. The catalog is parsed from
-// badil, or reconcileServices when it is empty, unless catalogErr is set. teardownBySlug, when it has the
-// slug, overrides teardown, and teardownErr fails every teardown. previews is
-// what GetPreview reads, unless previewErr is set; an unknown slug is
-// ErrNotFound. maxPreviews, when set, is the catalog's MaxPreviews. listed is
-// what ListPreviews returns, unless listErr is set. A write of a service in unchanged with skipUnchanged set
-// returns an Unchanged result and is logged in skipped, not in writes.
+// badil, or reconcileServices when it is empty, unless catalogErr is set.
+// teardownBySlug, when it has the slug, overrides teardown, and teardownErr
+// fails every teardown. previews is what GetPreview reads, unless previewErr
+// is set; an unknown slug is ErrNotFound. maxPreviews, when set, is the
+// catalog's MaxPreviews. listed is what ListPreviews returns, unless listErr
+// is set. A write of a service in unchanged with skipUnchanged set returns an
+// Unchanged result and is logged in skipped, not in writes.
 // ListPullRequestFiles returns files, unless filesErr is set.
 // UnpinServicesWithRetry unpins the services from previews[slug]
 // (preview.UnpinPRServices) and returns that file, never deleted, unless

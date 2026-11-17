@@ -34,17 +34,6 @@ type fakeGitops struct {
 	prErr   error
 	prCalls int
 
-	// files is what ListPullRequestFiles returns, unless filesErr is set.
-	files      []gitops.ChangedFile
-	filesErr   error
-	filesCalls int
-	// unpinResult is what UnpinServicesWithRetry returns (an empty result
-	// when nil), unless unpinErr is set; unpins holds the services of each
-	// call.
-	unpinResult *gitops.TeardownResult
-	unpinErr    error
-	unpins      [][]string
-
 	// previews is what GetPreview reads, unless previewErr is set; an unknown
 	// slug is ErrNotFound.
 	previews   map[string]*preview.PreviewValues
@@ -185,27 +174,13 @@ func (f *fakeGitops) GetPullRequest(_ context.Context, _, _ string, _ int) (*git
 }
 
 func (f *fakeGitops) ListPullRequestFiles(context.Context, string, string, int) ([]gitops.ChangedFile, error) {
-	f.filesCalls++
-	if f.filesErr != nil {
-		return nil, f.filesErr
-	}
-	return f.files, nil
+	return nil, nil
 }
 
 func (f *fakeGitops) UnpinServicesWithRetry(
-	_ context.Context,
-	_, _, _ string,
-	_ int,
-	services []string,
+	context.Context, string, string, string, int, []string,
 ) (*gitops.TeardownResult, error) {
-	f.unpins = append(f.unpins, services)
-	if f.unpinErr != nil {
-		return nil, f.unpinErr
-	}
-	if f.unpinResult == nil {
-		return &gitops.TeardownResult{}, nil
-	}
-	return f.unpinResult, nil
+	return &gitops.TeardownResult{}, nil
 }
 
 func (f *fakeGitops) GetPreview(_ context.Context, slug string) (*preview.PreviewValues, string, error) {

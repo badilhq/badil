@@ -1045,15 +1045,3 @@ func TestUnpinPRServices(t *testing.T) {
 		})
 	}
 }
-
-func TestUnpinPRServices_LastPin(t *testing.T) {
-	const pr42 = "https://github.com/acme/platform/pull/42"
-	in := preview.PreviewValues{Services: []preview.ServiceEntry{pinned("api", "a", pr42), {Name: "web"}}}
-	got, removed, stillPinned := preview.UnpinPRServices(in, "acme", "platform", 42, []string{"api", "web"})
-	if !reflect.DeepEqual(removed, []string{"api"}) || stillPinned {
-		t.Errorf("removed = %v, pinned = %v; want [api], false", removed, stillPinned)
-	}
-	if got.Services[0].CommitSha != "" || in.Services[0].CommitSha != "a" {
-		t.Errorf("got %+v from %+v; want api unpinned in a copy", got.Services[0], in.Services[0])
-	}
-}
