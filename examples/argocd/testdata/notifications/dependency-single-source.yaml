@@ -1,0 +1,35 @@
+# Expected results of the triggers in ../../github-deployments-values.yaml.
+# A single-source dependency Application: its history entry's revision and
+# targetRevision are both the chart version, so it is not a pinned entry.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: feature-x-redis
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: feature-x
+  annotations:
+    preview.badil.dev/vcs.ref.revision: ""
+    preview.badil.dev/host: ""
+    test.badil.dev/on-preview-deployed: "false"
+    test.badil.dev/on-preview-degraded: "false"
+    test.badil.dev/on-preview-sync-error: "false"
+    test.badil.dev/on-preview-unpinned: "false"
+spec:
+  project: feature-x
+  source:
+    repoURL: https://charts.example.com
+    targetRevision: "6.17.0"
+    chart: redis
+    helm:
+      releaseName: redis
+status:
+  health: {status: Healthy}
+  sync: {status: Synced, revision: "6.17.0", comparedTo: {source: {repoURL: https://charts.example.com, targetRevision: "6.17.0", chart: redis}}}
+  operationState: {phase: Succeeded, syncResult: {revision: "6.17.0"}}
+  history:
+    - id: 0
+      revision: "6.17.0"
+      deployedAt: "2026-11-16T21:50:00Z"
+      source: {repoURL: https://charts.example.com, targetRevision: "6.17.0", chart: redis, helm: {releaseName: redis}}

@@ -9,8 +9,10 @@ metadata:
     app.kubernetes.io/instance: feature-x
   annotations:
     preview.badil.dev/vcs.ref.revision: ""
+    test.badil.dev/on-preview-deployed: "false"
     test.badil.dev/on-preview-degraded: "false"
     test.badil.dev/on-preview-sync-error: "false"
+    test.badil.dev/on-preview-unpinned: "false"
 spec:
   project: feature-x
   source:

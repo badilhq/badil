@@ -1,0 +1,40 @@
+# Expected results of the triggers in ../../github-deployments-values.yaml.
+# Unpinned after a pin, once the sync at main has run: the pin entry is
+# not the last one.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: feature-x-api
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/instance: feature-x
+  annotations:
+    preview.badil.dev/vcs.ref.revision: ""
+    test.badil.dev/on-preview-deployed: "false"
+    test.badil.dev/on-preview-degraded: "false"
+    test.badil.dev/on-preview-sync-error: "false"
+    test.badil.dev/on-preview-unpinned: "true"
+spec:
+  project: feature-x
+  source:
+    repoURL: https://github.com/acme/api.git
+    targetRevision: "main"
+    path: k8s/
+status:
+  health: {status: Healthy}
+  sync: {status: Synced, revision: "88ac2f0ebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", comparedTo: {source: {targetRevision: main}}}
+  operationState: {phase: Succeeded, syncResult: {revision: "88ac2f0ebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}
+  history:
+    - id: 0
+      revision: "88ac2f0ebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      deployedAt: "2026-11-16T21:50:00Z"
+      source: {repoURL: https://github.com/acme/api.git, targetRevision: "main", path: k8s/}
+    - id: 1
+      revision: "4d14f8e8aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      deployedAt: "2026-11-16T21:51:00Z"
+      source: {repoURL: https://github.com/acme/api.git, targetRevision: "4d14f8e8aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", path: k8s/}
+    - id: 2
+      revision: "88ac2f0ebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      deployedAt: "2026-11-16T21:52:00Z"
+      source: {repoURL: https://github.com/acme/api.git, targetRevision: "main", path: k8s/}

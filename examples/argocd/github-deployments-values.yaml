@@ -9,7 +9,10 @@
 # Unknown at that SHA (for example a chart that fails to render), it posts
 # `error`. Both land on the deployment a `success` at that SHA would use. When
 # the Application is deleted, it posts `inactive` on the deployment of the SHA
-# badil last pinned (best effort). Argo CD authenticates with its own GitHub App.
+# badil last pinned (best effort). When badil unpins the service from a preview
+# that survives, it posts `inactive` on the deployment of the last pinned SHA
+# in the Application's sync history. Argo CD authenticates with its own GitHub
+# App.
 #
 # Requires notifications-values.yaml (spin-up time) and must come after it on
 # the command line. It repeats the spin-up subscription, because Helm replaces
@@ -27,8 +30,9 @@
 # Argo CD installed without Helm: put the keys service.github,
 # template.badil-preview-deployed, template.badil-preview-failed,
 # template.badil-preview-errored, template.badil-preview-deleted,
-# trigger.on-preview-deployed, trigger.on-preview-degraded,
-# trigger.on-preview-sync-error, trigger.on-preview-deleted and subscriptions
+# template.badil-preview-unpinned, trigger.on-preview-deployed,
+# trigger.on-preview-degraded, trigger.on-preview-sync-error,
+# trigger.on-preview-deleted, trigger.on-preview-unpinned and subscriptions
 # (with both entries below) under `data` of the argocd-notifications-cm
 # ConfigMap, and the github-appID, github-installationID and github-privateKey
 # items in the argocd-notifications-secret Secret.
@@ -92,11 +96,29 @@ notifications:
           requiredContexts: []
           autoMerge: false
           transientEnvironment: false
+    # revisionPath: the revision of the last pinned entry of the sync history,
+    # as trigger.on-preview-unpinned selects it.
+    template.badil-preview-unpinned: |
+      message: "{{ index .app.metadata.labels \"app.kubernetes.io/name\" }} unpinned from preview {{ index .app.metadata.labels \"app.kubernetes.io/instance\" }}"
+      github:
+        repoURLPath: "{{.app.spec.source.repoURL}}"
+        revisionPath: "{{ $pinned := \"\" }}{{ range .app.status.history }}{{ $rev := toString (dig \"revision\" \"\" .) }}{{ $target := toString (dig \"source\" \"targetRevision\" \"\" .) }}{{ if and (regexMatch \"^[0-9a-f]{40}$\" $rev) (regexMatch \"^[0-9a-f]{7,40}$\" $target) (hasPrefix $target $rev) }}{{ $pinned = $rev }}{{ end }}{{ end }}{{ $pinned }}"
+        deployment:
+          state: inactive
+          environment: "preview-{{ index .app.metadata.labels \"app.kubernetes.io/instance\" }}-{{ index .app.metadata.labels \"app.kubernetes.io/name\" }}"
+          # Use http:// when preview.tls: false.
+          environmentURL: "{{ with index .app.metadata.annotations \"preview.badil.dev/host\" }}https://{{ . }}/{{ end }}"
+          requiredContexts: []
+          autoMerge: false
+          transientEnvironment: false
 
   triggers:
-    # Fires once per revision of a pinned service's Application.
+    # Fires once per revision of a pinned service's Application. The last test
+    # waits for the sync at the pinned SHA: right after a pin, operationState
+    # still describes the previous sync (main's SHA when the service tracked
+    # main). startsWith keeps a short SHA sent to /v1/deploy working.
     trigger.on-preview-deployed: |
-      - when: app.status?.operationState?.phase in ['Succeeded'] and app.status?.health?.status == 'Healthy' and app.metadata.annotations['preview.badil.dev/vcs.ref.revision'] != ''
+      - when: app.status?.operationState?.phase in ['Succeeded'] and app.status?.health?.status == 'Healthy' and app.metadata.annotations['preview.badil.dev/vcs.ref.revision'] != '' and app.status?.operationState?.syncResult?.revision startsWith app.metadata.annotations['preview.badil.dev/vcs.ref.revision']
         oncePer: app.status?.operationState?.syncResult?.revision
         send: [badil-preview-deployed]
     # Fires once per pinned SHA when the Application is Degraded at that SHA
@@ -123,6 +145,18 @@ notifications:
       - when: app.metadata.deletionTimestamp != nil and app.metadata.annotations['preview.badil.dev/vcs.ref.revision'] != ''
         oncePer: app.metadata.name
         send: [badil-preview-deleted]
+    # Fires once per unpinned SHA when badil unpins the service (empty
+    # revision annotation) and the sync history still holds a pinned entry:
+    # a single-source entry whose revision is a full SHA, whose
+    # source.targetRevision is a SHA, and a prefix of it. Branch-tracking
+    # entries and dependency entries (chart versions; multi-source entries
+    # with an empty source and no revision) are not pinned entries, and the
+    # nil tests keep matches and startsWith off missing fields. It does not
+    # wait for the sync to the branch: the pinned entry is already there.
+    trigger.on-preview-unpinned: |
+      - when: app.metadata.annotations['preview.badil.dev/vcs.ref.revision'] == '' and any(app.status?.history ?? [], {.revision != nil and .source?.targetRevision != nil and .revision matches '^[0-9a-f]{40}$' and .source?.targetRevision matches '^[0-9a-f]{7,40}$' and .revision startsWith .source?.targetRevision})
+        oncePer: findLast(app.status?.history ?? [], {.revision != nil and .source?.targetRevision != nil and .revision matches '^[0-9a-f]{40}$' and .source?.targetRevision matches '^[0-9a-f]{7,40}$' and .revision startsWith .source?.targetRevision})?.revision
+        send: [badil-preview-unpinned]
 
   # Full list: repeats the spin-up subscription from notifications-values.yaml.
   subscriptions:
@@ -138,4 +172,5 @@ notifications:
         - on-preview-deleted
         - on-preview-degraded
         - on-preview-sync-error
+        - on-preview-unpinned
       selector: app.kubernetes.io/part-of=preview-environments,app.kubernetes.io/managed-by=argocd

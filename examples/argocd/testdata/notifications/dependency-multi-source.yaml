@@ -1,7 +1,8 @@
 # Expected results of the triggers in ../../github-deployments-values.yaml.
 # A dependency Application with valueFiles: spec.sources and no spec.source,
 # and an empty revision annotation. Degraded with a failed sync, it still
-# triggers nothing.
+# triggers nothing. Its history entry has Argo CD's multi-source shape:
+# sources and revisions, an empty source and no revision.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -13,8 +14,10 @@ metadata:
   annotations:
     preview.badil.dev/vcs.ref.revision: ""
     preview.badil.dev/host: ""
+    test.badil.dev/on-preview-deployed: "false"
     test.badil.dev/on-preview-degraded: "false"
     test.badil.dev/on-preview-sync-error: "false"
+    test.badil.dev/on-preview-unpinned: "false"
 spec:
   project: feature-x
   sources:
@@ -39,3 +42,12 @@ status:
   operationState:
     phase: Failed
     syncResult: {revisions: ["16.4.2", "0123456789abcdef0123456789abcdef01234567"]}
+  history:
+    - id: 0
+      deployedAt: "2026-11-16T21:50:00Z"
+      deployStartedAt: "2026-11-16T21:49:58Z"
+      source: {repoURL: ""}
+      sources:
+        - {repoURL: oci://registry-1.docker.io/bitnamicharts/postgresql, targetRevision: "16.4.2", path: "."}
+        - {repoURL: https://github.com/acme/gitops.git, targetRevision: HEAD, ref: values}
+      revisions: ["16.4.2", "0123456789abcdef0123456789abcdef01234567"]
