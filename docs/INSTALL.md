@@ -171,22 +171,24 @@ helm upgrade argocd argo/argo-cd -n argocd --version <your installed argo-cd cha
   --set-file notifications.secret.items.github-privateKey=<path to the App's .pem>
 ```
 
-On the PR, each pinned service that goes Healthy at the PR head SHA appears as a deployment to the environment `preview-<slug>-<service>`, state `success`, with `environment_url` set to `https://<service host>/`. A service that turns Degraded at the PR head SHA (image never pushed, crash loop) shows on the same deployment as state `failure`, after its Deployment's `progressDeadlineSeconds`; one whose sync fails or whose chart fails to render at that SHA shows as state `error`. When the service's Application is deleted, the deployment of the SHA badil last pinned is marked `inactive`. The file uses `https://`; change every `environmentURL` line to `http://` if your previews run with `preview.tls: false`.
+On the PR, each pinned service that goes Healthy at the PR head SHA appears as a deployment to the environment `preview-<slug>-<service>`, state `success`, with `environment_url` set to `https://<service host>/`. A service that turns Degraded at the PR head SHA (image never pushed, crash loop) shows on the same deployment as state `failure`, after its Deployment's `progressDeadlineSeconds`; one whose sync fails or whose chart fails to render at that SHA shows as state `error`. When the service's Application is deleted, the deployment of the SHA badil last pinned is marked `inactive`. When badil unpins a service from a preview that survives (a later push that no longer touches its `paths`, or a PR closed while another PR keeps the preview), the deployment of its last pinned SHA is marked `inactive`. The file uses `https://`; change every `environmentURL` line to `http://` if your previews run with `preview.tls: false`.
 
 Limitations:
 
 1. `inactive` on delete is best effort. It closes the `success`, `failure` or `error` deployment of the SHA badil last pinned; only when that SHA never got a status (still Progressing at teardown) does it create an extra `inactive` deployment. An earlier SHA's `success` stays.
-2. A PR that leaves a surviving preview keeps its last `success`, because its Application is updated, not deleted.
-3. Failed notifications are not retried.
-4. Applying the config posts `success` for every already-Healthy pinned Application, `failure` for every pinned Application already Degraded at its SHA, and `error` for every one whose sync already failed or is `Unknown` at its SHA.
-5. Environments accumulate on the service repos; delete them by hand.
-6. The URL is the host root; the expose path is not applied.
-7. One App installation covers all service repos.
-8. For a pinned service with no host (not in `expose`, e.g. `postgres`), `environment_url` is sent as `""`. Whether GitHub accepts that is not verified; the notifications controller log shows the result.
-9. `oncePer` is per pinned SHA: a service that was Healthy (`success`), then Degraded (`failure`), then Healthy again at the same SHA keeps `failure`, because `on-preview-deployed` already fired for that revision. A push (new SHA) resets it.
-10. A rollout that never completes (image never pushed, crash loop) shows as `failure` only after the Deployment's `progressDeadlineSeconds` (600 s by default).
-11. A transient `Unknown` sync status (for example a repo-server error) posts `error` once for that SHA; a later Healthy sync at a SHA where `on-preview-deployed` had not fired yet posts `success` on the same deployment.
-12. With a short `commit_sha` sent to `/v1/deploy`, `on-preview-degraded` and `on-preview-sync-error` never fire, because their guards compare `app.spec.source.targetRevision` with the resolved full SHA; nothing logs it. `on-preview-deleted` then looks up the deployment by the short SHA and misses the full-SHA `success` deployment: it leaves that deployment open and creates an extra `inactive` deployment for the short ref. The label flow always pins the full SHA.
+2. Failed notifications are not retried.
+3. Applying the config posts `success` for every already-Healthy pinned Application, `failure` for every pinned Application already Degraded at its SHA, and `error` for every one whose sync already failed or is `Unknown` at its SHA, and `inactive` for every unpinned Application whose sync history still holds a pinned entry.
+4. Environments accumulate on the service repos; delete them by hand.
+5. The URL is the host root; the expose path is not applied.
+6. One App installation covers all service repos.
+7. For a pinned service with no host (not in `expose`, e.g. `postgres`), `environment_url` is sent as `""`. Whether GitHub accepts that is not verified; the notifications controller log shows the result.
+8. `oncePer` is per pinned SHA: a service that was Healthy (`success`), then Degraded (`failure`), then Healthy again at the same SHA keeps `failure`, because `on-preview-deployed` already fired for that revision. A push (new SHA) resets it.
+9. A rollout that never completes (image never pushed, crash loop) shows as `failure` only after the Deployment's `progressDeadlineSeconds` (600 s by default).
+10. A transient `Unknown` sync status (for example a repo-server error) posts `error` once for that SHA; a later Healthy sync at a SHA where `on-preview-deployed` had not fired yet posts `success` on the same deployment.
+11. With a short `commit_sha` sent to `/v1/deploy`, `on-preview-degraded` and `on-preview-sync-error` never fire, because their guards compare `app.spec.source.targetRevision` with the resolved full SHA; nothing logs it. `on-preview-deleted` then looks up the deployment by the short SHA and misses the full-SHA `success` deployment: it leaves that deployment open and creates an extra `inactive` deployment for the short ref. The label flow always pins the full SHA.
+12. The unpin status is lost when the pinned entry has left the sync history (Argo CD keeps the last 10 syncs) before the controller sees the unpin. Not expected in practice.
+13. When the unpinned SHA's sync succeeded but it never got a status (still Progressing at the unpin), the unpin creates an extra deployment for that SHA holding only `inactive`, as limitation 1 describes for delete.
+14. Argo CD records a sync in its history only when it succeeds. If the last pinned SHA's sync failed (its deployment shows `error` or `failure`) and badil then unpins the service, `on-preview-unpinned` posts `inactive` on the previous successfully synced pin's deployment, and the failed SHA's deployment stays open.
 
 Check: the PR shows the deployment, and `kubectl -n argocd logs deploy/argocd-notifications-controller` has no `github` errors. Without Helm, see the file's comments. Details: ARCHITECTURE [Preview deployments on GitHub](ARCHITECTURE.md#preview-deployments-on-github).
 
