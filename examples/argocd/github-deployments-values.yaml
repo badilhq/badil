@@ -113,13 +113,17 @@ notifications:
           transientEnvironment: false
 
   triggers:
-    # Fires once per revision of a pinned service's Application. The last test
-    # waits for the sync at the pinned SHA: right after a pin, operationState
-    # still describes the previous sync (main's SHA when the service tracked
-    # main). startsWith keeps a short SHA sent to /v1/deploy working.
+    # Fires once per sync at the pinned SHA of a pinned service's Application:
+    # oncePer is the synced revision and the id of the sync history's last
+    # entry, so a re-pin at the same SHA posts success again (the engine never
+    # clears a oncePer key), and so does any further successful sync at that
+    # SHA, on the same deployment. The last test waits for the sync at the
+    # pinned SHA: right after a pin, operationState still describes the
+    # previous sync (main's SHA when the service tracked main). startsWith
+    # keeps a short SHA sent to /v1/deploy working.
     trigger.on-preview-deployed: |
       - when: app.status?.operationState?.phase in ['Succeeded'] and app.status?.health?.status == 'Healthy' and app.metadata.annotations['preview.badil.dev/vcs.ref.revision'] != '' and app.status?.operationState?.syncResult?.revision startsWith app.metadata.annotations['preview.badil.dev/vcs.ref.revision']
-        oncePer: app.status?.operationState?.syncResult?.revision
+        oncePer: app.status?.operationState?.syncResult?.revision + '/' + string(last(app.status?.history ?? [])?.id)
         send: [badil-preview-deployed]
     # Fires once per pinned SHA when the Application is Degraded at that SHA
     # (for a Deployment, after its progressDeadlineSeconds). The sync guard
@@ -145,17 +149,19 @@ notifications:
       - when: app.metadata.deletionTimestamp != nil and app.metadata.annotations['preview.badil.dev/vcs.ref.revision'] != ''
         oncePer: app.metadata.name
         send: [badil-preview-deleted]
-    # Fires once per unpinned SHA when badil unpins the service (empty
-    # revision annotation) and the sync history still holds a pinned entry:
+    # Fires once per pinned sync that badil unpins (empty revision
+    # annotation), when the sync history still holds a pinned entry:
     # a single-source entry whose revision is a full SHA, whose
     # source.targetRevision is a SHA, and a prefix of it. Branch-tracking
     # entries and dependency entries (chart versions; multi-source entries
     # with an empty source and no revision) are not pinned entries, and the
     # nil tests keep matches and startsWith off missing fields. It does not
     # wait for the sync to the branch: the pinned entry is already there.
+    # oncePer is the last pinned entry's revision and history id, so a re-pin
+    # at the same SHA followed by another unpin posts inactive again.
     trigger.on-preview-unpinned: |
       - when: app.metadata.annotations['preview.badil.dev/vcs.ref.revision'] == '' and any(app.status?.history ?? [], {.revision != nil and .source?.targetRevision != nil and .revision matches '^[0-9a-f]{40}$' and .source?.targetRevision matches '^[0-9a-f]{7,40}$' and .revision startsWith .source?.targetRevision})
-        oncePer: findLast(app.status?.history ?? [], {.revision != nil and .source?.targetRevision != nil and .revision matches '^[0-9a-f]{40}$' and .source?.targetRevision matches '^[0-9a-f]{7,40}$' and .revision startsWith .source?.targetRevision})?.revision
+        oncePer: let p = findLast(app.status?.history ?? [], {.revision != nil and .source?.targetRevision != nil and .revision matches '^[0-9a-f]{40}$' and .source?.targetRevision matches '^[0-9a-f]{7,40}$' and .revision startsWith .source?.targetRevision}); p?.revision + '/' + string(p?.id)
         send: [badil-preview-unpinned]
 
   # Full list: repeats the spin-up subscription from notifications-values.yaml.
