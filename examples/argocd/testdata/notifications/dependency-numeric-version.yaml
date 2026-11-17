@@ -29,9 +29,9 @@ spec:
       releaseName: redis
 status:
   reconciledAt: "2026-11-17T04:22:29Z"
-  health: {status: Healthy}
+  health: {status: Healthy, lastTransitionTime: "2026-11-17T04:21:23Z"}
   sync: {status: Synced, revision: "20241117", comparedTo: {source: {repoURL: https://charts.example.com, targetRevision: "20241117", chart: redis}}}
-  operationState: {phase: Succeeded, finishedAt: "2026-11-17T04:22:28Z", syncResult: {revision: "20241117"}}
+  operationState: {phase: Succeeded, startedAt: "2026-11-17T04:22:23Z", finishedAt: "2026-11-17T04:22:28Z", syncResult: {revision: "20241117"}}
   history:
     - id: 0
       revision: "20241117"

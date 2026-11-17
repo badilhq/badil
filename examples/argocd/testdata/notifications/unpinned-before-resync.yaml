@@ -25,9 +25,9 @@ spec:
     path: k8s/
 status:
   reconciledAt: "2026-11-17T04:22:29Z"
-  health: {status: Healthy}
+  health: {status: Healthy, lastTransitionTime: "2026-11-17T04:21:23Z"}
   sync: {status: OutOfSync, revision: "88ac2f0ebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", comparedTo: {source: {targetRevision: main}}}
-  operationState: {phase: Succeeded, finishedAt: "2026-11-17T04:22:28Z", syncResult: {revision: "4d14f8e8aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
+  operationState: {phase: Succeeded, startedAt: "2026-11-17T04:22:23Z", finishedAt: "2026-11-17T04:22:28Z", syncResult: {revision: "4d14f8e8aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
   history:
     - id: 0
       revision: "88ac2f0ebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"

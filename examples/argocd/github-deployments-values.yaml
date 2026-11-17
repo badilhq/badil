@@ -118,16 +118,20 @@ notifications:
     # entry, so a re-pin at the same SHA posts success again once Argo CD syncs
     # it (the engine never clears a oncePer key), and so does any further
     # successful sync at that SHA, on the same deployment. A pin or re-pin that
-    # runs no sync (rendered manifests unchanged) posts nothing. The last test waits for the sync at the
-    # pinned SHA: right after a pin, operationState still describes the
-    # previous sync (main's SHA when the service tracked main). startsWith
-    # keeps a short SHA sent to /v1/deploy working. The reconciledAt guard
-    # waits for the status refresh that follows the sync: until then, health
-    # still describes the pods from before the sync. Both timestamps have
-    # one-second precision, so a refresh in the same second as the sync's
-    # end waits for the next one.
+    # runs no sync (rendered manifests unchanged) posts nothing. The
+    # startsWith test waits for the sync at the pinned SHA: right after a
+    # pin, operationState still describes the previous sync (main's SHA when
+    # the service tracked main). startsWith keeps a short SHA sent to
+    # /v1/deploy working. The last test waits for health computed after the
+    # sync: Argo CD records the sync's end before it refreshes health, so
+    # until then health still describes the pods from before the sync. It
+    # holds once a status refresh is later than the sync's end (reconciledAt
+    # > finishedAt), or health changed after the sync started
+    # (lastTransitionTime > startedAt, as when the new pods turn Healthy).
+    # All timestamps have one-second precision, and equal seconds count as
+    # stale.
     trigger.on-preview-deployed: |
-      - when: app.status?.operationState?.phase in ['Succeeded'] and app.status?.health?.status == 'Healthy' and app.metadata.annotations['preview.badil.dev/vcs.ref.revision'] != '' and app.status?.operationState?.syncResult?.revision startsWith app.metadata.annotations['preview.badil.dev/vcs.ref.revision'] and app.status?.reconciledAt != nil and app.status?.operationState?.finishedAt != nil and date(app.status.reconciledAt) > date(app.status.operationState.finishedAt)
+      - when: app.status?.operationState?.phase in ['Succeeded'] and app.status?.health?.status == 'Healthy' and app.metadata.annotations['preview.badil.dev/vcs.ref.revision'] != '' and app.status?.operationState?.syncResult?.revision startsWith app.metadata.annotations['preview.badil.dev/vcs.ref.revision'] and app.status?.operationState?.finishedAt != nil and app.status?.operationState?.startedAt != nil and ((app.status?.reconciledAt != nil and date(app.status.reconciledAt) > date(app.status.operationState.finishedAt)) or (app.status?.health?.lastTransitionTime != nil and date(app.status.health.lastTransitionTime) > date(app.status.operationState.startedAt)))
         oncePer: app.status?.operationState?.syncResult?.revision + '/' + string(last(app.status?.history ?? [])?.id)
         send: [badil-preview-deployed]
     # Fires once per pinned SHA when the Application is Degraded at that SHA
