@@ -105,11 +105,13 @@ func NewServer(
 	if s.argoCDToken != "" {
 		r.With(requireBearer(s.argoCDToken)).Post("/webhooks/argocd", s.handleArgoCDEvent)
 	}
-	r.Route("/v1", func(r chi.Router) {
-		r.Use(requireBearer(deployToken))
-		r.Post("/deploy", s.handleDeploy)
-		r.Post("/sync", s.handleSync)
-	})
+	if deployToken != "" {
+		r.Route("/v1", func(r chi.Router) {
+			r.Use(requireBearer(deployToken))
+			r.Post("/deploy", s.handleDeploy)
+			r.Post("/sync", s.handleSync)
+		})
+	}
 	s.router = r
 	return s
 }

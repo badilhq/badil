@@ -24,7 +24,7 @@ Self-hosted, single-tenant. Everything runs in the user's cluster; badil talks t
 
 | Component | Where | Notes |
 |---|---|---|
-| `badil serve` | this repo | chi HTTP server: `/healthz`, `/v1/deploy`, `/v1/sync`, `/webhooks/github`, `/webhooks/argocd` (optional) |
+| `badil serve` | this repo | chi HTTP server: `/healthz`, `/v1/deploy` (optional), `/v1/sync` (optional), `/webhooks/github`, `/webhooks/argocd` (optional) |
 | `badil cleanup` | this repo | One-shot, CronJob (hourly). Per preview, the first matching rule: no pinned service → delete; `CLEANUP_TTL` set and no deploy within it → delete; otherwise unpin closed PRs, and open PRs whose label moved, conflicts or is gone (see [Cleanup sweep](#cleanup-sweep)) |
 | `badil bootstrap-app` / `verify-app` | this repo | Create a GitHub App via the manifest flow / check credentials |
 | `preview-apps` chart | this repo, [`charts/preview-apps`](../charts/preview-apps) | Renders AppProject, Namespace, one ArgoCD Application per service and per dependency; the AppProject and Applications in the namespace set by `argocdNamespace` (default `argocd`); Application annotations `preview.badil.dev/*` carry the PR metadata |
@@ -301,13 +301,13 @@ GET  /healthz
 
 GET  /metrics               # on METRICS_ADDR only (default :9090), not on LISTEN_ADDR
 
-POST /v1/deploy
+POST /v1/deploy             # only when BADIL_DEPLOY_TOKEN is set (404 otherwise)
   Authorization: Bearer $BADIL_DEPLOY_TOKEN
   { "service", "head_ref", "commit_sha", "pr_author", "pr_url", "pr_number", "workflow_run_url" }
   → { "preview_slug", "gitops_commit_url", "warnings": [...] }
   → 409 { "error": "preview limit (<max>) reached" }   # preview.maxPreviews reached and previews/<slug>/ does not exist
 
-POST /v1/sync
+POST /v1/sync               # only when BADIL_DEPLOY_TOKEN is set (404 otherwise)
   Authorization: Bearer $BADIL_DEPLOY_TOKEN
   empty body or {} → every preview; { "slug": "<slug>" } → that preview   # unknown field → 400
   → { "synced": [<slugs rewritten>], "unchanged": <count>, "failed": [<slugs>] }
@@ -448,7 +448,7 @@ GITHUB_PRIVATE_KEY_PATH | GITHUB_PRIVATE_KEY
 GITHUB_WEBHOOK_SECRET
 GITHUB_INSTALLATION_ID
 GITOPS_REPO                 # owner/repo
-BADIL_DEPLOY_TOKEN
+BADIL_DEPLOY_TOKEN          # optional; enables /v1/deploy and /v1/sync
 LISTEN_ADDR                 # default :8080
 METRICS_ADDR                # default :9090 when unset; set to "" to disable /metrics
 ARGOCD_WEBHOOK_TOKEN        # optional; enables /webhooks/argocd

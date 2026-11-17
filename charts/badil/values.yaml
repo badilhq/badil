@@ -20,7 +20,8 @@ config:
   # Gitops repository as owner/name (GITOPS_REPO).
   gitopsRepo: ""
 
-# Required: existing Secret with keys github-private-key, github-webhook-secret and deploy-token.
+# Required: existing Secret with keys github-private-key and github-webhook-secret.
+# Optional key deploy-token enables POST /v1/deploy and POST /v1/sync (BADIL_DEPLOY_TOKEN).
 # Optional key argocd-webhook-token enables POST /webhooks/argocd (ARGOCD_WEBHOOK_TOKEN).
 existingSecret: ""
 

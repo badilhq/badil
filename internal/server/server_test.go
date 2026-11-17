@@ -23,3 +23,18 @@ func TestHealthz(t *testing.T) {
 		t.Fatalf("unexpected body: %s", rec.Body.String())
 	}
 }
+
+func TestDeployAPI_RoutesAbsentWithoutToken(t *testing.T) {
+	srv := server.NewServer(nil, nil, "", 0)
+	for _, path := range []string{"/v1/deploy", "/v1/sync"} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
+			req.Header.Set("Authorization", "Bearer ")
+			rec := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(rec, req)
+			if rec.Code != http.StatusNotFound {
+				t.Errorf("status = %d, want 404", rec.Code)
+			}
+		})
+	}
+}

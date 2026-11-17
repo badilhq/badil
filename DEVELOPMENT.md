@@ -124,7 +124,7 @@ A signed-but-unparseable delivery is authentic and there is nothing to re-queue,
 | `manifest exchange returned empty credentials` | The browser callback fired without a valid code | Retry `make dev-bootstrap`; check the GitHub tab for an error |
 | `badil verify-app` returns `401 A JSON web token could not be decoded` | `GITHUB_APP_ID` and `dev.private-key.pem` don't match | Re-run `make dev-bootstrap`, or regenerate the private key from the App settings page and replace `dev.private-key.pem` |
 | `badil verify-app` shows `Installations (0)` | App created but not installed anywhere | Open the App settings, click **Install App**, pick repos |
-| `badil serve` fails with `BADIL_DEPLOY_TOKEN is required` | `.env` not sourced | `source .env` first, or use `make dev-serve` which sources for you |
+| `badil serve` fails with `GITHUB_APP_ID is required` | `.env` not sourced | `source .env` first, or use `make dev-serve` which sources for you |
 
 ## Appendix B — manual App creation (manifest-flow fallback)
 

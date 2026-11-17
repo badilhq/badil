@@ -98,7 +98,7 @@ Configuration (env):
 | `GITHUB_WEBHOOK_SECRET` | yes | |
 | `GITHUB_INSTALLATION_ID` | yes | |
 | `GITOPS_REPO` | yes | `owner/repo` |
-| `BADIL_DEPLOY_TOKEN` | yes | bearer token for manual `/v1/deploy` and `/v1/sync` calls |
+| `BADIL_DEPLOY_TOKEN` | no | bearer token for `/v1/deploy` and `/v1/sync`; when unset, both are off (404) |
 | `LISTEN_ADDR` | no | default `:8080` |
 | `METRICS_ADDR` | no | Prometheus `/metrics` listener, default `:9090`; set to empty to disable |
 | `ARGOCD_WEBHOOK_TOKEN` | no | bearer token of Argo CD notifications; enables `/webhooks/argocd` |

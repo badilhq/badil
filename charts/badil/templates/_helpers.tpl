@@ -59,6 +59,7 @@ Server environment.
     secretKeyRef:
       name: {{ $secret }}
       key: deploy-token
+      optional: true
 {{- end -}}
 
 {{/*
