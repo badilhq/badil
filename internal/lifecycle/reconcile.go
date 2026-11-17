@@ -100,9 +100,9 @@ type Event struct {
 // catalog, the PR or the target preview can't be read, or the previews can't
 // be listed, on a non-closed event, when the PR's files can't be listed or the
 // unpin of its untouched services fails, on any event, or when no service
-// write succeeded and at least one failed; otherwise skipped (with its reason) when the reconcile was
-// skipped; otherwise deployed when a service write succeeded; otherwise
-// torn_down.
+// write succeeded and at least one failed; otherwise skipped (with its
+// reason) when the reconcile was skipped; otherwise deployed when a service
+// write succeeded; otherwise torn_down.
 func ReconcilePR(ctx context.Context, api ReconcileAPI, ev Event) {
 	o, r := reconcile(ctx, api, ev)
 	api.Reconcile(o, r)
@@ -301,8 +301,7 @@ func touchedServices(
 func touches(patterns []string, files []gitops.ChangedFile) bool {
 	match := func(name string) bool {
 		return name != "" && slices.ContainsFunc(patterns, func(p string) bool {
-			ok, _ := doublestar.Match(p, name)
-			return ok
+			return doublestar.MatchUnvalidated(p, name)
 		})
 	}
 	return slices.ContainsFunc(files, func(f gitops.ChangedFile) bool {

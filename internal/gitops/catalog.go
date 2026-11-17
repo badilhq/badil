@@ -427,19 +427,14 @@ func parseValueFiles(path string, n *yaml.Node) ([]string, error) {
 // parsePaths validates services.<name>.paths, at path: a non-empty sequence
 // of non-empty strings, each a valid doublestar pattern.
 func parsePaths(path string, n *yaml.Node) ([]string, error) {
-	if n.Kind != yaml.SequenceNode || len(n.Content) == 0 {
-		return nil, fmt.Errorf("%s must be a non-empty list of non-empty strings", path)
+	paths, err := parseValueFiles(path, n)
+	if err != nil {
+		return nil, err
 	}
-	paths := make([]string, 0, len(n.Content))
-	for i, item := range n.Content {
-		item = resolveAlias(item)
-		if !nonEmptyString(item) {
-			return nil, fmt.Errorf("%s must be a non-empty list of non-empty strings", path)
+	for i, p := range paths {
+		if !doublestar.ValidatePattern(p) {
+			return nil, fmt.Errorf("%s[%d]: invalid pattern %q", path, i, p)
 		}
-		if !doublestar.ValidatePattern(item.Value) {
-			return nil, fmt.Errorf("%s[%d]: invalid pattern %q", path, i, item.Value)
-		}
-		paths = append(paths, item.Value)
 	}
 	return paths, nil
 }
