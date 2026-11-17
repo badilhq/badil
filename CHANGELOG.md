@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.22.0](https://github.com/badilhq/badil/compare/v0.21.0...v0.22.0) (2026-11-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **charts:** the renderer chart is published as oci://ghcr.io/badilhq/charts/preview-apps from 0.13.0; preview-env gets no new versions.
+
+### Features
+
+* **charts:** rename the preview-env chart to preview-apps ([#82](https://github.com/badilhq/badil/issues/82)) ([57d0b24](https://github.com/badilhq/badil/commit/57d0b2461766cdb1d7e7b1d60853a798d1d4311f))
+* **lifecycle:** pin only the monorepo services a pr changes ([#85](https://github.com/badilhq/badil/issues/85)) ([7a58718](https://github.com/badilhq/badil/commit/7a58718d12717ca1522d99cdc0aa3efea070eca2))
+
+
+### Bug Fixes
+
+* **examples:** mark unpinned services' github deployments inactive ([#86](https://github.com/badilhq/badil/issues/86)) ([9c74a2f](https://github.com/badilhq/badil/commit/9c74a2f860656f991ab6ad0c1998603c76f62604))
+* **examples:** wait for post-sync health before posting success or spin-up ([#87](https://github.com/badilhq/badil/issues/87)) ([659465d](https://github.com/badilhq/badil/commit/659465d815b301964a7b4c4789b58d73868cb5af))
+
 ## [0.21.0](https://github.com/badilhq/badil/compare/v0.20.0...v0.21.0) (2026-11-16)
 
 
