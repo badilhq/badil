@@ -420,8 +420,10 @@ jobs:
       - name: Argo CD GitHub deployments triggers
         run: |
           tmp=$(mktemp -d)
-          yq '{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "argocd-notifications-cm"}, "data": (.notifications.triggers * .notifications.templates)}' \
-            examples/argocd/github-deployments-values.yaml > "$tmp/cm.yaml"
+          # Both files' triggers and templates: they share no key.
+          # shellcheck disable=SC2016
+          yq ea '{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "argocd-notifications-cm"}, "data": (.notifications.triggers * .notifications.templates)} as $item ireduce ({}; . * $item)' \
+            examples/argocd/notifications-values.yaml examples/argocd/github-deployments-values.yaml > "$tmp/cm.yaml"
           # One condition per trigger: oncePer is tracked per condition, so a
           # split trigger could post the same state twice for one SHA.
           multi=$(yq '.data | to_entries[] | select(.key | test("^trigger\.")) | select((.value | from_yaml | length) != 1) | .key' "$tmp/cm.yaml")
@@ -439,7 +441,7 @@ jobs:
           cp examples/argocd/testdata/notifications/*.yaml "$tmp/apps/"
           # The image runs as user argocd: let it read the runner's mktemp dir.
           chmod -R a+rX "$tmp"
-          triggers='on-preview-deployed on-preview-degraded on-preview-sync-error on-preview-unpinned'
+          triggers='on-preview-deployed on-preview-degraded on-preview-sync-error on-preview-unpinned on-preview-healthy'
           want=$(for f in "$tmp"/apps/*.yaml; do
             for t in $triggers; do
               echo "$(basename "$f" .yaml) $t $(yq ".metadata.annotations[\"test.badil.dev/$t\"]" "$f")"

@@ -41,9 +41,13 @@ notifications:
             }
 
   triggers:
-    # Fires once per Application revision.
+    # Fires once per Application revision, once the status refresh that
+    # follows the sync has run (reconciledAt later than the sync's
+    # finishedAt): until then, health still describes the pods from before
+    # the sync. Both timestamps have one-second precision, so a refresh in
+    # the same second as the sync's end waits for the next one.
     trigger.on-preview-healthy: |
-      - when: app.status?.operationState?.phase in ['Succeeded'] and app.status?.health?.status == 'Healthy'
+      - when: app.status?.operationState?.phase in ['Succeeded'] and app.status?.health?.status == 'Healthy' and app.status?.reconciledAt != nil and app.status?.operationState?.finishedAt != nil and date(app.status.reconciledAt) > date(app.status.operationState.finishedAt)
         oncePer: app.status?.operationState?.syncResult?.revision
         send: [badil-spinup]
 

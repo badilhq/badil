@@ -1,4 +1,5 @@
-# Expected results of the triggers in ../../github-deployments-values.yaml.
+# Expected results of the triggers in ../../notifications-values.yaml and
+# ../../github-deployments-values.yaml.
 # Unpinned after a pin sent to /v1/deploy as a short SHA: the history entry
 # has the short SHA as targetRevision and the full SHA as revision.
 apiVersion: argoproj.io/v1alpha1
@@ -15,6 +16,7 @@ metadata:
     test.badil.dev/on-preview-degraded: "false"
     test.badil.dev/on-preview-sync-error: "false"
     test.badil.dev/on-preview-unpinned: "true"
+    test.badil.dev/on-preview-healthy: "true"
 spec:
   project: feature-x
   source:
@@ -22,9 +24,10 @@ spec:
     targetRevision: "main"
     path: k8s/
 status:
+  reconciledAt: "2026-11-17T04:22:29Z"
   health: {status: Healthy}
   sync: {status: Synced, revision: "88ac2f0ebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", comparedTo: {source: {targetRevision: main}}}
-  operationState: {phase: Succeeded, syncResult: {revision: "88ac2f0ebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}
+  operationState: {phase: Succeeded, finishedAt: "2026-11-17T04:22:28Z", syncResult: {revision: "88ac2f0ebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}
   history:
     - id: 0
       revision: "4d14f8e8aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

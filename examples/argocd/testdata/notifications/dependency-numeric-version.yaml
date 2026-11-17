@@ -1,4 +1,5 @@
-# Expected results of the triggers in ../../github-deployments-values.yaml.
+# Expected results of the triggers in ../../notifications-values.yaml and
+# ../../github-deployments-values.yaml.
 # A single-source dependency Application whose chart version is all digits:
 # its targetRevision looks like a short SHA, but its revision is not a full
 # SHA, so it is not a pinned entry.
@@ -17,6 +18,7 @@ metadata:
     test.badil.dev/on-preview-degraded: "false"
     test.badil.dev/on-preview-sync-error: "false"
     test.badil.dev/on-preview-unpinned: "false"
+    test.badil.dev/on-preview-healthy: "true"
 spec:
   project: feature-x
   source:
@@ -26,9 +28,10 @@ spec:
     helm:
       releaseName: redis
 status:
+  reconciledAt: "2026-11-17T04:22:29Z"
   health: {status: Healthy}
   sync: {status: Synced, revision: "20241117", comparedTo: {source: {repoURL: https://charts.example.com, targetRevision: "20241117", chart: redis}}}
-  operationState: {phase: Succeeded, syncResult: {revision: "20241117"}}
+  operationState: {phase: Succeeded, finishedAt: "2026-11-17T04:22:28Z", syncResult: {revision: "20241117"}}
   history:
     - id: 0
       revision: "20241117"

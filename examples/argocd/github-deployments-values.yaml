@@ -121,9 +121,13 @@ notifications:
     # runs no sync (rendered manifests unchanged) posts nothing. The last test waits for the sync at the
     # pinned SHA: right after a pin, operationState still describes the
     # previous sync (main's SHA when the service tracked main). startsWith
-    # keeps a short SHA sent to /v1/deploy working.
+    # keeps a short SHA sent to /v1/deploy working. The reconciledAt guard
+    # waits for the status refresh that follows the sync: until then, health
+    # still describes the pods from before the sync. Both timestamps have
+    # one-second precision, so a refresh in the same second as the sync's
+    # end waits for the next one.
     trigger.on-preview-deployed: |
-      - when: app.status?.operationState?.phase in ['Succeeded'] and app.status?.health?.status == 'Healthy' and app.metadata.annotations['preview.badil.dev/vcs.ref.revision'] != '' and app.status?.operationState?.syncResult?.revision startsWith app.metadata.annotations['preview.badil.dev/vcs.ref.revision']
+      - when: app.status?.operationState?.phase in ['Succeeded'] and app.status?.health?.status == 'Healthy' and app.metadata.annotations['preview.badil.dev/vcs.ref.revision'] != '' and app.status?.operationState?.syncResult?.revision startsWith app.metadata.annotations['preview.badil.dev/vcs.ref.revision'] and app.status?.reconciledAt != nil and app.status?.operationState?.finishedAt != nil and date(app.status.reconciledAt) > date(app.status.operationState.finishedAt)
         oncePer: app.status?.operationState?.syncResult?.revision + '/' + string(last(app.status?.history ?? [])?.id)
         send: [badil-preview-deployed]
     # Fires once per pinned SHA when the Application is Degraded at that SHA
