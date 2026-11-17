@@ -12,11 +12,17 @@ From an empty cluster to a first preview. Contract details live in [ARCHITECTURE
 
 ## 2. Gitops repo
 
+Create the gitops repo from [`badilhq/gitops-template`](https://github.com/badilhq/gitops-template) with "Use this template", follow its README, which covers this step and §3, then continue at [§4](#4-public-url-for-badil).
+
+Or set it up by hand:
+
 - Commit at the root a `badil.yaml`, starting from [`examples/argocd/badil.yaml`](../examples/argocd/badil.yaml): the service catalog, and optionally the image tag format, namespace metadata, dependencies, needs and the `preview` block. Every key is in ARCHITECTURE [Gitops repo contract](ARCHITECTURE.md#gitops-repo-contract).
 - badil creates `previews/` itself; a missing directory reads as no previews.
 - badil commits straight to the default branch. Its protection must let the App push directly: no required pull request, or the App on the bypass list.
 
 ## 3. Argo CD wiring
+
+Skip this step if the gitops repo comes from the template: its README covers it.
 
 - If the gitops repo or any service repo is private, register it in Argo CD first (repository credentials; see Argo CD [Private Repositories](https://argo-cd.readthedocs.io/en/stable/user-guide/private-repositories/)). The public `oci://ghcr.io/badilhq/charts` needs no credentials.
 - A dependency from a private OCI registry or Helm repository needs a credential too: see ARCHITECTURE [Dependencies](ARCHITECTURE.md#dependencies).

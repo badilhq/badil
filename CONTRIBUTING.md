@@ -40,6 +40,17 @@ Chart versioning:
 - Merged bumps are published to `oci://ghcr.io/badilhq/charts` on the next push to `main`.
 - If the image or chart publish of a release fails, re-run the failed jobs of that Release run: later pushes don't retry it.
 
+Gitops repo template:
+
+- After a release's charts are published, the `template` job of the Release workflow builds `dist/template/` from the tag (`scripts/build-template.sh`, `make template` locally) and pushes it to [`badilhq/gitops-template`](https://github.com/badilhq/gitops-template) as `chore: sync with badil vX.Y.Z`, only when its content changed. If it fails, re-run it from that Release run.
+- A PR that changes a commented line of `examples/argocd/badil.yaml` changes `template/badil.yaml` the same way, except `front`'s `# needs: [backend-1, backend-2]`, which the template omits.
+- One-time setup, by a maintainer, before the first release that runs the job:
+  1. Create `badilhq/gitops-template`, public, with default branch `main` and an initial commit on it, and enable "Template repository" in its settings.
+  2. Create a GitHub App owned by `badilhq`, with no webhook and the repository permission `Contents: Read and write` only, and install it on `badilhq/gitops-template` only.
+  3. Store its Client ID as the `TEMPLATE_APP_CLIENT_ID` Actions secret of `badilhq/badil`, and a generated private key as `TEMPLATE_APP_PRIVATE_KEY`.
+
+  Until then the `template` job fails on each release; re-run it once set up.
+
 ## License
 
 Contributions are licensed under [Apache-2.0](LICENSE).
