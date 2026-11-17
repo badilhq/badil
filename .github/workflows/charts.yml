@@ -439,7 +439,7 @@ jobs:
           cp examples/argocd/testdata/notifications/*.yaml "$tmp/apps/"
           # The image runs as user argocd: let it read the runner's mktemp dir.
           chmod -R a+rX "$tmp"
-          triggers='on-preview-degraded on-preview-sync-error'
+          triggers='on-preview-deployed on-preview-degraded on-preview-sync-error on-preview-unpinned'
           want=$(for f in "$tmp"/apps/*.yaml; do
             for t in $triggers; do
               echo "$(basename "$f" .yaml) $t $(yq ".metadata.annotations[\"test.badil.dev/$t\"]" "$f")"
@@ -456,6 +456,12 @@ jobs:
                   out=$(argocd admin notifications trigger run "$t" "./$f" --config-map ./cm.yaml --secret :empty 2>/tmp/stderr)
                   if grep -F "failed to execute when condition" /tmp/stderr >&2; then
                     echo "$(basename "$f" .yaml) $t: when condition failed" >&2
+                    exit 1
+                  fi
+                  # oncePer runs only when when is true; on error the engine
+                  # logs it and drops oncePer instead of failing.
+                  if grep -F "failed to execute oncePer condition" /tmp/stderr >&2; then
+                    echo "$(basename "$f" .yaml) $t: oncePer condition failed" >&2
                     exit 1
                   fi
                   r=$(echo "$out" | awk "NR > 1 { print \$NF }" | tail -n 1)
