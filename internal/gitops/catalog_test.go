@@ -1,6 +1,7 @@
 package gitops_test
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -1208,6 +1209,10 @@ func TestParseCatalog_Paths(t *testing.T) {
 
 func TestParseCatalog_MalformedPaths(t *testing.T) {
 	const list = "badil.yaml: services.api.paths must be a non-empty list of non-empty strings"
+	never := func(i int, p string) string {
+		return fmt.Sprintf(`badil.yaml: services.api.paths[%d]: pattern %q never matches: `+
+			`paths are relative to the repository root, with no leading "./" or "/" and no trailing "/"`, i, p)
+	}
 	svc := func(paths string) string {
 		return "services:\n  api: {repo: r, paths: " + paths + "}\n"
 	}
@@ -1225,6 +1230,9 @@ func TestParseCatalog_MalformedPaths(t *testing.T) {
 		{"list item", svc("[[api/**]]"), list},
 		{"invalid pattern", svc(`["api/**", "api/["]`), `badil.yaml: services.api.paths[1]: invalid pattern "api/["`},
 		{"invalid first pattern", svc(`["{a,b"]`), `badil.yaml: services.api.paths[0]: invalid pattern "{a,b"`},
+		{"leading dot slash", svc(`["./api/**"]`), never(0, "./api/**")},
+		{"leading slash", svc(`["web/**", "/api/**"]`), never(1, "/api/**")},
+		{"trailing slash", svc(`["api/"]`), never(0, "api/")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

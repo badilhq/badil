@@ -425,7 +425,8 @@ func parseValueFiles(path string, n *yaml.Node) ([]string, error) {
 }
 
 // parsePaths validates services.<name>.paths, at path: a non-empty sequence
-// of non-empty strings, each a valid doublestar pattern.
+// of non-empty strings, each a valid doublestar pattern that can match a path
+// relative to the repository root: no leading "./" or "/", no trailing "/".
 func parsePaths(path string, n *yaml.Node) ([]string, error) {
 	paths, err := parseValueFiles(path, n)
 	if err != nil {
@@ -434,6 +435,11 @@ func parsePaths(path string, n *yaml.Node) ([]string, error) {
 	for i, p := range paths {
 		if !doublestar.ValidatePattern(p) {
 			return nil, fmt.Errorf("%s[%d]: invalid pattern %q", path, i, p)
+		}
+		if strings.HasPrefix(p, "./") || strings.HasPrefix(p, "/") || strings.HasSuffix(p, "/") {
+			return nil, fmt.Errorf(
+				`%s[%d]: pattern %q never matches: paths are relative to the repository root, `+
+					`with no leading "./" or "/" and no trailing "/"`, path, i, p)
 		}
 	}
 	return paths, nil
