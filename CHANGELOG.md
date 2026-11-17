@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/badilhq/badil/compare/v0.22.0...v0.23.0) (2026-11-17)
+
+
+### Features
+
+* build and sync a gitops repo template on release ([#88](https://github.com/badilhq/badil/issues/88)) ([99dffc6](https://github.com/badilhq/badil/commit/99dffc676f41d52b1b1b1e60901cc3acd3d286ac))
+
 ## [0.22.0](https://github.com/badilhq/badil/compare/v0.21.0...v0.22.0) (2026-11-17)
 
 
