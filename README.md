@@ -62,6 +62,8 @@ A manual deploy always targets the slug of `head_ref`, and skips the one-PR-per-
 
 From an empty cluster to a first preview: [docs/INSTALL.md](docs/INSTALL.md).
 
+The gitops repo can start from the template [`badilhq/gitops-template`](https://github.com/badilhq/gitops-template).
+
 ## Status
 
 Pre-1.0, and the v1 scope is complete. The full loop (label a PR, preview deployed by Argo CD, URLs tested, merge, teardown) runs end to end on a k3d testbed with a four-service demo.

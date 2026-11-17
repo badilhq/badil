@@ -118,3 +118,49 @@ jobs:
             echo "::error::helm push $name $version failed after 3 attempts"
             exit 1
           done
+
+  template:
+    needs: [release-please, charts]
+    if: ${{ needs.release-please.outputs.release_created == 'true' && needs.charts.result == 'success' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ secrets.TEMPLATE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TEMPLATE_APP_PRIVATE_KEY }}
+          owner: badilhq
+          repositories: gitops-template
+          permission-contents: write
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+          persist-credentials: false
+
+      - name: Build the template
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: scripts/build-template.sh "$TAG"
+
+      - name: Push to badilhq/gitops-template
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          repo="$RUNNER_TEMP/gitops-template"
+          git clone "https://x-access-token:${TOKEN}@github.com/badilhq/gitops-template.git" "$repo"
+          find "$repo" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -R dist/template/. "$repo/"
+          cd "$repo"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "gitops-template already matches $TAG"
+            exit 0
+          fi
+          git -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m "chore: sync with badil $TAG"
+          git push origin HEAD:main
