@@ -270,5 +270,6 @@ Set `preview.domain` in `badil.yaml`, create a wildcard DNS record `*.<domain>` 
 | `preview reconcile failed … badil.yaml: …` in `kubectl logs -n badil deploy/badil` | `badil.yaml` is malformed; the error names the key | Fix that key in `badil.yaml` |
 | `preview reconcile skipped … reason="repo not in catalog"` | The `services.<name>.repo` URL isn't `https://github.com/<owner>/<repo>[.git]` | Fix the URL in `badil.yaml` |
 | `preview reconcile skipped … reason="fork pr"` | The PR comes from a fork | Expected: fork PRs never get a preview |
+| `preview reconcile skipped … reason="no service changed"` | No changed file of the PR matches any `paths` of its repo's services | Fix `paths` in `badil.yaml` |
 | No comment after labeling | The App isn't installed on that repo, or the label differs from `preview.label` | Install the App on the repo, or use the configured label |
 | Pods in `ImagePullBackOff` | The image isn't pushed yet, or the namespace can't pull from the registry | If CI is still pushing, wait; otherwise check registry access (prerequisites) |

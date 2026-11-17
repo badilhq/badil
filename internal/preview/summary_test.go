@@ -450,3 +450,12 @@ func TestBuildSummary_Dependencies(t *testing.T) {
 		t.Errorf("summary mismatch\n got:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+func TestBuildNoServiceSummary(t *testing.T) {
+	got := preview.BuildNoServiceSummary("pricing")
+	want := "## ⏭️ Preview: `pricing`\n\n" +
+		"This PR changes no service of the preview (`paths` in badil.yaml), so nothing is deployed."
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}

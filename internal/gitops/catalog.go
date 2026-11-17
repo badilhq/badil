@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"gopkg.in/yaml.v3"
 
 	"github.com/badilhq/badil/internal/preview"
@@ -34,6 +35,11 @@ type ServiceCatalog struct {
 	// a trailing slash. When set, the preview summary links the preview's
 	// Applications in Argo CD. It is empty when absent.
 	ArgoCDURL string
+	// Paths holds services.<name>.paths, for the services that set it: the
+	// doublestar patterns, relative to the service's repository root, of the
+	// files that belong to it. A pull request pins such a service only when
+	// it changes one of them. It plays no part in a preview file's projection.
+	Paths map[string][]string
 }
 
 // DefaultLabel is the preview label when preview.label is absent.
@@ -304,6 +310,9 @@ func parseServiceEntries(n *yaml.Node, c *ServiceCatalog) error {
 		if spec.needs != nil {
 			c.Needs = setKey(c.Needs, name, spec.needs)
 		}
+		if spec.paths != nil {
+			c.Paths = setKey(c.Paths, name, spec.paths)
+		}
 		return nil
 	})
 }
@@ -318,15 +327,16 @@ func setKey[V any](m map[string]V, key string, v V) map[string]V {
 }
 
 // serviceSpec is one validated services entry. Every field but repo is empty
-// (chart and needs nil) when the entry does not set it.
+// (chart, needs and paths nil) when the entry does not set it.
 type serviceSpec struct {
 	repo, branch, imageTag string
 	chart                  *preview.ChartSettings
 	needs                  []string
+	paths                  []string
 }
 
 // serviceEntry validates one services entry: repo is required; branch,
-// imageTag, chart and needs are optional; any other key or a repeated key is an
+// imageTag, chart, needs and paths are optional; any other key or a repeated key is an
 // error (decoding into a yaml.Node does not detect duplicate keys).
 func serviceEntry(name string, n *yaml.Node) (serviceSpec, error) {
 	prefix := "services." + name
@@ -352,6 +362,8 @@ func serviceEntry(name string, n *yaml.Node) (serviceSpec, error) {
 			spec.chart = &chart
 		case "needs":
 			spec.needs, err = parseNeeds(path, name, val)
+		case "paths":
+			spec.paths, err = parsePaths(path, val)
 		default:
 			err = fmt.Errorf("%s: unknown key %q", prefix, key)
 		}
@@ -410,6 +422,26 @@ func parseValueFiles(path string, n *yaml.Node) ([]string, error) {
 		files = append(files, item.Value)
 	}
 	return files, nil
+}
+
+// parsePaths validates services.<name>.paths, at path: a non-empty sequence
+// of non-empty strings, each a valid doublestar pattern.
+func parsePaths(path string, n *yaml.Node) ([]string, error) {
+	if n.Kind != yaml.SequenceNode || len(n.Content) == 0 {
+		return nil, fmt.Errorf("%s must be a non-empty list of non-empty strings", path)
+	}
+	paths := make([]string, 0, len(n.Content))
+	for i, item := range n.Content {
+		item = resolveAlias(item)
+		if !nonEmptyString(item) {
+			return nil, fmt.Errorf("%s must be a non-empty list of non-empty strings", path)
+		}
+		if !doublestar.ValidatePattern(item.Value) {
+			return nil, fmt.Errorf("%s[%d]: invalid pattern %q", path, i, item.Value)
+		}
+		paths = append(paths, item.Value)
+	}
+	return paths, nil
 }
 
 // parseNeeds validates the needs of the entry name, at path: a non-empty

@@ -447,3 +447,46 @@ func TestGo_TrackedByWaitBackground(t *testing.T) {
 		t.Error("WaitBackground returned before f finished")
 	}
 }
+
+func TestReconcile_PathFilters(t *testing.T) {
+	const badil = `services:
+  backend-1:
+    repo: https://github.com/acme/backend-1.git
+    paths: ["api/**"]
+  front:
+    repo: https://github.com/acme/backend-1.git
+    paths: ["web/**"]
+`
+	cases := []struct {
+		name     string
+		file     string
+		deployed string
+		comment  bool
+	}{
+		{name: "touched service", file: "api/main.go", deployed: "backend-1"},
+		{name: "no service", file: "docs/README.md", comment: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fg := reconcileFake()
+			fg.badilYAML = badil
+			fg.files = []gitops.ChangedFile{{Filename: tc.file}}
+			s, _ := newTeardownServer(t, fg)
+			deliver(t, s, labelEvent("labeled", "preview", "preview"))
+
+			if fg.filesCalls != 1 {
+				t.Errorf("ListPullRequestFiles calls = %d, want 1", fg.filesCalls)
+			}
+			if fg.capturedService != tc.deployed {
+				t.Errorf("deployed %q, want %q", fg.capturedService, tc.deployed)
+			}
+			commented := len(fg.upserts) == 1 && strings.Contains(fg.upserts[0].body, "changes no service")
+			if commented != tc.comment {
+				t.Errorf("upserts = %+v, want the no-service comment %v", fg.upserts, tc.comment)
+			}
+			if len(fg.unpins) != 0 {
+				t.Errorf("unpins = %v, want none", fg.unpins)
+			}
+		})
+	}
+}

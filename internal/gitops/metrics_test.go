@@ -53,6 +53,12 @@ func TestClientMetrics_TimesRetryOperations(t *testing.T) {
 	if _, err := c.TeardownPreviewWithRetry(ctx, "gone", "acme", "backend-1", 42); err != nil {
 		t.Fatalf("TeardownPreviewWithRetry: %v", err)
 	}
+	if _, err := c.UnpinServicesWithRetry(ctx, "broken", "acme", "backend-1", 42, []string{"backend-1"}); err == nil {
+		t.Fatal("UnpinServicesWithRetry: want an error")
+	}
+	if _, err := c.UnpinServicesWithRetry(ctx, "gone", "acme", "backend-1", 42, []string{"backend-1"}); err != nil {
+		t.Fatalf("UnpinServicesWithRetry: %v", err)
+	}
 	if _, err := c.SyncPreviewWithRetry(ctx, "broken", testCatalog("backend-1")); err == nil {
 		t.Fatal("SyncPreviewWithRetry: want an error")
 	}
@@ -79,7 +85,7 @@ func TestClientMetrics_TimesRetryOperations(t *testing.T) {
 		}
 	}
 	if want := map[string]uint64{
-		"write/ok": 1, "teardown/error": 1, "teardown/ok": 1, "sync/error": 1, "sync/ok": 1,
+		"write/ok": 1, "teardown/error": 2, "teardown/ok": 2, "sync/error": 1, "sync/ok": 1,
 	}; !maps.Equal(got, want) {
 		t.Errorf("gitops operation counts = %v, want %v", got, want)
 	}

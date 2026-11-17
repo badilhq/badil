@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bmatcuk/doublestar/v4"
+
 	"github.com/badilhq/badil/internal/gitops"
 	"github.com/badilhq/badil/internal/preview"
 )
@@ -20,6 +22,10 @@ const actionUnlabeled = "unlabeled"
 // alreadyDeployedReason is the skip reason of a reconcile whose every service
 // was already deployed as it would be written.
 const alreadyDeployedReason = "already deployed"
+
+// noServiceReason is the skip reason of a reconcile whose PR changes no
+// service of its repo: no changed file matches their paths.
+const noServiceReason = "no service changed"
 
 // previewLimitReason is the skip reason of a reconcile refused because
 // creating its preview would exceed preview.maxPreviews.
@@ -41,6 +47,13 @@ type ReconcileAPI interface {
 	GetPullRequest(ctx context.Context, owner, repo string, number int) (*gitops.PullRequest, error)
 	GetPreview(ctx context.Context, slug string) (*preview.PreviewValues, string, error)
 	ListPreviews(ctx context.Context) ([]string, error)
+	ListPullRequestFiles(ctx context.Context, owner, repo string, number int) ([]gitops.ChangedFile, error)
+	UnpinServicesWithRetry(
+		ctx context.Context,
+		slug, owner, repo string,
+		prNumber int,
+		services []string,
+	) (*gitops.TeardownResult, error)
 }
 
 // Event is a pull_request webhook delivery to reconcile. Its Target's Slug is
@@ -64,11 +77,14 @@ type Event struct {
 // nothing is read. Otherwise the PR is read and its labels resolve its target
 // preview (preview.ResolveTarget). The PR is first torn down from every other
 // preview it may still be pinned in. Then, when it is open and has a target,
-// every catalog service of its repo is deployed there at its head SHA, unless
-// another PR already pins one of them, or the preview does not exist and
-// preview.maxPreviews previews already do. An open PR with conflicting named
-// labels is told so. Fork PRs and repos outside the catalog are skipped. Every
-// outcome is logged.
+// the catalog services of its repo that it touches (touchedServices) are
+// deployed there at its head SHA, unless another PR already pins one of them,
+// or the preview does not exist and preview.maxPreviews previews already do;
+// before that deploy, the PR's entries there for the other services of its
+// repo are unpinned. A PR that touches no service is torn down from its
+// target and told so, and the reconcile is skipped. An open PR with
+// conflicting named labels is told so. Fork PRs and repos outside the catalog
+// are skipped. Every outcome is logged.
 //
 // A closed event is not guarded by its payload nor skipped for a repo outside
 // the catalog, and a closed fork PR is still torn down. When the catalog or
@@ -82,8 +98,9 @@ type Event struct {
 //
 // Each call records exactly one outcome through the Recorder: failed when the
 // catalog, the PR or the target preview can't be read, or the previews can't
-// be listed, on a non-closed event, or when no service write succeeded and at
-// least one failed; otherwise skipped (with its reason) when the reconcile was
+// be listed, on a non-closed event, when the PR's files can't be listed or the
+// unpin of its untouched services fails, on any event, or when no service
+// write succeeded and at least one failed; otherwise skipped (with its reason) when the reconcile was
 // skipped; otherwise deployed when a service write succeeded; otherwise
 // torn_down.
 func ReconcilePR(ctx context.Context, api ReconcileAPI, ev Event) {
@@ -131,8 +148,25 @@ func reconcile(ctx context.Context, api ReconcileAPI, ev Event) (string, string)
 		return reconcileSkipped(ctx, ev, "repo not in catalog")
 	}
 	removed := cleanup(ctx, api, ev, pr, t, catalog.Label)
-	if o, r := refused(ctx, api, catalog, ev, pr, t, services); o != "" {
+	repoServices := services
+	if deploy {
+		if services, err = touchedServices(ctx, api, catalog, ev, pr, services); err != nil {
+			return reconcileFailed(ctx, ev, err)
+		}
+		if len(services) == 0 {
+			return noServiceChanged(ctx, api, ev, t.Slug)
+		}
+	}
+	o, r, vals := refused(ctx, api, catalog, ev, pr, t, services)
+	if o != "" {
 		return o, r
+	}
+	if deploy {
+		unpinned, unpinErr := unpinUntouched(ctx, api, ev, t.Slug, vals, repoServices, services)
+		if unpinErr != nil {
+			return reconcileFailed(ctx, ev, unpinErr)
+		}
+		removed = removed || unpinned
 	}
 	outcome, reason := outcomeTornDown, ""
 	if deploy {
@@ -230,9 +264,100 @@ func movedReason(slug string) string {
 	return fmt.Sprintf("moved to preview `%s`", slug)
 }
 
+// touchedServices returns, in catalog order, the services of its repo,
+// services, that the PR touches: a service without paths always; a service
+// with paths when a file the PR changes, or the path it was renamed from,
+// matches one of them. The PR's files are listed only when one of services
+// has paths and the PR changes at most gitops.MaxListedPullRequestFiles
+// files; otherwise every service is touched. A failed listing is returned.
+func touchedServices(
+	ctx context.Context,
+	api ReconcileAPI,
+	catalog *gitops.ServiceCatalog,
+	ev Event,
+	pr *gitops.PullRequest,
+	services []string,
+) ([]string, error) {
+	filtered := slices.ContainsFunc(services, func(name string) bool { return catalog.Paths[name] != nil })
+	if !filtered || pr.ChangedFiles > gitops.MaxListedPullRequestFiles {
+		return services, nil
+	}
+	files, err := api.ListPullRequestFiles(ctx, ev.Owner, ev.Repo, ev.Number)
+	if err != nil {
+		return nil, err
+	}
+	var touched []string
+	for _, name := range services {
+		patterns := catalog.Paths[name]
+		if patterns == nil || touches(patterns, files) {
+			touched = append(touched, name)
+		}
+	}
+	return touched, nil
+}
+
+// touches reports whether a file of files, or the path it was renamed from,
+// matches one of patterns. The patterns are valid: ParseCatalog checked them.
+func touches(patterns []string, files []gitops.ChangedFile) bool {
+	match := func(name string) bool {
+		return name != "" && slices.ContainsFunc(patterns, func(p string) bool {
+			ok, _ := doublestar.Match(p, name)
+			return ok
+		})
+	}
+	return slices.ContainsFunc(files, func(f gitops.ChangedFile) bool {
+		return match(f.Filename) || match(f.PreviousFilename)
+	})
+}
+
+// noServiceChanged handles an open PR with the target slug that touches no
+// service of its repo: it is torn down from slug, without editing its comment,
+// then told that nothing is deployed, and the reconcile is skipped with
+// noServiceReason. A failed teardown or comment does not change the outcome.
+func noServiceChanged(ctx context.Context, api ReconcileAPI, ev Event, slug string) (string, string) {
+	tt := ev.Target
+	tt.Slug = slug
+	teardown(ctx, api, tt, noServiceReason, triggerWebhook, false)
+	body := preview.BuildNoServiceSummary(slug)
+	if err := api.UpsertPRComment(ctx, ev.Owner, ev.Repo, ev.Number, body); err != nil {
+		conflictCommentFailed(ctx, ev, err)
+	}
+	return reconcileSkipped(ctx, ev, noServiceReason)
+}
+
+// unpinUntouched unpins, in the preview slug whose values refused read, the
+// PR's entries for the services of its repo, repoServices, that are not in
+// touched, in one write (unpinServices). Nothing is written when vals is nil
+// (the preview does not exist) or the PR pins none of them there. It reports
+// whether it unpinned an entry, and the write's error.
+func unpinUntouched(
+	ctx context.Context,
+	api ReconcileAPI,
+	ev Event,
+	slug string,
+	vals *preview.PreviewValues,
+	repoServices, touched []string,
+) (bool, error) {
+	if vals == nil {
+		return false, nil
+	}
+	untouched := slices.DeleteFunc(slices.Clone(repoServices), func(name string) bool {
+		return slices.Contains(touched, name)
+	})
+	_, names, _ := preview.UnpinPRServices(*vals, ev.Owner, ev.Repo, ev.Number, untouched)
+	if len(names) == 0 {
+		return false, nil
+	}
+	tt := ev.Target
+	tt.Slug = slug
+	return unpinServices(ctx, api, tt, names)
+}
+
 // refused reports whether the PR must not be deployed to t.Slug, as the
 // reconcile's outcome and reason: refusedByHolder's, then, when the preview
-// does not exist, refusedByLimit's. It returns "" when it is not refused.
+// does not exist, refusedByLimit's. It returns "" when it is not refused. Its
+// third result is the preview t.Slug that refusedByHolder read, nil when the
+// preview does not exist or nothing was read.
 func refused(
 	ctx context.Context,
 	api ReconcileAPI,
@@ -241,21 +366,21 @@ func refused(
 	pr *gitops.PullRequest,
 	t preview.Resolution,
 	services []string,
-) (string, string) {
-	o, r, exists := refusedByHolder(ctx, api, ev, pr, t, services, catalog.Label)
-	if o != "" || exists {
-		return o, r
+) (string, string, *preview.PreviewValues) {
+	o, r, vals := refusedByHolder(ctx, api, ev, pr, t, services, catalog.Label)
+	if o != "" || vals != nil {
+		return o, r, vals
 	}
-	return refusedByLimit(ctx, api, ev, pr, t, catalog.MaxPreviews)
+	o, r = refusedByLimit(ctx, api, ev, pr, t, catalog.MaxPreviews)
+	return o, r, nil
 }
 
 // refusedByHolder reports whether the PR must not be deployed to t.Slug, as
 // the reconcile's outcome and reason: skipped when one of its services is
 // already pinned there by another PR (it is then told so), failed when the
 // preview can't be read, and "" when it is not refused. It reads nothing
-// unless the PR is open and has a target. Its third result, exists, is true
-// when it read the preview t.Slug, false when the preview does not exist or
-// nothing was read.
+// unless the PR is open and has a target. Its third result is the preview
+// t.Slug it read, nil when the preview does not exist or nothing was read.
 func refusedByHolder(
 	ctx context.Context,
 	api ReconcileAPI,
@@ -264,28 +389,28 @@ func refusedByHolder(
 	t preview.Resolution,
 	services []string,
 	label string,
-) (string, string, bool) {
+) (string, string, *preview.PreviewValues) {
 	if !pr.Open || t.Slug == "" {
-		return "", "", false
+		return "", "", nil
 	}
 	vals, _, err := api.GetPreview(ctx, t.Slug)
 	if errors.Is(err, gitops.ErrNotFound) {
-		return "", "", false
+		return "", "", nil
 	}
 	if err != nil {
 		o, r := reconcileFailed(ctx, ev, err)
-		return o, r, false
+		return o, r, nil
 	}
 	service, holder, held := heldBy(vals, services, ev.Target)
 	if !held {
-		return "", "", true
+		return "", "", vals
 	}
 	body := preview.BuildServiceHeldSummary(t.Slug, service, holder, label)
 	if upsertErr := api.UpsertPRComment(ctx, ev.Owner, ev.Repo, ev.Number, body); upsertErr != nil {
 		conflictCommentFailed(ctx, ev, upsertErr)
 	}
 	o, r := reconcileSkipped(ctx, ev, "service held by another pr", slog.String("holder", holder))
-	return o, r, true
+	return o, r, vals
 }
 
 // refusedByLimit reports whether the PR must not create the preview t.Slug,

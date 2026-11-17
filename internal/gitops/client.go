@@ -44,7 +44,8 @@ type Client struct {
 // Option configures a Client built by NewClient.
 type Option func(*Client)
 
-// WithMetrics times WritePreviewWithRetry, TeardownPreviewWithRetry and
+// WithMetrics times WritePreviewWithRetry, TeardownPreviewWithRetry (and
+// UnpinServicesWithRetry, as the teardown operation) and
 // SyncPreviewWithRetry in m, and counts the previews WritePreviewWithRetry
 // creates.
 func WithMetrics(m *metrics.Metrics) Option {
@@ -168,6 +169,8 @@ type PullRequest struct {
 	// HeadFullName is the head repository's owner/repo; it differs from
 	// FullName on a fork PR.
 	HeadFullName string
+	// ChangedFiles is the number of files the PR changes (changed_files).
+	ChangedFiles int
 }
 
 // GetPullRequest reads owner/repo#number. Lookup failures (including 404 and
@@ -190,7 +193,44 @@ func (c *Client) GetPullRequest(ctx context.Context, owner, repo string, number 
 		Labels:       labels,
 		FullName:     pr.GetBase().GetRepo().GetFullName(),
 		HeadFullName: pr.GetHead().GetRepo().GetFullName(),
+		ChangedFiles: pr.GetChangedFiles(),
 	}, nil
+}
+
+// filesPerPage is the page size of ListPullRequestFiles, GitHub's maximum.
+const filesPerPage = 100
+
+// MaxListedPullRequestFiles is the most files GitHub lists for a pull
+// request: "Responses include a maximum of 3000 files."
+const MaxListedPullRequestFiles = 3000
+
+// ChangedFile is a file a pull request changes, its path relative to the
+// repository root. PreviousFilename is its path before a rename, empty
+// otherwise.
+type ChangedFile struct {
+	Filename         string
+	PreviousFilename string
+}
+
+// ListPullRequestFiles lists the files owner/repo#number changes, reading
+// every page (100 files each). GitHub lists at most MaxListedPullRequestFiles.
+// A failure on any page is returned as an error.
+func (c *Client) ListPullRequestFiles(ctx context.Context, owner, repo string, number int) ([]ChangedFile, error) {
+	opts := &gh.ListOptions{PerPage: filesPerPage}
+	var files []ChangedFile
+	for {
+		page, resp, err := c.gh.PullRequests.ListFiles(ctx, owner, repo, number, opts)
+		if err != nil {
+			return nil, classifyHTTPError(resp, err)
+		}
+		for _, f := range page {
+			files = append(files, ChangedFile{Filename: f.GetFilename(), PreviousFilename: f.GetPreviousFilename()})
+		}
+		if resp == nil || resp.NextPage == 0 {
+			return files, nil
+		}
+		opts.Page = resp.NextPage
+	}
 }
 
 // previewPath returns the gitops repo path for a preview slug's values file.
@@ -238,7 +278,12 @@ func marshalPreview(vals preview.PreviewValues) ([]byte, error) {
 // WritePreview persists vals at previews/<slug>/values.yaml. When sha is empty
 // the file is created; otherwise an update is performed against that SHA.
 // Returns the html_url of the resulting commit.
-func (c *Client) WritePreview(ctx context.Context, slug string, vals preview.PreviewValues, sha, message string) (string, error) {
+func (c *Client) WritePreview(
+	ctx context.Context,
+	slug string,
+	vals preview.PreviewValues,
+	sha, message string,
+) (string, error) {
 	body, err := marshalPreview(vals)
 	if err != nil {
 		return "", fmt.Errorf("marshal: %w", err)
@@ -420,10 +465,11 @@ func (c *Client) writePreviewWithRetry(
 	return nil, fmt.Errorf("write %s: %d attempts exhausted", previewPath(slug), MaxWriteRetries)
 }
 
-// TeardownResult is the outcome of TeardownPreviewWithRetry. Removed lists the
-// services unpinned from the closed PR; it is empty when there was nothing to
-// tear down. Values, Excluded (preview.Projection.Excluded) and Catalog, the
-// badil.yaml the file was projected on, are set only when Deleted is false.
+// TeardownResult is the outcome of TeardownPreviewWithRetry and
+// UnpinServicesWithRetry. Removed lists the services unpinned from the PR; it
+// is empty when there was nothing to tear down. Values, Excluded
+// (preview.Projection.Excluded) and Catalog, the badil.yaml the file was
+// projected on, are set only when Deleted is false.
 type TeardownResult struct {
 	Values        preview.PreviewValues
 	Excluded      []string
@@ -463,6 +509,44 @@ func (c *Client) teardownPreviewWithRetry(
 	slug, owner, repo string,
 	prNumber int,
 ) (*TeardownResult, error) {
+	unpin := func(vals preview.PreviewValues) (preview.PreviewValues, []string, bool) {
+		return preview.UnpinPR(vals, owner, repo, prNumber)
+	}
+	return c.unpinWithRetry(ctx, "teardown", slug, unpin, false)
+}
+
+// UnpinServicesWithRetry unpins, in previews/<slug>/values.yaml, the entries
+// deployed by the PR owner/repo#prNumber whose service is in services
+// (preview.UnpinPRServices); the PR's other entries stay pinned. It is
+// TeardownPreviewWithRetry except that the file is never deleted: it is
+// updated, projected on badil.yaml, even when no pin remains, so Deleted is
+// always false.
+//
+// Its duration, retries included, is observed as the teardown operation.
+func (c *Client) UnpinServicesWithRetry(
+	ctx context.Context,
+	slug, owner, repo string,
+	prNumber int,
+	services []string,
+) (*TeardownResult, error) {
+	start := time.Now()
+	unpin := func(vals preview.PreviewValues) (preview.PreviewValues, []string, bool) {
+		return preview.UnpinPRServices(vals, owner, repo, prNumber, services)
+	}
+	res, err := c.unpinWithRetry(ctx, "unpin", slug, unpin, true)
+	c.observe("teardown", start, err)
+	return res, err
+}
+
+// unpinWithRetry applies unpin to previews/<slug>/values.yaml and writes the
+// result, as TeardownPreviewWithRetry describes. The file is deleted when no
+// pin remains, unless keepFile is set. op prefixes its errors.
+func (c *Client) unpinWithRetry(
+	ctx context.Context,
+	op, slug string,
+	unpin func(preview.PreviewValues) (preview.PreviewValues, []string, bool),
+	keepFile bool,
+) (*TeardownResult, error) {
 	existing, sha, err := c.GetPreview(ctx, slug)
 	if errors.Is(err, ErrNotFound) {
 		return &TeardownResult{}, nil
@@ -473,29 +557,17 @@ func (c *Client) teardownPreviewWithRetry(
 
 	var catalog *ServiceCatalog
 	for attempt := 1; attempt <= MaxWriteRetries; attempt++ {
-		vals, removed, pinned := preview.UnpinPR(*existing, owner, repo, prNumber)
+		vals, removed, pinned := unpin(*existing)
 		if len(removed) == 0 {
 			return &TeardownResult{}, nil
 		}
-		result := &TeardownResult{Removed: removed, Deleted: !pinned}
-		var writeErr error
-		if pinned {
-			if catalog == nil {
-				if catalog, err = c.FetchServiceCatalog(ctx); err != nil {
-					return nil, fmt.Errorf("teardown %s: %w", previewPath(slug), err)
-				}
-			}
-			proj := c.applyCatalog(ctx, vals, slug, catalog)
-			result.Values, result.Excluded, result.Catalog = proj.Values, proj.Excluded, catalog
-			result.CommitMessage = fmt.Sprintf("chore(preview): remove %s from %s", strings.Join(removed, ", "), slug)
-			result.CommitURL, writeErr = c.WritePreview(ctx, slug, proj.Values, sha, result.CommitMessage)
-		} else {
-			result.CommitMessage = fmt.Sprintf("chore(preview): delete %s preview", slug)
-			result.CommitURL, writeErr = c.deletePreview(ctx, slug, sha, result.CommitMessage)
-			if errors.Is(writeErr, ErrNotFound) {
-				return &TeardownResult{}, nil
+		update := pinned || keepFile
+		if update && catalog == nil {
+			if catalog, err = c.FetchServiceCatalog(ctx); err != nil {
+				return nil, fmt.Errorf("%s %s: %w", op, previewPath(slug), err)
 			}
 		}
+		result, writeErr := c.writeUnpinned(ctx, slug, sha, vals, removed, update, catalog)
 		if writeErr == nil {
 			return result, nil
 		}
@@ -511,7 +583,36 @@ func (c *Client) teardownPreviewWithRetry(
 			return nil, fmt.Errorf("conflict re-fetch: %w", err)
 		}
 	}
-	return nil, fmt.Errorf("teardown %s: %d attempts exhausted", previewPath(slug), MaxWriteRetries)
+	return nil, fmt.Errorf("%s %s: %d attempts exhausted", op, previewPath(slug), MaxWriteRetries)
+}
+
+// writeUnpinned writes vals, the file at blob sha once removed were unpinned:
+// when update is set, it is updated, projected on catalog (applyCatalog);
+// otherwise it is deleted, and an empty result is returned when it is
+// already gone.
+func (c *Client) writeUnpinned(
+	ctx context.Context,
+	slug, sha string,
+	vals preview.PreviewValues,
+	removed []string,
+	update bool,
+	catalog *ServiceCatalog,
+) (*TeardownResult, error) {
+	result := &TeardownResult{Removed: removed, Deleted: !update}
+	var err error
+	if !update {
+		result.CommitMessage = fmt.Sprintf("chore(preview): delete %s preview", slug)
+		result.CommitURL, err = c.deletePreview(ctx, slug, sha, result.CommitMessage)
+		if errors.Is(err, ErrNotFound) {
+			return &TeardownResult{}, nil
+		}
+		return result, err
+	}
+	proj := c.applyCatalog(ctx, vals, slug, catalog)
+	result.Values, result.Excluded, result.Catalog = proj.Values, proj.Excluded, catalog
+	result.CommitMessage = fmt.Sprintf("chore(preview): remove %s from %s", strings.Join(removed, ", "), slug)
+	result.CommitURL, err = c.WritePreview(ctx, slug, proj.Values, sha, result.CommitMessage)
+	return result, err
 }
 
 // SyncResult is the outcome of SyncPreviewWithRetry. Changed is true when
@@ -713,7 +814,13 @@ func (c *Client) upsertPRComment(ctx context.Context, owner, repo string, prNumb
 			if comment.Body == nil || !strings.Contains(*comment.Body, PRCommentMarker) {
 				continue
 			}
-			_, editResp, editErr := c.gh.Issues.EditComment(ctx, owner, repo, comment.GetID(), &gh.IssueComment{Body: gh.Ptr(body)})
+			_, editResp, editErr := c.gh.Issues.EditComment(
+				ctx,
+				owner,
+				repo,
+				comment.GetID(),
+				&gh.IssueComment{Body: gh.Ptr(body)},
+			)
 			if editErr != nil {
 				return classifyHTTPError(editResp, editErr)
 			}
@@ -724,7 +831,13 @@ func (c *Client) upsertPRComment(ctx context.Context, owner, repo string, prNumb
 		}
 		opts.Page = resp.NextPage
 	}
-	_, createResp, createErr := c.gh.Issues.CreateComment(ctx, owner, repo, prNumber, &gh.IssueComment{Body: gh.Ptr(body)})
+	_, createResp, createErr := c.gh.Issues.CreateComment(
+		ctx,
+		owner,
+		repo,
+		prNumber,
+		&gh.IssueComment{Body: gh.Ptr(body)},
+	)
 	if createErr != nil {
 		return classifyHTTPError(createResp, createErr)
 	}
