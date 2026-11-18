@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.0](https://github.com/badilhq/badil/compare/v0.24.0...v0.25.0) (2026-11-18)
+
+
+### Miscellaneous Chores
+
+* release 0.25.0 ([20ec579](https://github.com/badilhq/badil/commit/20ec57965df479305ec0560dd9458515574a1b20))
+
 ## [0.24.0](https://github.com/badilhq/badil/compare/v0.23.0...v0.24.0) (2026-11-18)
 
 
