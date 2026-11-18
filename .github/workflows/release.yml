@@ -164,3 +164,38 @@ jobs:
             -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
             commit -m "chore: sync with badil $TAG"
           git push origin HEAD:main
+
+  docs:
+    needs: [release-please, charts]
+    if: ${{ needs.release-please.outputs.release_created == 'true' && needs.charts.result == 'success' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ secrets.TEMPLATE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TEMPLATE_APP_PRIVATE_KEY }}
+          owner: badilhq
+          repositories: badil.dev
+          permission-contents: write
+
+      - name: Point badilhq/badil.dev's docs at the release
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          repo="$RUNNER_TEMP/badil.dev"
+          git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/badilhq/badil.dev.git" "$repo"
+          cd "$repo"
+          printf '%s\n' "$TAG" > docs/badil-version
+          git add docs/badil-version
+          if git diff --cached --quiet; then
+            echo "badil.dev already shows $TAG"
+            exit 0
+          fi
+          git -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m "chore(docs): show badil $TAG"
+          git push origin HEAD:main
