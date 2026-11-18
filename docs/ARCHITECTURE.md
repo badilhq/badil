@@ -2,40 +2,32 @@
 
 Self-hosted, single-tenant. Everything runs in the user's cluster; badil talks to GitHub through the user's own GitHub App and never touches the cluster directly: ArgoCD does the deploys.
 
-**Deploy flow**
-
-```mermaid
-flowchart TB
-  ci["Service repo CI<br/>builds + pushes the image<br/>(no deploy call)"]
-  pr["GitHub PR<br/>(label or push)"] -->|pull_request webhook| wh["POST /webhooks/github"]
-  manual["Manual trigger"] --> deploy["POST /v1/deploy<br/>(only with<br/>BADIL_DEPLOY_TOKEN)"]
-  wh -->|async reconcile| serve["badil serve<br/>(GitHub App)"]
-  deploy --> serve
-  serve -.->|"PR comment<br/>(fan-out)"| pr
-  serve -->|"writes<br/>previews/&lt;slug&gt;/values.yaml"| gitops[("gitops repo")]
-  gitops --> appset["Argo CD ApplicationSet<br/>git directory generator:<br/>previews/*"]
-  appset -->|renders| chart["preview-apps chart"]
-  chart --> ns["AppProject + Namespace"]
-  chart --> svcapp["Application per service"]
-  chart --> depapp["Application<br/>per dependency"]
-  svcapp --> svc["Service chart<br/>at commitSha<br/>or the entry's branch"]
-  depapp --> dep["Dependency chart<br/>from OCI registry<br/>or Helm repository,<br/>at its version"]
-```
-
-**Teardown, cleanup and sync**
-
 ```mermaid
 flowchart LR
-  close["PR label removed<br/>or PR closed"] -->|pull_request webhook| teardown["badil serve, async:<br/>unpins the PR's services<br/>or deletes<br/>previews/&lt;slug&gt;/values.yaml"]
-  cleanup["badil cleanup<br/>CronJob or<br/>in-server interval"] --> sweep["deletes stale previews;<br/>unpins closed PRs,<br/>and open PRs whose label<br/>moved, conflicts or is gone"]
-  push["Push to the gitops<br/>default branch<br/>changing badil.yaml"] -->|push webhook| pushsync["badil serve, async:<br/>syncs every preview<br/>with badil.yaml"]
-  v1sync["POST /v1/sync<br/>(only with<br/>BADIL_DEPLOY_TOKEN)"] --> apisync["badil serve:<br/>syncs every preview,<br/>or one, with badil.yaml"]
-  teardown --> gitops[("gitops repo")]
-  sweep --> gitops
-  pushsync --> gitops
-  apisync --> gitops
-  gitops --> argo["Argo CD<br/>prunes what was removed"]
+  pr["GitHub<br/>pull request<br/>labelled preview"]
+  subgraph you["Your side"]
+    badil["badil"] -->|write| repo[("gitops repo")] -->|watch| argo["Argo CD"] -->|deploy| ns["Preview<br/>namespace"]
+  end
+  pr -->|webhook| badil
+  badil -.->|PR comment| pr
+  argo -.->|deployment status| pr
+
+  classDef github stroke:#8c959f,stroke-width:2px
+  classDef badil stroke:#1a7f37,stroke-width:2px
+  classDef repo stroke:#8250df,stroke-width:2px
+  classDef argo stroke:#EF7B4D,stroke-width:2px
+  classDef k8s stroke:#326CE5,stroke-width:2px
+  class pr github
+  class badil badil
+  class repo repo
+  class argo argo
+  class ns k8s
 ```
+
+- Each service repo's CI builds and pushes its images, and makes no deploy call.
+- The deployment status is optional: Argo CD's notifications controller posts it as GitHub Deployments, through its own GitHub App (see [Preview deployments on GitHub](#preview-deployments-on-github)).
+- Closing or unlabelling a PR, and the [cleanup sweep](#cleanup-sweep), unpin services or delete preview files; a push changing `badil.yaml`, or `POST /v1/sync`, resyncs every preview (see [Config sync](#config-sync)); Argo CD prunes what was removed.
+- `POST /v1/deploy` and `POST /v1/sync` exist only when `BADIL_DEPLOY_TOKEN` is set.
 
 ## Components
 
