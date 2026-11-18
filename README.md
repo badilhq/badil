@@ -87,7 +87,7 @@ badil verify-app      # check GitHub App credentials, list installations
 badil version         # print the version (also badil --version)
 ```
 
-badil reads its whole preview config from `badil.yaml` in the gitops repo (service catalog, chart settings, image tag format, dependencies, namespace metadata, `preview` block) and writes everything `preview-apps` needs into each preview file (see ARCHITECTURE [Gitops repo contract](docs/ARCHITECTURE.md#gitops-repo-contract)).
+badil reads its whole preview config from `badil.yaml` in the gitops repo (service catalog, chart settings, image tag format, dependencies, namespace metadata, `preview` block) and writes everything `preview-apps` needs into each preview file (see the [Configuration reference](docs/CONFIGURATION.md#badilyaml)).
 
 Configuration (env):
 
@@ -120,7 +120,11 @@ Install: [docs/INSTALL.md](docs/INSTALL.md); ArgoCD wiring: [examples/argocd](ex
 ## Docs
 
 - [Install](docs/INSTALL.md): from an empty cluster to a first preview
-- [Architecture](docs/ARCHITECTURE.md): components, gitops and service repo contracts, API
+- [Architecture](docs/ARCHITECTURE.md): how badil works and why
+- [Configuration reference](docs/CONFIGURATION.md): `badil.yaml`, the preview file, the service repo contract and the server's environment variables
+- [HTTP API reference](docs/API.md): every endpoint
+- [Preview lifecycle reference](docs/LIFECYCLE.md): what badil does on each event, teardown, cleanup sweep and config sync
+- [Operations reference](docs/OPERATIONS.md): metrics, spin-up time, preview deployments on GitHub and the dashboard
 - [Preview contract](docs/CONTRACT.md): the `badil.dev/v1beta1` preview file, its schema and conformance fixtures, and what a renderer must do
 
 ## License

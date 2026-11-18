@@ -1,6 +1,10 @@
 # Preview contract
 
-badil and the renderer of a preview never talk to each other. A **renderer** is whatever reads a preview file from the gitops repo and creates the preview's workloads from it. badil ships one, the [`preview-apps`](../charts/preview-apps) Helm chart: the example [ApplicationSet](../examples/argocd/applicationset-previews.yaml) renders it once per `previews/<slug>/` directory into an AppProject, a Namespace and one Argo CD Application per service and per dependency. Any tool that follows this page can replace it, such as an [ApplicationSet without Helm](#applicationset-without-helm), Kustomize or your own app-of-apps (see [Bring your own renderer](#bring-your-own-renderer)). badil only writes the file: it never calls, configures or waits on the renderer.
+badil and the renderer of a preview never talk to each other. A **renderer** is whatever reads a preview file from the gitops repo and creates the preview's workloads from it.
+
+badil ships one, the [`preview-apps`](../charts/preview-apps) Helm chart: the example [ApplicationSet](../examples/argocd/applicationset-previews.yaml) renders it once per `previews/<slug>/` directory into an AppProject, a Namespace and one Argo CD Application per service and per dependency.
+
+Any tool that follows this page can replace it, such as an [ApplicationSet without Helm](#applicationset-without-helm), Kustomize or your own app-of-apps (see [Bring your own renderer](#bring-your-own-renderer)). badil only writes the file: it never calls, configures or waits on the renderer.
 
 This page is that file's contract, `badil.dev/v1beta1`, and what a renderer must do with it.
 
@@ -17,13 +21,17 @@ At the root of the gitops repo:
 | `badil.yaml` | you | badil only: the service catalog with each service's chart settings and image tag format, the dependencies, the namespace metadata and the `preview` block |
 | `previews/<slug>/values.yaml` | badil | any renderer: one preview, in the format below |
 
-A renderer needs only `previews/<slug>/values.yaml`: badil writes into it everything `badil.yaml` says about rendering, so it carries each service's repo, revision, image tag and chart settings, each dependency's chart, version and values, the gitops repo URL and the namespace metadata. `badil.yaml` is described in [ARCHITECTURE](ARCHITECTURE.md#gitops-repo-contract).
+A renderer needs only `previews/<slug>/values.yaml`: badil writes into it everything `badil.yaml` says about rendering, so it carries each service's repo, revision, image tag and chart settings, each dependency's chart, version and values, the gitops repo URL and the namespace metadata. `badil.yaml` is described in the [Configuration reference](CONFIGURATION.md#badilyaml).
 
 ## Lifecycle
 
 - **Create.** badil creates `previews/<slug>/values.yaml` on the first deploy to a slug, from the label flow or `POST /v1/deploy`.
-- **Update.** badil rewrites the file on a deploy, a teardown, or a cleanup sweep sync (the file differs from `badil.yaml`), when that changes its content. A label-flow deploy that would change only `metadata.updated-at` writes nothing, and neither does a teardown that unpins nothing or a sync of a file that already matches, so a renderer must not expect a commit per deploy. When a service is removed from `badil.yaml`, its unpinned entries are dropped by the next write; a pinned entry stays until its PR's teardown, which drops it: a renderer must remove what it deployed for an entry that disappears. A dependency removed from `badil.yaml` is dropped by the next write, the same way. A `badil.yaml` change (a chart setting, an image tag format, a dependency, the namespace metadata) reaches every preview the same way, by its next write.
-- **Delete.** badil deletes the file, and with it `previews/<slug>/`, when no service of the preview is pinned any more (teardown or cleanup sweep), when the preview expires (`CLEANUP_TTL`), or when the sweep tears down the last PR that pinned it. See [Teardown flow](ARCHITECTURE.md#http-api) and [Cleanup sweep](ARCHITECTURE.md#cleanup-sweep).
+- **Update.** badil rewrites the file on a deploy, a teardown, or a cleanup sweep sync (the file differs from `badil.yaml`), when that changes its content. A label-flow deploy that would change only `metadata.updated-at` writes nothing, and neither does a teardown that unpins nothing or a sync of a file that already matches, so a renderer must not expect a commit per deploy.
+
+  When a service is removed from `badil.yaml`, its unpinned entries are dropped by the next write; a pinned entry stays until its PR's teardown, which drops it: a renderer must remove what it deployed for an entry that disappears.
+
+  A dependency removed from `badil.yaml` is dropped by the next write, the same way. A `badil.yaml` change (a chart setting, an image tag format, a dependency, the namespace metadata) reaches every preview the same way, by its next write.
+- **Delete.** badil deletes the file, and with it `previews/<slug>/`, when no service of the preview is pinned any more (teardown or cleanup sweep), when the preview expires (`CLEANUP_TTL`), or when the sweep tears down the last PR that pinned it. See [Teardown](LIFECYCLE.md#teardown) and [Cleanup sweep](LIFECYCLE.md#cleanup-sweep).
 
 The slug is the slugified head branch, or the name of a `<label>:<name>` label: lowercase `a-z` and `0-9`, every other run of characters replaced by one `-`, no leading or trailing `-`. A slug is a DNS label of at most 53 characters (Helm's release-name limit): a longer one is cut and suffixed with `-` and 6 hex characters of a hash of the full slug.
 
@@ -121,7 +129,15 @@ dependencies:
 | `dependencies[].hostParam` | string | exactly when `host` is | Helm parameter set to `host` |
 | `dependencies[].host` | string | exposed dependencies only | the ingress host `<name>-<slug>.<domain>` |
 
-The contract is strict: `apiVersion` must be `badil.dev/v1beta1`, every object but `dependencies[].values` is closed (an unknown field at any level is invalid), every field has the type shown, a null value is invalid, and an entry with `commitSha` but no `metadata`, or `metadata` but no `commitSha`, is invalid, as is a dependency with `chart.name` and an `oci://` `chart.repoURL`, or without `chart.name` and another one, or with only one of `hostParam` and `host`. Every string badil writes reads back as a string under YAML 1.1: values such as `"42"` or `"on"` are quoted.
+The contract is strict:
+
+- `apiVersion` must be `badil.dev/v1beta1`;
+- every object but `dependencies[].values` is closed: an unknown field at any level is invalid;
+- every field has the type shown, and a null value is invalid;
+- an entry with `commitSha` but no `metadata`, or `metadata` but no `commitSha`, is invalid;
+- a dependency is invalid with `chart.name` and an `oci://` `chart.repoURL`, without `chart.name` and another one, or with only one of `hostParam` and `host`.
+
+Every string badil writes reads back as a string under YAML 1.1: values such as `"42"` or `"on"` are quoted.
 
 The JSON Schema of the contract is [`schema/preview.v1beta1.schema.json`](../schema/preview.v1beta1.schema.json) (draft 2020-12), generated from badil's Go types.
 

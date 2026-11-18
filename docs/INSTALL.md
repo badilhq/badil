@@ -1,12 +1,12 @@
 # Install
 
-From an empty cluster to a first preview. Contract details live in [ARCHITECTURE](ARCHITECTURE.md); this guide links to them.
+From an empty cluster to a first preview. Contract details live in the [Configuration reference](CONFIGURATION.md); this guide links to them.
 
 ## 1. Prerequisites
 
 - A Kubernetes cluster with Argo CD 3.1 or later (OCI chart source, Beta since v3.1.0), in any namespace. The `preview-apps` chart creates its AppProject and Applications in the namespace set by its `argocdNamespace` value (default `argocd`). When Argo CD runs elsewhere, set that namespace in the places [Adapt to your org](../examples/argocd/README.md#adapt-to-your-org) lists, and read `-n argocd` in the commands of this guide as your Argo CD namespace.
 - An ingress controller with TLS for the badil webhook URL (GitHub calls it over https), plus wildcard DNS when preview URLs are used.
-- A GitHub gitops repo, and service repos whose CI pushes images tagged as the `imageTag` format of `badil.yaml` renders the commit SHA (the full SHA by default), all under the one account (user or org) the App is installed on. `/v1/deploy` must send the full SHA: see [`imageTag`](ARCHITECTURE.md#gitops-repo-contract).
+- A GitHub gitops repo, and service repos whose CI pushes images tagged as the `imageTag` format of `badil.yaml` renders the commit SHA (the full SHA by default), all under the one account (user or org) the App is installed on. `/v1/deploy` must send the full SHA: see [`imageTag`](CONFIGURATION.md#imagetag).
 - Service images pullable from the preview namespaces: `preview-apps` creates each namespace fresh, with no `imagePullSecrets`. Use public images, node-level registry credentials, or pull secrets set by the service chart.
 - `kubectl`, Helm 3.8+ and Go 1.26+ (for the `badil` CLI).
 
@@ -16,7 +16,7 @@ Create the gitops repo from [`badilhq/gitops-template`](https://github.com/badil
 
 Or set it up by hand:
 
-- Commit at the root a `badil.yaml`, starting from [`examples/argocd/badil.yaml`](../examples/argocd/badil.yaml): the service catalog, and optionally the image tag format, namespace metadata, dependencies, needs and the `preview` block. Every key is in ARCHITECTURE [Gitops repo contract](ARCHITECTURE.md#gitops-repo-contract).
+- Commit at the root a `badil.yaml`, starting from [`examples/argocd/badil.yaml`](../examples/argocd/badil.yaml): the service catalog, and optionally the image tag format, namespace metadata, dependencies, needs and the `preview` block. Every key is in the [Configuration reference](CONFIGURATION.md#badilyaml).
 - badil creates `previews/` itself; a missing directory reads as no previews.
 - badil commits straight to the default branch. Its protection must let the App push directly: no required pull request, or the App on the bypass list.
 
@@ -25,7 +25,7 @@ Or set it up by hand:
 Skip this step if the gitops repo comes from the template: its README covers it.
 
 - If the gitops repo or any service repo is private, register it in Argo CD first (repository credentials; see Argo CD [Private Repositories](https://argo-cd.readthedocs.io/en/stable/user-guide/private-repositories/)). The public `oci://ghcr.io/badilhq/charts` needs no credentials.
-- A dependency from a private OCI registry or Helm repository needs a credential too: see ARCHITECTURE [Dependencies](ARCHITECTURE.md#dependencies).
+- A dependency from a private OCI registry or Helm repository needs a credential too: see [`dependencies`](CONFIGURATION.md#dependencies).
 - Copy [`examples/argocd/appproject-previews.yaml`](../examples/argocd/appproject-previews.yaml) and [`applicationset-previews.yaml`](../examples/argocd/applicationset-previews.yaml), and adapt both as listed in [Adapt to your org](../examples/argocd/README.md#adapt-to-your-org).
 - Take the files from the badil release tag you install (`https://github.com/badilhq/badil/tree/vX.Y.Z/examples/argocd`): they carry the matching `preview-apps` `targetRevision`. For the latest chart, use the latest release tag: `main` can be ahead of it.
 - Apply both:
@@ -155,7 +155,7 @@ Check: `badil_argocd_events_total{result="recorded"}` increases after the next l
 kubectl get --raw /api/v1/namespaces/badil/services/badil:metrics/proxy/metrics | grep badil_argocd_events_total
 ```
 
-Without Helm, see the file's comments. To remove the setup later, revert the Argo CD release without the file, then delete the token, which Helm leaves in the Secret: `kubectl -n argocd patch secret argocd-notifications-secret --type=json -p '[{"op":"remove","path":"/data/badil-webhook-token"}]'`. Details: ARCHITECTURE [Spin-up endpoint](ARCHITECTURE.md#spin-up-endpoint).
+Without Helm, see the file's comments. To remove the setup later, revert the Argo CD release without the file, then delete the token, which Helm leaves in the Secret: `kubectl -n argocd patch secret argocd-notifications-secret --type=json -p '[{"op":"remove","path":"/data/badil-webhook-token"}]'`. Details: [Spin-up time](OPERATIONS.md#spin-up-time).
 
 ### Preview deployments on GitHub (optional)
 
@@ -177,7 +177,15 @@ helm upgrade argocd argo/argo-cd -n argocd --version <your installed argo-cd cha
   --set-file notifications.secret.items.github-privateKey=<path to the App's .pem>
 ```
 
-On the PR, each pinned service that goes Healthy at the PR head SHA appears as a deployment to the environment `preview-<slug>-<service>`, state `success`, with `environment_url` set to `https://<service host>/`. A service that turns Degraded at the PR head SHA (image never pushed, crash loop) shows on the same deployment as state `failure`, after its Deployment's `progressDeadlineSeconds`; one whose sync fails or whose chart fails to render at that SHA shows as state `error`. When the service's Application is deleted, the deployment of the SHA badil last pinned is marked `inactive`. When badil unpins a service from a preview that survives (a later push that no longer touches its `paths`, or a PR closed while another PR keeps the preview), the deployment of its last pinned SHA is marked `inactive`. Each sync at the pinned SHA posts `success` once and each unpin of a pinned sync posts `inactive` once: re-adding the label (or reopening the PR) at the same SHA posts `success` again on the same deployment once Argo CD syncs it at that SHA (limitation 15), and so does any further successful sync at that SHA. The file uses `https://`; change every `environmentURL` line to `http://` if your previews run with `preview.tls: false`.
+On the PR, each pinned service that goes Healthy at the PR head SHA appears as a deployment to the environment `preview-<slug>-<service>`, state `success`, with `environment_url` set to `https://<service host>/`.
+
+A service that turns Degraded at the PR head SHA (image never pushed, crash loop) shows on the same deployment as state `failure`, after its Deployment's `progressDeadlineSeconds`; one whose sync fails or whose chart fails to render at that SHA shows as state `error`.
+
+When the service's Application is deleted, the deployment of the SHA badil last pinned is marked `inactive`. When badil unpins a service from a preview that survives (a later push that no longer touches its `paths`, or a PR closed while another PR keeps the preview), the deployment of its last pinned SHA is marked `inactive`.
+
+Each sync at the pinned SHA posts `success` once and each unpin of a pinned sync posts `inactive` once: re-adding the label (or reopening the PR) at the same SHA posts `success` again on the same deployment once Argo CD syncs it at that SHA (limitation 15), and so does any further successful sync at that SHA.
+
+The file uses `https://`; change every `environmentURL` line to `http://` if your previews run with `preview.tls: false`.
 
 Limitations:
 
@@ -199,7 +207,7 @@ Limitations:
 16. `success`, and the spin-up sample of `notifications-values.yaml`, can come late. Argo CD records times to the second, and a time equal to the sync's end or start counts as stale. A sync that changes no pod keeps health `Healthy` with no transition after its start, so it waits for a status refresh in a later second than its end; when the refresh that follows the sync lands in the same second, it waits for the next full refresh. That comes after `timeout.reconciliation` plus up to `timeout.reconciliation.jitter` per period: at worst about two periods plus jitter, about 5 minutes with the defaults (120 s and 60 s), and with no bound when `timeout.reconciliation` is `0s`. A pin rarely leaves pods unchanged, since it changes the image tag.
 17. `success`, and the spin-up sample, can come early: any health change after the sync's start counts, even one that does not come from the new pods. This happens when the previous SHA's rollout turns Healthy while the next SHA's sync runs (pushes seconds apart), and when the chart orders its resources in sync waves: Argo CD applies a wave only once the earlier waves are Healthy and marks the sync as succeeded as soon as the last wave is applied, so an earlier wave turning Healthy (a migration Job, another Deployment) is a health change after the start while the last wave's pods still start. Either way, `success` and the spin-up sample for the new SHA can come before its pods are Healthy, and are not sent again when they turn Healthy.
 
-Check: the PR shows the deployment, and `kubectl -n argocd logs deploy/argocd-notifications-controller` has no `github` errors. Without Helm, see the file's comments. Details: ARCHITECTURE [Preview deployments on GitHub](ARCHITECTURE.md#preview-deployments-on-github).
+Check: the PR shows the deployment, and `kubectl -n argocd logs deploy/argocd-notifications-controller` has no `github` errors. Without Helm, see the file's comments. Details: [Preview deployments on GitHub](OPERATIONS.md#preview-deployments-on-github).
 
 To remove the setup later:
 
@@ -234,17 +242,17 @@ With the Prometheus Operator (e.g. kube-prometheus-stack), add to the `helm inst
 - `dashboard.enabled=true` renders the Grafana dashboard as a ConfigMap labelled `grafana_dashboard: "1"`, which the Grafana sidecar of kube-prometheus-stack loads from any namespace. Change the label with `dashboard.labels` if your sidecar uses another one.
 - Without the sidecar, import [`charts/badil/dashboards/badil.json`](../charts/badil/dashboards/badil.json) as a Grafana dashboard and pick your Prometheus data source.
 
-Last successful sweep needs `cleanup.interval`; the spin-up panels need [Spin-up time](#spin-up-time-optional). Details: ARCHITECTURE [Dashboard](ARCHITECTURE.md#dashboard).
+Last successful sweep needs `cleanup.interval`; the spin-up panels need [Spin-up time](#spin-up-time-optional). Details: [Dashboard](OPERATIONS.md#dashboard).
 
 ### Preview limits (optional)
 
-badil sets no quota or network policy on previews. To cap each preview's resources and isolate its ingress, apply the Kyverno policy in [`examples/kyverno/`](../examples/kyverno/README.md) (Kyverno v1.19.0 or later): it creates a ResourceQuota, a LimitRange and an ingress NetworkPolicy in every preview namespace. Adapt its quota numbers and its ingress controller namespace first. Details: ARCHITECTURE [Preview limits](ARCHITECTURE.md#preview-limits).
+badil sets no quota or network policy on previews. To cap each preview's resources and isolate its ingress, apply the Kyverno policy in [`examples/kyverno/`](../examples/kyverno/README.md) (Kyverno v1.19.0 or later): it creates a ResourceQuota, a LimitRange and an ingress NetworkPolicy in every preview namespace. Adapt its quota numbers and its ingress controller namespace first. Details: [Preview limits](CONFIGURATION.md#preview-limits).
 
 ## 7. Service repos
 
 - Create the `preview` label (or your custom `preview.label`) in each service repo, e.g. `gh label create preview --repo <owner>/<repo>`. Create any `preview:<name>` label yourself in each repo too: badil never creates labels.
-- CI must push the image tagged as the service's `imageTag` format renders the commit SHA (the full SHA by default): ARCHITECTURE [Pinned and branch-tracking services](ARCHITECTURE.md#pinned-and-branch-tracking-services).
-- Chart contract and the `services.<name>.chart` settings (in `badil.yaml`): ARCHITECTURE [Service repo contract](ARCHITECTURE.md#service-repo-contract).
+- CI must push the image tagged as the service's `imageTag` format renders the commit SHA (the full SHA by default): [Pinned and branch-tracking services](ARCHITECTURE.md#pinned-and-branch-tracking-services).
+- Chart contract and the `services.<name>.chart` settings (in `badil.yaml`): [Service repo contract](CONFIGURATION.md#service-repo-contract).
 
 ## 8. First preview
 
@@ -258,7 +266,7 @@ badil sets no quota or network policy on previews. To cap each preview's resourc
 
 ## 9. Preview URLs (optional)
 
-Set `preview.domain` in `badil.yaml`, create a wildcard DNS record `*.<domain>` pointing to the ingress controller, and list the services under `expose`. Details: ARCHITECTURE [Per-preview URLs](ARCHITECTURE.md#per-preview-urls).
+Set `preview.domain` in `badil.yaml`, create a wildcard DNS record `*.<domain>` pointing to the ingress controller, and list the services under `expose`. Details: [Per-preview URLs](CONFIGURATION.md#per-preview-urls).
 
 ## 10. Upgrade
 
