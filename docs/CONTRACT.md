@@ -1,6 +1,8 @@
 # Preview contract
 
-badil and the renderer of a preview never talk to each other: badil writes one file per preview into the gitops repo, and a renderer turns it into running workloads. This page is that file's contract, `badil.dev/v1beta1`, and what a renderer must do with it. [`preview-apps`](../charts/preview-apps), driven by the example [ApplicationSet](../examples/argocd/applicationset-previews.yaml), is the renderer badil ships; any other renderer that follows this page works with badil unchanged.
+badil and the renderer of a preview never talk to each other. A **renderer** is whatever reads a preview file from the gitops repo and creates the preview's workloads from it. badil ships one, the [`preview-apps`](../charts/preview-apps) Helm chart: the example [ApplicationSet](../examples/argocd/applicationset-previews.yaml) renders it once per `previews/<slug>/` directory into an AppProject, a Namespace and one Argo CD Application per service and per dependency. Any tool that follows this page can replace it, such as an [ApplicationSet without Helm](#applicationset-without-helm), Kustomize or your own app-of-apps (see [Bring your own renderer](#bring-your-own-renderer)). badil only writes the file: it never calls, configures or waits on the renderer.
+
+This page is that file's contract, `badil.dev/v1beta1`, and what a renderer must do with it.
 
 ## Versioning
 
