@@ -483,7 +483,7 @@ A rewrite is logged (`preview synced`) and counted in `badil_previews_synced_tot
 
 ### Catalog changes
 
-A `badil.yaml` change therefore reaches every preview within one sweep interval, without a push: a service added, removed or renamed, a `repo`, `branch`, `preview.domain` or `expose` change. With the App subscribed to `push`, it reaches them at once (see [Config sync](#config-sync)); the sweep stays the safety net.
+A `badil.yaml` change therefore reaches every preview within one sweep interval, without a push: a service added, removed or renamed, a `repo`, `branch`, `preview.domain` or `expose` change. With the App subscribed to `push`, it reaches them at once (see [Config sync](#config-sync)).
 
 A mistaken edit propagates the same way, except that pinned entries of a removed service stay until their PR leaves. A git revert of `badil.yaml` undoes it at the next sweep.
 

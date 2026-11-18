@@ -45,7 +45,7 @@ badil is a few binaries and charts. Each service repo adds its own chart.
 
 ## How a preview flows
 
-A preview goes from a label to a deploy, and back to nothing:
+The steps from label to teardown:
 
 1. A service repo's CI builds and pushes the image of each commit.
 2. A user adds the preview label to a PR. GitHub sends the `pull_request` webhook.
@@ -120,7 +120,7 @@ Key: [`paths`](CONFIGURATION.md#servicesnamepaths). Rules: [Path filters](LIFECY
 
 ## Cleanup sweep
 
-Webhooks can be missed: badil may be down, or a label may be renamed. The cleanup sweep makes the gitops repo converge anyway.
+The cleanup sweep fixes what missed webhooks leave behind, for example when badil was down or a label was renamed.
 
 It runs in the server every `CLEANUP_INTERVAL`, or as the `badil cleanup` CronJob. For each preview, it deletes the file when no service is pinned, or when no deploy happened within `CLEANUP_TTL`. Otherwise it unpins closed PRs, and open PRs whose label moved, conflicts or is gone. It then rewrites every preview it keeps to match `badil.yaml`.
 
@@ -130,7 +130,7 @@ Rules: [Cleanup sweep](LIFECYCLE.md#cleanup-sweep).
 
 A change to `badil.yaml` should reach running previews without waiting for a push to each PR. Config sync rewrites every preview to match `badil.yaml`, the way the sweep's last step does.
 
-It runs on a push to the gitops repo's default branch, when the App subscribes to `push`, and on `POST /v1/sync`. The sweep stays the safety net.
+It runs on a push to the gitops repo's default branch, when the App subscribes to `push`, and on `POST /v1/sync`. Without either, the next cleanup sweep applies the change.
 
 Rules: [Config sync](LIFECYCLE.md#config-sync).
 
