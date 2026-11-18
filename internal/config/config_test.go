@@ -105,9 +105,12 @@ func TestLoad_MissingDeployToken(t *testing.T) {
 	delete(env, "BADIL_DEPLOY_TOKEN")
 	setEnv(t, env)
 
-	_, err := config.Load()
-	if err == nil {
-		t.Fatal("expected error for missing BADIL_DEPLOY_TOKEN")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.DeployToken != "" {
+		t.Errorf("DeployToken = %q, want empty", cfg.DeployToken)
 	}
 }
 

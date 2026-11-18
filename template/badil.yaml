@@ -61,6 +61,5 @@ services:
 #   domain: previews.example.com  # lowercase bare domain; needs a wildcard DNS record for *.<domain>
 #   tls: true                     # optional, default true: https links (ingress TLS stays in the service chart)
 #   expose:
-#     front: {}
-#     backend-1:
+#     my-service:
 #       path: /docs               # optional, default "/": PR-comment link only

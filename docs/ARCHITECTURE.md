@@ -24,7 +24,7 @@ Self-hosted, single-tenant. Everything runs in the user's cluster; badil talks t
 
 | Component | Where | Notes |
 |---|---|---|
-| `badil serve` | this repo | chi HTTP server: `/healthz`, `/v1/deploy`, `/v1/sync`, `/webhooks/github`, `/webhooks/argocd` (optional) |
+| `badil serve` | this repo | chi HTTP server: `/healthz`, `/v1/deploy` (optional), `/v1/sync` (optional), `/webhooks/github`, `/webhooks/argocd` (optional) |
 | `badil cleanup` | this repo | One-shot, CronJob (hourly). Per preview, the first matching rule: no pinned service → delete; `CLEANUP_TTL` set and no deploy within it → delete; otherwise unpin closed PRs, and open PRs whose label moved, conflicts or is gone (see [Cleanup sweep](#cleanup-sweep)) |
 | `badil bootstrap-app` / `verify-app` | this repo | Create a GitHub App via the manifest flow / check credentials |
 | `preview-apps` chart | this repo, [`charts/preview-apps`](../charts/preview-apps) | Renders AppProject, Namespace, one ArgoCD Application per service and per dependency; the AppProject and Applications in the namespace set by `argocdNamespace` (default `argocd`); Application annotations `preview.badil.dev/*` carry the PR metadata |
@@ -104,7 +104,7 @@ badil reads `badil.yaml` on every deploy, reconcile, teardown that keeps the pre
 - `services.<name>.chart` keys are all optional: badil writes each into the preview file with its default applied. `path`, `imageTagParam` and `hostParam` must be non-empty strings, and `valueFiles` a non-empty list of non-empty strings. A null `chart` or a null key is rejected; omit it to use the defaults.
 - `dependencies.<name>` needs `chart` and `version`, non-empty strings (quote a version YAML reads as a number, such as `"1.0"`). A `chart` starting with `oci://` is an OCI chart reference, with a host, and `repo` must be absent; any other `chart` is a chart name and `repo`, an `https://` Helm repository URL with a host, is required. `values` is any mapping, `valueFiles` a non-empty list of non-empty strings and `hostParam` a non-empty string; an exposed dependency without `hostParam` is rejected, as no Helm parameter is known to set its host. A dependency name must be unique and must not be a service name: both become `<slug>-<name>` Applications. See [Dependencies](#dependencies).
 - `services.<name>.needs` and `dependencies.<name>.needs` are non-empty lists of names of services or dependencies of `badil.yaml`. An unknown name, a repeated name, the entry's own name and an empty list are rejected, with the key's path (for example `badil.yaml: services.front.needs: "cache" is neither a service nor a dependency`). Cycles are allowed. See [Needs](#needs).
-- `services.<name>.paths` is a non-empty list of glob patterns, relative to the service's repo root, matched against the paths of the files a PR changes, with `/` separators, by [doublestar](https://github.com/bmatcuk/doublestar) v4: `*` matches within a path segment, `**` across segments (`api/**` is every file under `api/`), and `?`, `[...]` and `{a,b}` work as in a shell. A null, a value that is not a list, an empty list, an empty string or an item that is not a string is rejected with `badil.yaml: services.<name>.paths must be a non-empty list of non-empty strings`, and a malformed pattern with `badil.yaml: services.<name>.paths[<i>]: invalid pattern "<p>"` (`<i>` counted from 0). See [Path filters](#path-filters).
+- `services.<name>.paths` is a non-empty list of glob patterns, relative to the service's repo root, matched against the paths of the files a PR changes, with `/` separators, by [doublestar](https://github.com/bmatcuk/doublestar) v4: `*` matches within a path segment, `**` across segments (`api/**` is every file under `api/`), and `?`, `[...]` and `{a,b}` work as in a shell. A null, a value that is not a list, an empty list, an empty string or an item that is not a string is rejected with `badil.yaml: services.<name>.paths must be a non-empty list of non-empty strings`, a malformed pattern with `badil.yaml: services.<name>.paths[<i>]: invalid pattern "<p>"` (`<i>` counted from 0), and a pattern that starts with `./` or `/` or ends with `/`, which never matches since GitHub lists changed files relative to the repository root, with `badil.yaml: services.<name>.paths[<i>]: pattern "<p>" never matches: paths are relative to the repository root, with no leading "./" or "/" and no trailing "/"`. See [Path filters](#path-filters).
 - `namespace.labels` and `namespace.annotations` are added to every preview Namespace, after the chart's own (`app.kubernetes.io/name`, `app.kubernetes.io/instance`, `app.kubernetes.io/part-of`, `app.kubernetes.io/managed-by`, and the annotation `argocd.argoproj.io/sync-wave`). Keys and values are strings (an empty value is allowed); a null, a number or a boolean is rejected, as is a key the chart sets. An empty block writes nothing.
 - `preview.label` must be a non-empty string; it is matched case-insensitively, like GitHub label names. `<label>:<name>` labels name the preview (see the label flow below).
 - `preview.maxPreviews` must be a YAML integer of at least 1; a string (`"3"`), `0`, a negative number or a float is rejected, and a null or empty value means unset. It does not need `preview.domain`. See Preview cap in the [HTTP API](#http-api) section.
@@ -301,13 +301,13 @@ GET  /healthz
 
 GET  /metrics               # on METRICS_ADDR only (default :9090), not on LISTEN_ADDR
 
-POST /v1/deploy
+POST /v1/deploy             # only when BADIL_DEPLOY_TOKEN is set (404 otherwise)
   Authorization: Bearer $BADIL_DEPLOY_TOKEN
   { "service", "head_ref", "commit_sha", "pr_author", "pr_url", "pr_number", "workflow_run_url" }
   → { "preview_slug", "gitops_commit_url", "warnings": [...] }
   → 409 { "error": "preview limit (<max>) reached" }   # preview.maxPreviews reached and previews/<slug>/ does not exist
 
-POST /v1/sync
+POST /v1/sync               # only when BADIL_DEPLOY_TOKEN is set (404 otherwise)
   Authorization: Bearer $BADIL_DEPLOY_TOKEN
   empty body or {} → every preview; { "slug": "<slug>" } → that preview   # unknown field → 400
   → { "synced": [<slugs rewritten>], "unchanged": <count>, "failed": [<slugs>] }
@@ -448,7 +448,7 @@ GITHUB_PRIVATE_KEY_PATH | GITHUB_PRIVATE_KEY
 GITHUB_WEBHOOK_SECRET
 GITHUB_INSTALLATION_ID
 GITOPS_REPO                 # owner/repo
-BADIL_DEPLOY_TOKEN
+BADIL_DEPLOY_TOKEN          # optional; enables /v1/deploy and /v1/sync
 LISTEN_ADDR                 # default :8080
 METRICS_ADDR                # default :9090 when unset; set to "" to disable /metrics
 ARGOCD_WEBHOOK_TOKEN        # optional; enables /webhooks/argocd

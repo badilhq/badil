@@ -16,7 +16,9 @@ type Config struct {
 	InstallationID int64
 	GitOpsRepo     string
 	ListenAddr     string
-	DeployToken    string
+	// DeployToken authenticates POST /v1/deploy and POST /v1/sync, "" when
+	// they are disabled.
+	DeployToken string
 	// MetricsAddr is the listen address of the metrics server, "" when it is
 	// disabled.
 	MetricsAddr string
@@ -52,11 +54,6 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
-	deployToken, err := requireEnv("BADIL_DEPLOY_TOKEN")
-	if err != nil {
-		return nil, err
-	}
-
 	listenAddr := os.Getenv("LISTEN_ADDR")
 	if listenAddr == "" {
 		listenAddr = ":8080"
@@ -74,7 +71,7 @@ func Load() (*Config, error) {
 		InstallationID:     installationID,
 		GitOpsRepo:         gitOpsRepo,
 		ListenAddr:         listenAddr,
-		DeployToken:        deployToken,
+		DeployToken:        os.Getenv("BADIL_DEPLOY_TOKEN"),
 		MetricsAddr:        metricsAddr,
 		ArgoCDWebhookToken: os.Getenv("ARGOCD_WEBHOOK_TOKEN"),
 	}, nil
