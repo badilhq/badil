@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/badilhq/badil/compare/v0.23.0...v0.24.0) (2026-11-18)
+
+
+### Features
+
+* make BADIL_DEPLOY_TOKEN optional and reject paths that never match ([#92](https://github.com/badilhq/badil/issues/92)) ([20656a2](https://github.com/badilhq/badil/commit/20656a29c69a918e1696b98697bb37dd018bc2d6))
+
 ## [0.23.0](https://github.com/badilhq/badil/compare/v0.22.0...v0.23.0) (2026-11-17)
 
 
