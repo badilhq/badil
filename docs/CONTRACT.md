@@ -31,7 +31,7 @@ A renderer needs only `previews/<slug>/values.yaml`: badil writes into it everyt
   When a service is removed from `badil.yaml`, its unpinned entries are dropped by the next write; a pinned entry stays until its PR's teardown, which drops it: a renderer must remove what it deployed for an entry that disappears.
 
   A dependency removed from `badil.yaml` is dropped by the next write, the same way. A `badil.yaml` change (a chart setting, an image tag format, a dependency, the namespace metadata) reaches every preview the same way, by its next write.
-- **Delete.** badil deletes the file, and with it `previews/<slug>/`, when no service of the preview is pinned any more (teardown or cleanup sweep), when the preview expires (`CLEANUP_TTL`), or when the sweep tears down the last PR that pinned it. See [Teardown](LIFECYCLE.md#teardown) and [Cleanup sweep](LIFECYCLE.md#cleanup-sweep).
+- **Delete.** badil deletes the file, and with it `previews/<slug>/`, when no service of the preview is pinned any more (teardown or cleanup sweep), when the preview expires (`CLEANUP_TTL`), or when the sweep tears down the last PR that pinned it. See [Teardown](CLEANUP.md#teardown) and [Cleanup sweep](CLEANUP.md#cleanup-sweep).
 
 The slug is the slugified head branch, or the name of a `<label>:<name>` label: lowercase `a-z` and `0-9`, every other run of characters replaced by one `-`, no leading or trailing `-`. A slug is a DNS label of at most 53 characters (Helm's release-name limit): a longer one is cut and suffixed with `-` and 6 hex characters of a hash of the full slug.
 

@@ -89,21 +89,7 @@ badil version         # print the version (also badil --version)
 
 badil reads its whole preview config from `badil.yaml` in the gitops repo (service catalog, chart settings, image tag format, dependencies, namespace metadata, `preview` block) and writes everything `preview-apps` needs into each preview file (see the [Configuration reference](docs/CONFIGURATION.md#badilyaml)).
 
-Configuration (env):
-
-| Variable | Required | |
-|---|---|---|
-| `GITHUB_APP_ID` | yes | |
-| `GITHUB_PRIVATE_KEY_PATH` or `GITHUB_PRIVATE_KEY` | yes | PEM file path or inline PEM |
-| `GITHUB_WEBHOOK_SECRET` | yes | |
-| `GITHUB_INSTALLATION_ID` | yes | |
-| `GITOPS_REPO` | yes | `owner/repo` |
-| `BADIL_DEPLOY_TOKEN` | no | bearer token for `/v1/deploy` and `/v1/sync`; when unset, both are off (404) |
-| `LISTEN_ADDR` | no | default `:8080` |
-| `METRICS_ADDR` | no | Prometheus `/metrics` listener, default `:9090`; set to empty to disable |
-| `ARGOCD_WEBHOOK_TOKEN` | no | bearer token of Argo CD notifications; enables `/webhooks/argocd` |
-| `CLEANUP_INTERVAL` | no | `serve` runs the cleanup sweep this often, a Go duration of at least `1m` (e.g. `1h`); unset disables it |
-| `CLEANUP_TTL` | no | sweep expiry, a Go duration (e.g. `168h`), for `cleanup` and the in-server sweep; unset disables expiry |
+The server's environment variables are listed in the [Configuration reference](docs/CONFIGURATION.md#server-environment-variables).
 
 Local setup: [DEVELOPMENT.md](DEVELOPMENT.md).
 
@@ -123,7 +109,9 @@ Install: [docs/INSTALL.md](docs/INSTALL.md); ArgoCD wiring: [examples/argocd](ex
 - [Architecture](docs/ARCHITECTURE.md): how badil works and why
 - [Configuration reference](docs/CONFIGURATION.md): `badil.yaml`, the preview file, the service repo contract and the server's environment variables
 - [HTTP API reference](docs/API.md): every endpoint
-- [Preview lifecycle reference](docs/LIFECYCLE.md): what badil does on each event, teardown, cleanup sweep and config sync
+- [Pull request events](docs/EVENTS.md): what badil does on a pull request delivery
+- [Services and dependencies](docs/SERVICES.md): path filters, `needs`, service modes, dependencies and preview file writes
+- [Cleanup and config sync](docs/CLEANUP.md): teardown, the cleanup sweep and config sync
 - [Operations reference](docs/OPERATIONS.md): metrics, spin-up time, preview deployments on GitHub and the dashboard
 - [Preview contract](docs/CONTRACT.md): the `badil.dev/v1beta1` preview file, its schema and conformance fixtures, and what a renderer must do
 

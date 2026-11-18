@@ -56,7 +56,7 @@ The steps from label to teardown:
 7. Each push to the PR pins the new head SHA, and Argo CD syncs it.
 8. Closing the PR or removing its label unpins its services. When no pin is left, badil deletes the file, and Argo CD prunes the preview.
 
-The [cleanup sweep](#cleanup-sweep) catches what events missed. Every step is detailed in the [Preview lifecycle reference](LIFECYCLE.md).
+The [cleanup sweep](#cleanup-sweep) catches what events missed. Every step is detailed in [Pull request events](EVENTS.md), [Services and dependencies](SERVICES.md) and [Cleanup and config sync](CLEANUP.md).
 
 ## The gitops repo is the interface
 
@@ -75,7 +75,7 @@ A preview runs the full stack, but only the PR's services run its code. Each ser
 
 So each service's CI must push an image tagged with the commit SHA, as its `imageTag` format renders it.
 
-How each mode is rendered: [Service modes](LIFECYCLE.md#service-modes). Image tag formats: [`imageTag`](CONFIGURATION.md#imagetag).
+How each mode is rendered: [Service modes](SERVICES.md#service-modes). Image tag formats: [`imageTag`](CONFIGURATION.md#imagetag).
 
 ### Images that do not exist yet
 
@@ -100,7 +100,7 @@ A preview is named by a slug: the PR's branch, or the name of a `preview:<name>`
 
 A preview holds one PR per service, so two PRs never fight over a service. `preview.maxPreviews` can cap the number of previews.
 
-Rules: [Target preview](LIFECYCLE.md#target-preview), [One PR per service](LIFECYCLE.md#one-pr-per-service) and [Preview cap](LIFECYCLE.md#preview-cap).
+Rules: [Target preview](EVENTS.md#target-preview), [One PR per service](EVENTS.md#one-pr-per-service) and [Preview cap](EVENTS.md#preview-cap).
 
 ## Dependencies and needs
 
@@ -108,7 +108,7 @@ A service often needs a database, a cache or a mail catcher. `dependencies` are 
 
 By default every preview runs every service and dependency. `needs` trims a preview to what its PRs use: a service or dependency lists what it calls, and a preview runs only its pinned services and what they need. badil does not infer `needs`.
 
-Keys: [`dependencies`](CONFIGURATION.md#dependencies) and [`needs`](CONFIGURATION.md#servicesnameneeds-and-dependenciesnameneeds). Rules: [Dependencies](LIFECYCLE.md#dependencies) and [Needs](LIFECYCLE.md#needs).
+Keys: [`dependencies`](CONFIGURATION.md#dependencies) and [`needs`](CONFIGURATION.md#servicesnameneeds-and-dependenciesnameneeds). Rules: [Dependencies](SERVICES.md#dependencies) and [Needs](SERVICES.md#needs).
 
 ## Path filters
 
@@ -116,7 +116,7 @@ In a monorepo, one repo holds several services. Without path filters, a labelled
 
 `paths` lists the files of a repo that belong to a service. A PR then pins only the services whose files it changes. badil does not infer `paths`, and the PR comment shows which services are pinned.
 
-Key: [`paths`](CONFIGURATION.md#servicesnamepaths). Rules: [Path filters](LIFECYCLE.md#path-filters).
+Key: [`paths`](CONFIGURATION.md#servicesnamepaths). Rules: [Path filters](SERVICES.md#path-filters).
 
 ## Cleanup sweep
 
@@ -124,7 +124,7 @@ The cleanup sweep fixes what missed webhooks leave behind, for example when badi
 
 It runs in the server every `CLEANUP_INTERVAL`, or as the `badil cleanup` CronJob. For each preview, it deletes the file when no service is pinned, or when no deploy happened within `CLEANUP_TTL`. Otherwise it unpins closed PRs, and open PRs whose label moved, conflicts or is gone. It then rewrites every preview it keeps to match `badil.yaml`.
 
-Rules: [Cleanup sweep](LIFECYCLE.md#cleanup-sweep).
+Rules: [Cleanup sweep](CLEANUP.md#cleanup-sweep).
 
 ## Config sync
 
@@ -132,7 +132,7 @@ A change to `badil.yaml` should reach running previews without waiting for a pus
 
 It runs on a push to the gitops repo's default branch, when the App subscribes to `push`, and on `POST /v1/sync`. Without either, the next cleanup sweep applies the change.
 
-Rules: [Config sync](LIFECYCLE.md#config-sync).
+Rules: [Config sync](CLEANUP.md#config-sync).
 
 ## Preview deployments on GitHub
 

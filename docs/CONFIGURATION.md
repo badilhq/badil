@@ -135,7 +135,7 @@ Both are non-empty lists of names of services or dependencies of `badil.yaml`. C
 
 badil rejects an unknown name, a repeated name, the entry's own name and an empty list. The error names the key's path, for example `badil.yaml: services.front.needs: "cache" is neither a service nor a dependency`.
 
-See [Dependencies and needs](ARCHITECTURE.md#dependencies-and-needs), and the rules in [Needs](LIFECYCLE.md#needs).
+See [Dependencies and needs](ARCHITECTURE.md#dependencies-and-needs), and the rules in [Needs](SERVICES.md#needs).
 
 ### `services.<name>.paths`
 
@@ -155,7 +155,7 @@ These errors are possible, `<i>` being counted from 0:
 
 The last pattern never matches, since GitHub lists changed files relative to the repository root.
 
-See [Path filters](ARCHITECTURE.md#path-filters), and the rules in [Path filters](LIFECYCLE.md#path-filters).
+See [Path filters](ARCHITECTURE.md#path-filters), and the rules in [Path filters](SERVICES.md#path-filters).
 
 ### `dependencies`
 
@@ -178,17 +178,17 @@ The per-preview AppProject allows only the preview namespace as destination, and
 
 A private chart registry or Helm repository needs an Argo CD repository credential, which you set up: badil passes no credential.
 
-See [Dependencies and needs](ARCHITECTURE.md#dependencies-and-needs), and how they are rendered in [Dependencies](LIFECYCLE.md#dependencies).
+See [Dependencies and needs](ARCHITECTURE.md#dependencies-and-needs), and how they are rendered in [Dependencies](SERVICES.md#dependencies).
 
 ### `preview.label`
 
-`preview.label` must be a non-empty string. It is matched case-insensitively, like GitHub label names. `<label>:<name>` labels name the preview (see [Target preview](LIFECYCLE.md#target-preview)).
+`preview.label` must be a non-empty string. It is matched case-insensitively, like GitHub label names. `<label>:<name>` labels name the preview (see [Target preview](EVENTS.md#target-preview)).
 
 ### `preview.maxPreviews`
 
 `preview.maxPreviews` must be a YAML integer of at least 1. A string (`"3"`), `0`, a negative number or a float is rejected. A null or empty value means unset. It does not need `preview.domain`.
 
-See [Preview cap](LIFECYCLE.md#preview-cap).
+See [Preview cap](EVENTS.md#preview-cap).
 
 ### `preview.argocdURL`
 
@@ -247,7 +247,7 @@ A quota on compute resources (`requests.cpu`, `requests.memory`, `limits.memory`
 
 ## Preview file
 
-badil writes `previews/<slug>/values.yaml`. [CONTRACT](CONTRACT.md#v1beta1-file) defines every field and the strict rules of v1beta1. When badil writes it is in [Preview file writes](LIFECYCLE.md#preview-file-writes).
+badil writes `previews/<slug>/values.yaml`. [CONTRACT](CONTRACT.md#v1beta1-file) defines every field and the strict rules of v1beta1. When badil writes it is in [Preview file writes](SERVICES.md#preview-file-writes).
 
 ```yaml
 # previews/feature-pricing/values.yaml: every field in CONTRACT.md
@@ -316,11 +316,11 @@ badil reads these environment variables:
 | `GITHUB_WEBHOOK_SECRET` | yes | | GitHub App webhook secret |
 | `GITHUB_INSTALLATION_ID` | yes | | the only installation badil accepts webhooks from |
 | `GITOPS_REPO` | yes | | the gitops repo, `owner/repo` |
-| `BADIL_DEPLOY_TOKEN` | no | unset | enables `/v1/deploy` and `/v1/sync` |
+| `BADIL_DEPLOY_TOKEN` | no | unset | bearer token for `/v1/deploy` and `/v1/sync`; when unset, both answer 404 |
 | `LISTEN_ADDR` | no | `:8080` | API and webhook listener |
-| `METRICS_ADDR` | no | `:9090` when unset | `/metrics` listener; set to `""` to disable `/metrics` |
-| `ARGOCD_WEBHOOK_TOKEN` | no | unset | enables `/webhooks/argocd` |
-| `CLEANUP_INTERVAL` | no | unset: no in-server sweep | `serve` only: how often the in-server sweep runs, a Go duration of at least 1m (e.g. `1h`) |
+| `METRICS_ADDR` | no | `:9090` when unset | Prometheus `/metrics` listener; set to `""` to disable `/metrics` |
+| `ARGOCD_WEBHOOK_TOKEN` | no | unset | bearer token of Argo CD notifications; enables `/webhooks/argocd` |
+| `CLEANUP_INTERVAL` | no | unset: no in-server sweep | `serve` only: how often the in-server sweep runs, a Go duration of at least `1m` (e.g. `1h`) |
 | `CLEANUP_TTL` | no | unset: no expiry | `cleanup`, and `serve` when `CLEANUP_INTERVAL` is set: sweep expiry, a Go duration (e.g. `168h`) |
 
 ### GitHub App

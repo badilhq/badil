@@ -20,7 +20,7 @@ Every label has a closed set of values. Go runtime (`go_*`) and process (`proces
 | `badil_sweep_runs_total` | counter | `result` | In-server sweep runs, `ok` or `error`. A run cancelled by shutdown is not counted. |
 | `badil_sweep_last_success_timestamp_seconds` | gauge | | Unix time of the last successful in-server sweep. |
 | `badil_sweep_previews_deleted_total` | counter | `rule` | Previews deleted by the sweep: `no_pin` (rule 1) or `ttl` (rule 2). |
-| `badil_previews_synced_total` | counter | | Previews rewritten to match `badil.yaml`, by a sweep (step 4 of the in-server sweep), a push or `/v1/sync` (see [Config sync](LIFECYCLE.md#config-sync)). |
+| `badil_previews_synced_total` | counter | | Previews rewritten to match `badil.yaml`, by a sweep (step 4 of the in-server sweep), a push or `/v1/sync` (see [Config sync](CLEANUP.md#config-sync)). |
 | `badil_previews` | gauge | | Previews in the gitops repo: listed at server startup, incremented when a deploy creates a preview, decremented when a teardown or sweep deletes one, and reset by each in-server sweep. |
 | `badil_preview_spinup_seconds` | histogram | `catalog_service` | Spin-up time of a pinned service, from badil's gitops write to its Application synced and Healthy (see [Spin-up time](#spin-up-time)). Buckets: 15, 30, 60, 120, 180, 300, 600, 900, 1800 s. `catalog_service` is a catalog service; it is not named `service` because that collides with the `service` target label Prometheus adds when scraping through a ServiceMonitor. |
 | `badil_argocd_events_total` | counter | `result` | Events accepted by `/webhooks/argocd`: `recorded` (a spin-up was observed) or `ignored`. 400 and 401 answers are not counted. |
@@ -166,15 +166,25 @@ These limitations apply:
 14. Argo CD records a sync in its history only when it succeeds. If the last pinned SHA's sync failed (its deployment shows `error` or `failure`) and badil then unpins the service, `on-preview-unpinned` posts `inactive` on the previous successfully synced pin's deployment, and the failed SHA's deployment stays open.
 15. `on-preview-deployed` needs a sync at the pinned SHA, and Argo CD auto-syncs an Application only when it is OutOfSync. A pin whose rendered manifests equal what is deployed (a chart that ignores the image tag, with its chart path unchanged by the PR) runs no sync: the service runs the pinned SHA with no deployment status.
 
-    A re-pin at the same SHA that reaches the Application before the sync to the branch after the unpin, or after an unpin that itself ran no sync, runs no sync either: the last history `id` is unchanged, its key is already stored, and the deployment stays `inactive`.
+    A re-pin at the same SHA runs no sync either in two cases:
+
+    - it reaches the Application before the sync to the branch that follows the unpin;
+    - the unpin itself ran no sync.
+
+    The last history `id` is then unchanged, its key is already stored, and the deployment stays `inactive`.
 16. `success`, and the spin-up sample of `notifications-values.yaml`, can come late. Argo CD records times to the second, and a time equal to the sync's end or start counts as stale.
 
     A sync that changes no pod keeps health `Healthy` with no transition after its start, so it waits for a status refresh in a later second than its end; when the refresh that follows the sync lands in the same second, it waits for the next full refresh.
 
-    That comes after `timeout.reconciliation` plus up to `timeout.reconciliation.jitter` per period: at worst about two periods plus jitter, about 5 minutes with the defaults (120 s and 60 s), and with no bound when `timeout.reconciliation` is `0s`. A pin rarely leaves pods unchanged, since it changes the image tag.
+    A full refresh comes every `timeout.reconciliation` plus up to `timeout.reconciliation.jitter`. The wait is at worst about two periods plus jitter: about 5 minutes with the defaults (120 s and 60 s). It has no bound when `timeout.reconciliation` is `0s`.
+
+    A pin rarely leaves pods unchanged, since it changes the image tag.
 17. `success`, and the spin-up sample, can come early: any health change after the sync's start counts, even one that does not come from the new pods.
 
-    This happens when the previous SHA's rollout turns Healthy while the next SHA's sync runs (pushes seconds apart), and when the chart orders its resources in sync waves: Argo CD applies a wave only once the earlier waves are Healthy and marks the sync as succeeded as soon as the last wave is applied, so an earlier wave turning Healthy (a migration Job, another Deployment) is a health change after the start while the last wave's pods still start.
+    This happens in two cases:
+
+    - the previous SHA's rollout turns Healthy while the next SHA's sync runs (pushes seconds apart);
+    - the chart orders its resources in sync waves. Argo CD applies a wave only once the earlier waves are Healthy, and marks the sync as succeeded as soon as the last wave is applied. An earlier wave turning Healthy (a migration Job, another Deployment) is then a health change after the start, while the last wave's pods still start.
 
     Either way, `success` and the spin-up sample for the new SHA can come before its pods are Healthy, and are not sent again when they turn Healthy.
 

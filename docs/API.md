@@ -52,7 +52,7 @@ A deploy runs these steps:
 
 It always writes, even when only `updated-at` changes, so a repeated deploy of the same commit refreshes the TTL clock.
 
-A manual deploy runs outside the reconcile queue and skips the one-PR-per-service check (see [One PR per service](LIFECYCLE.md#one-pr-per-service)). The cleanup sweep may later unpin it (see [Manual deploy pins](LIFECYCLE.md#manual-deploy-pins)).
+A manual deploy runs outside the reconcile queue and skips the one-PR-per-service check (see [One PR per service](EVENTS.md#one-pr-per-service)). The cleanup sweep may later unpin it (see [Manual deploy pins](CLEANUP.md#manual-deploy-pins)).
 
 ### Preview cap check
 
@@ -60,7 +60,7 @@ After the catalog check, the deploy reads `previews/<slug>/values.yaml`. When it
 
 At the cap, it answers `409 {"error": "preview limit (<max>) reached"}`, writes nothing and logs `deploy failed` with `op` `preview limit`. Other read or list errors are answered like the write's, with `op` `read preview` or `list previews`.
 
-The cap is soft: see [Preview cap](LIFECYCLE.md#preview-cap).
+The cap is soft: see [Preview cap](EVENTS.md#preview-cap).
 
 ## `POST /v1/sync`
 
@@ -75,7 +75,7 @@ Syncs every preview, or one, with `badil.yaml` now, and answers when done.
   - `404 {"error": "preview <slug> not found"}`: no `previews/<slug>/values.yaml`.
   - `503 {"error": "badil.yaml unavailable: …"}`: `badil.yaml` can't be read or parsed.
 
-It ignores and keeps the push SHA. See [Config sync](LIFECYCLE.md#config-sync).
+It ignores and keeps the push SHA. See [Config sync](CLEANUP.md#config-sync).
 
 ## `POST /webhooks/github`
 
@@ -91,9 +91,9 @@ Each event is handled as follows:
 
 | Event | Condition | Action |
 |---|---|---|
-| `pull_request` | action `opened`, `reopened`, `synchronize`, `labeled`, `unlabeled` or `closed` | async reconcile: see [Label flow](LIFECYCLE.md#label-flow) |
+| `pull_request` | action `opened`, `reopened`, `synchronize`, `labeled`, `unlabeled` or `closed` | async reconcile: see [Label flow](EVENTS.md#label-flow) |
 | `pull_request` | any other action | log only |
-| `push` | to `GITOPS_REPO`'s default branch, not a deletion | async config sync: see [Push](LIFECYCLE.md#push) |
+| `push` | to `GITOPS_REPO`'s default branch, not a deletion | async config sync: see [Push](CLEANUP.md#push) |
 | `push` | any other push | log only |
 | any other event | | structured log only |
 
