@@ -18,7 +18,7 @@ Requires Argo CD 3.1 or later (OCI chart source).
 
 ## Preview URLs
 
-To give each preview its own URL, uncomment the `preview` block in `badil.yaml` and set `domain`, then create a wildcard DNS record for `*.<domain>` pointing at your ingress controller. Each service listed under `expose` gets the ingress host `<service>-<slug>.<domain>` (capped to a 63-character label, see ARCHITECTURE) and a link in the PR comment; its chart must enable ingress and honor `app.ingress.host` (or its `chart.hostParam`). This needs badil 0.10.0 or later: after changing the chart version (`targetRevision`) in `applicationset-previews.yaml`, re-apply it with `kubectl apply -f applicationset-previews.yaml`, as Argo CD does not manage the ApplicationSet itself.
+To give each preview its own URL, uncomment the `preview` block in `badil.yaml` and set `domain`, then create a wildcard DNS record for `*.<domain>` pointing at your ingress controller. Each service listed under `expose` gets the ingress host `<service>-<slug>.<domain>` (capped to a 63-character label, see [Length caps](../../docs/CONFIGURATION.md#length-caps)) and a link in the PR comment; its chart must enable ingress and honor `app.ingress.host` (or its `chart.hostParam`). This needs badil 0.10.0 or later: after changing the chart version (`targetRevision`) in `applicationset-previews.yaml`, re-apply it with `kubectl apply -f applicationset-previews.yaml`, as Argo CD does not manage the ApplicationSet itself.
 
 Preview Namespace labels and annotations go in `namespace` of `badil.yaml`. For per-preview limits on top of them, see the Kyverno example in [`../kyverno/`](../kyverno/README.md).
 

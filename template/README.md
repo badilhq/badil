@@ -12,7 +12,7 @@ A starting point for the gitops repo of [badil](https://github.com/badilhq/badil
 2. If Argo CD runs in a namespace other than `argocd`, or the `preview-apps` chart is hosted elsewhere than `oci://ghcr.io/badilhq/charts`, adapt both `argocd/` files as listed in [Adapt to your org](https://github.com/badilhq/badil/blob/{{VERSION}}/examples/argocd/README.md#adapt-to-your-org).
 3. List your services in `badil.yaml` (replace `my-service`).
 4. Let the badil GitHub App push straight to the default branch: no required pull request in its protection, or the App on the bypass list.
-5. If this repo or any service repo is private, register it in Argo CD first (Argo CD [Private Repositories](https://argo-cd.readthedocs.io/en/stable/user-guide/private-repositories/)). A dependency from a private OCI registry or Helm repository needs a credential too: see [Dependencies](https://github.com/badilhq/badil/blob/{{VERSION}}/docs/ARCHITECTURE.md#dependencies).
+5. If this repo or any service repo is private, register it in Argo CD first (Argo CD [Private Repositories](https://argo-cd.readthedocs.io/en/stable/user-guide/private-repositories/)). A dependency from a private OCI registry or Helm repository needs a credential too: see [Dependencies](https://github.com/badilhq/badil/blob/{{VERSION}}/docs/CONFIGURATION.md#dependencies).
 6. Apply both `argocd/` files:
 
    ```bash

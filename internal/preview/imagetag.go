@@ -41,7 +41,7 @@ func shortSHA(sha string, n int) string {
 // an entry pinned to commitSha, or for a branch-tracking entry when commitSha
 // is empty: its placeholder becomes commitSha or its first 7 or 8 characters
 // (all of it when shorter), or the Argo CD variable of the deployed revision,
-// as the image tag table of docs/ARCHITECTURE.md shows.
+// as the image tag table of docs/CONFIGURATION.md shows.
 func ExpandImageTag(format, commitSha string) string {
 	prefix, rest, _ := strings.Cut(format, "{")
 	placeholder, suffix, _ := strings.Cut(rest, "}")
