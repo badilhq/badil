@@ -30,6 +30,7 @@ CI does not run golangci-lint; run `make lint` locally.
 
 Releases are cut by [release-please](https://github.com/googleapis/release-please) from Conventional Commits.
 
+- `feat`, `fix`, `perf`, `revert` and `docs` commits open or update the release PR; `docs` commits are released so that docs changes reach badil.dev. `chore`, `style`, `refactor`, `test`, `build` and `ci` commits don't, unless they are breaking (`!`).
 - On `main` it keeps a `chore(main): release X.Y.Z` PR up to date. Merging it tags `vX.Y.Z`, creates the GitHub Release, and publishes `ghcr.io/badilhq/badil:X.Y.Z` (also `X.Y` and `latest`, for linux/amd64 and linux/arm64) and the `badil` chart.
 - Checks on the release PR don't start on their own. A maintainer re-runs them from the PR, checks that the diff only touches `CHANGELOG.md`, `.release-please-manifest.json` and `charts/badil/Chart.yaml`, then merges.
 
