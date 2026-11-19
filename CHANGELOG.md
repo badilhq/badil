@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.2](https://github.com/badilhq/badil/compare/v0.25.1...v0.25.2) (2026-11-19)
+
+
+### Documentation
+
+* add a quickstart page that points to badilhq/quickstart ([#101](https://github.com/badilhq/badil/issues/101)) ([6af75a1](https://github.com/badilhq/badil/commit/6af75a1b948ce26b0ab7911d63d46121c1f30b38))
+
 ## [0.25.1](https://github.com/badilhq/badil/compare/v0.25.0...v0.25.1) (2026-11-19)
 
 
