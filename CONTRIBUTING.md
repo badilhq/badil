@@ -52,7 +52,7 @@ Gitops repo template:
 - One-time setup, by a maintainer, before the first release that runs the job:
   1. Create `badilhq/gitops-template`, public, with default branch `main` and an initial commit on it, and enable "Template repository" in its settings.
   2. Create a GitHub App owned by `badilhq` (`badil-release`), with no webhook and the repository permission `Contents: Read and write` only, and install it on `badilhq/gitops-template` and `badilhq/badil.dev` only.
-  3. Store its Client ID as the `TEMPLATE_APP_CLIENT_ID` Actions secret of `badilhq/badil`, and a generated private key as `TEMPLATE_APP_PRIVATE_KEY`.
+  3. Store its Client ID as the `RELEASE_APP_CLIENT_ID` Actions secret of `badilhq/badil`, and a generated private key as `RELEASE_APP_PRIVATE_KEY`.
 
   Until then the `template` and `docs` jobs fail on each release; re-run them once set up.
 
