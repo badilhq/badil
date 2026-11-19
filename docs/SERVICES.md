@@ -148,7 +148,7 @@ The image tag parameter is the entry's `chart.imageTagParam`.
 
 A pinned service changes only when badil writes a new SHA. A branch-tracking service follows new commits on its branch: Argo CD resolves the variable to the commit it syncs.
 
-The image tag parameter is passed with `forceString: true`, so a digits-only short SHA stays a string ([CONTRACT](CONTRACT.md#renderer-obligations), obligation 4).
+The image tag parameter is passed with `forceString: true`, so a digits-only short SHA stays a string ([Preview contract](CONTRACT.md#renderer-obligations), obligation 4).
 
 In both modes the Application's `repoURL` is the entry's `repoURL`. The AppProject's `sourceRepos` are the distinct `repoURL`s of the file's entries.
 
@@ -215,7 +215,7 @@ The pinned entry then wins until its PR leaves the preview. badil leaves the dep
 
 ## Preview file writes
 
-badil writes `previews/<slug>/values.yaml` on every deploy, teardown and sweep. Its fields are in [CONTRACT](CONTRACT.md#v1beta1-file).
+badil writes `previews/<slug>/values.yaml` on every deploy, teardown and sweep. Its fields are in [Preview contract](CONTRACT.md#v1beta1-file).
 
 Each deploy write, and the cleanup sweep's sync ([step 4](CLEANUP.md#4-sync-with-badilyaml)), project the file on the catalog as it is then. The file holds, in order:
 

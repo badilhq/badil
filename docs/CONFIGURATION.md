@@ -13,7 +13,7 @@ previews/<slug>/values.yaml      # written by badil, read by preview-apps: apiVe
 
 `badil.yaml` is the only preview config. badil is its only reader, and writes everything a renderer needs into each preview file, chart settings and image tags included. `badil.yaml` lives at the repo root, at a fixed path.
 
-The renderer reads only the preview file (plus the ApplicationSet's `argocdNamespace`), so it is swappable on the preview file alone. [CONTRACT](CONTRACT.md) publishes `previews/<slug>/values.yaml` for any renderer: its schema, lifecycle, conformance fixtures and a renderer's obligations.
+The renderer reads only the preview file (plus the ApplicationSet's `argocdNamespace`), so it is swappable on the preview file alone. [Preview contract](CONTRACT.md) publishes `previews/<slug>/values.yaml` for any renderer: its schema, lifecycle, conformance fixtures and a renderer's obligations.
 
 ## `badil.yaml`
 
@@ -247,7 +247,7 @@ A quota on compute resources (`requests.cpu`, `requests.memory`, `limits.memory`
 
 ## Preview file
 
-badil writes `previews/<slug>/values.yaml`. [CONTRACT](CONTRACT.md#v1beta1-file) defines every field and the strict rules of v1beta1. When badil writes it is in [Preview file writes](SERVICES.md#preview-file-writes).
+badil writes `previews/<slug>/values.yaml`. [Preview contract](CONTRACT.md#v1beta1-file) defines every field and the strict rules of v1beta1. When badil writes it is in [Preview file writes](SERVICES.md#preview-file-writes).
 
 ```yaml
 # previews/feature-pricing/values.yaml: every field in CONTRACT.md
