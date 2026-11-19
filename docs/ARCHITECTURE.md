@@ -62,7 +62,7 @@ The [cleanup sweep](#cleanup-sweep) catches what events missed. Every step is de
 
 badil never talks to the cluster or to Argo CD. It reads one file, `badil.yaml`, and writes one file per preview. Argo CD does every deploy and deletion.
 
-`badil.yaml` is the only preview config, and badil is its only reader. badil writes everything a renderer needs into each preview file. The renderer reads only that file, so it can be swapped: [CONTRACT](CONTRACT.md) publishes the file for any renderer.
+`badil.yaml` is the only preview config, and badil is its only reader. badil writes everything a renderer needs into each preview file. The renderer reads only that file, so it can be swapped: [Preview contract](CONTRACT.md) publishes the file for any renderer.
 
 Keys: [Configuration reference](CONFIGURATION.md).
 
