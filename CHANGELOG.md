@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.3](https://github.com/badilhq/badil/compare/v0.25.2...v0.25.3) (2026-11-19)
+
+
+### Documentation
+
+* remove the quickstart page ([#103](https://github.com/badilhq/badil/issues/103)) ([25ce5e9](https://github.com/badilhq/badil/commit/25ce5e99adc779c277071df6aa73bfd99d4449b3))
+
 ## [0.25.2](https://github.com/badilhq/badil/compare/v0.25.1...v0.25.2) (2026-11-19)
 
 
