@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.1](https://github.com/badilhq/badil/compare/v0.25.0...v0.25.1) (2026-11-19)
+
+
+### Documentation
+
+* name the preview contract in its links ([#98](https://github.com/badilhq/badil/issues/98)) ([5634e44](https://github.com/badilhq/badil/commit/5634e44ffccec233f9a4823e486ee8e709ff9cf5))
+
 ## [0.25.0](https://github.com/badilhq/badil/compare/v0.24.0...v0.25.0) (2026-11-18)
 
 
