@@ -412,7 +412,7 @@ func TestInCluster_MemoryOnlyOutsideACluster(t *testing.T) {
 	logs := captureLogs(t)
 
 	s := status.InCluster(context.Background())
-	if s.Persisted() {
+	if status.Persisted(s) {
 		t.Fatal("Persisted = true outside a cluster")
 	}
 	if n := strings.Count(logs.String(), "status persistence disabled"); n != 1 {
@@ -443,7 +443,7 @@ func TestInCluster_NoNamespace(t *testing.T) {
 	t.Setenv("KUBERNETES_SERVICE_HOST", "")
 	t.Setenv("POD_NAMESPACE", "")
 	logs := captureLogs(t)
-	if status.InCluster(context.Background()).Persisted() {
+	if status.Persisted(status.InCluster(context.Background())) {
 		t.Fatal("Persisted = true")
 	}
 	if !strings.Contains(logs.String(), "status persistence disabled") {

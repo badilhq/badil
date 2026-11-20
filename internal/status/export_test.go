@@ -11,3 +11,8 @@ const FlushInterval = flushInterval
 func SetInterval(s *Store, d time.Duration) {
 	s.interval = d
 }
+
+// Persisted reports whether s keeps the status in ConfigMaps.
+func Persisted(s *Store) bool {
+	return s.kube != nil
+}
