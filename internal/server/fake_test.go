@@ -15,6 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/badilhq/badil/internal/forge"
+	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
 	"github.com/badilhq/badil/internal/store/storetest"
@@ -32,7 +33,10 @@ var testIdentity = store.CommitIdentity{ //nolint:gochecknoglobals // test fixtu
 // remote holding that badil.yaml, the files of previews and of synced (each
 // projected on the catalog, so that a sync leaves it alone, unless it is in
 // stale) and raw; the remote is made by open. Apply fails with applyErr when
-// set. When started is non-nil, FetchServiceCatalog sends "catalog" and Apply
+// set. A deploy Apply fails with previewErr or listErr, when set, as
+// lifecycle.DeployPR fails when its preview cap check cannot read the preview
+// or list the previews: a real tree read cannot be made to fail with a given
+// error. When started is non-nil, FetchServiceCatalog sends "catalog" and Apply
 // sends "apply" on entry; the test buffers the channel. A non-nil applyGate
 // blocks Apply until it is closed; applyPanic makes it panic.
 //
@@ -46,6 +50,8 @@ type fakeGitops struct {
 	badilYAML  string
 	catalogErr error
 	applyErr   error
+	previewErr error
+	listErr    error
 	fanOutErr  error
 	applyGate  chan struct{}
 	applyPanic bool
@@ -75,6 +81,10 @@ type fakeGitops struct {
 
 	remote *storetest.Remote
 	st     *store.GitHubStore
+
+	// writeResult is not read: Apply writes the remote. Tests written for
+	// the contents API store still set it.
+	writeResult *store.WriteResult
 
 	capturedInputs   preview.DeployInputs
 	capturedURLs     preview.URLConfig
@@ -181,6 +191,12 @@ func (f *fakeGitops) Apply(ctx context.Context, op store.Op) (store.Result, erro
 	}
 	if f.applyErr != nil {
 		return store.Result{}, f.applyErr
+	}
+	if op.Kind == store.OpDeploy && f.previewErr != nil {
+		return store.Result{}, &lifecycle.CapCheckError{Op: "read preview", Err: f.previewErr}
+	}
+	if op.Kind == store.OpDeploy && f.listErr != nil {
+		return store.Result{}, &lifecycle.CapCheckError{Op: "list previews", Err: f.listErr}
 	}
 	res, err := f.st.Apply(ctx, op)
 	if err != nil || res.NoOp {

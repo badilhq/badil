@@ -134,6 +134,11 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(ctx, w, http.StatusConflict, msg)
 		return
 	}
+	var checkErr *lifecycle.CapCheckError
+	if errors.As(err, &checkErr) {
+		writeUpstreamError(ctx, logger, w, checkErr.Op, checkErr.Err)
+		return
+	}
 	if err != nil {
 		writeUpstreamError(ctx, logger, w, "write preview", err)
 		return

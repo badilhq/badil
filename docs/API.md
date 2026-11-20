@@ -58,7 +58,7 @@ A manual deploy runs outside the reconcile queue and skips the one-PR-per-servic
 
 The deploy reads `previews/<slug>/values.yaml` on the head its commit is made on. When it does not exist, it lists the previews there.
 
-At the cap, it answers `409 {"error": "preview limit (<max>) reached"}`, writes nothing and logs `deploy failed` with `op` `preview limit`. A failed write is logged with `op` `write preview`.
+At the cap, it answers `409 {"error": "preview limit (<max>) reached"}`, writes nothing and logs `deploy failed` with `op` `preview limit`. Other read or list errors are answered like the write's, with `op` `read preview` or `list previews`. A failed write is logged with `op` `write preview`.
 
 The check is decided again on every push attempt, so a concurrent deploy that creates a preview is counted: see [Preview cap](EVENTS.md#preview-cap).
 

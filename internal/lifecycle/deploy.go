@@ -14,6 +14,18 @@ import (
 // preview would exceed preview.maxPreviews. Callers test it with errors.Is.
 var ErrPreviewLimit = errors.New("preview limit reached")
 
+// CapCheckError is the error of a read the preview cap check of DeployPR
+// makes on the tree it writes: Op is "read preview" when the preview could
+// not be read, "list previews" when the previews could not be listed.
+type CapCheckError struct {
+	Op  string
+	Err error
+}
+
+func (e *CapCheckError) Error() string { return e.Op + ": " + e.Err.Error() }
+
+func (e *CapCheckError) Unwrap() error { return e.Err }
+
 // DeployAPI is what DeployPR uses: the store, the forge, the Recorder and
 // the comment fan-out.
 type DeployAPI struct {
@@ -36,7 +48,8 @@ type DeployResult struct {
 // of the preview. The deploy always writes the service, refreshing its
 // updated-at; it is refused with ErrPreviewLimit when the preview does not
 // exist and catalog.MaxPreviews previews already do, a check made on the
-// tree the deploy writes. A deploy that changes nothing (the same inputs
+// tree the deploy writes, whose read errors are a *CapCheckError. A deploy
+// that changes nothing (the same inputs
 // within the same second) commits nothing: its result and comments carry the
 // remote head's commit. It returns the result, the fan-out error (possibly
 // joined, nil when every comment landed) and the operation's error; on an
@@ -54,11 +67,9 @@ func DeployPR(
 		Kind: store.OpDeploy,
 		Change: func(tree *store.Tree) (store.Summary, error) {
 			write, limited = nil, false
-			if _, getErr := tree.GetPreview(slug); errors.Is(getErr, store.ErrNotFound) {
-				var limitErr error
-				if limited, limitErr = limitReached(tree, catalog.MaxPreviews); limitErr != nil || limited {
-					return store.Summary{}, limitErr
-				}
+			var checkErr error
+			if limited, checkErr = overLimit(tree, catalog.MaxPreviews, slug); checkErr != nil || limited {
+				return store.Summary{}, checkErr
 			}
 			var deployErr error
 			write, deployErr = tree.Deploy(slug, catalog, inputs.ServiceName, inputs.CommitSha, inputs, false)
@@ -82,4 +93,25 @@ func DeployPR(
 		slug, write.Values, catalog.URLs, catalog.ArgoCDURL, write.Excluded, res.Subject, res.URL,
 	)
 	return result, api.FanOut(ctx, api.Forge, write.Values, summary), nil
+}
+
+// overLimit reports whether the preview slug does not exist in tree and
+// maxPreviews previews already do. It reads nothing when maxPreviews is 0 (no
+// cap). A read error is a *CapCheckError.
+func overLimit(tree *store.Tree, maxPreviews int, slug string) (bool, error) {
+	if maxPreviews <= 0 {
+		return false, nil
+	}
+	_, err := tree.GetPreview(slug)
+	if err == nil {
+		return false, nil
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return false, &CapCheckError{Op: "read preview", Err: err}
+	}
+	limited, err := limitReached(tree, maxPreviews)
+	if err != nil {
+		return false, &CapCheckError{Op: "list previews", Err: err}
+	}
+	return limited, nil
 }

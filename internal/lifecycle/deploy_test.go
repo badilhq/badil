@@ -2,6 +2,7 @@ package lifecycle_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -41,4 +42,38 @@ func TestDeployPR_NoOpStillComments(t *testing.T) {
 	}
 	f.assertOneCommit(t, "chore(preview): deploy front@fe7c4ed to feature-pricing",
 		"feature-pricing: pin front@fe7c4ed")
+}
+
+// TestDeployPR_CapCheckReadError deploys to a capped catalog whose preview
+// cannot be read: the deploy fails with a *CapCheckError of "read preview",
+// and pushes and comments nothing. A list error of the check cannot be made
+// on a git tree: go-git reads a missing or unreadable previews/ as absent.
+func TestDeployPR_CapCheckReadError(t *testing.T) {
+	captureLogs(t)
+	f := &reconcileFake{
+		Metrics:     metrics.New(),
+		maxPreviews: 2,
+		raw:         map[string]string{"previews/feature-pricing/values.yaml": "services: [\n"},
+	}
+	r := f.api(t)
+	api := lifecycle.DeployAPI{Store: r.Store, Forge: r.Forge, Recorder: r.Recorder, FanOut: r.FanOut}
+	catalog, err := f.FetchServiceCatalog(context.Background())
+	if err != nil {
+		t.Fatalf("catalog: %v", err)
+	}
+	inputs := preview.DeployInputs{
+		ServiceName: "front", CommitSha: fetchedSHA, HeadRef: "feature/pricing", PRAuthor: "octocat",
+		PRURL: front42, PRNumber: "42", Timestamp: "2026-11-20T10:00:00Z",
+	}
+	_, _, deployErr := lifecycle.DeployPR(context.Background(), api, catalog, "feature-pricing", inputs)
+
+	var checkErr *lifecycle.CapCheckError
+	if !errors.As(deployErr, &checkErr) || checkErr.Op != "read preview" ||
+		!strings.HasPrefix(checkErr.Err.Error(), "parse previews/feature-pricing/values.yaml") {
+		t.Fatalf("err = %v, want the read preview error of the cap check", deployErr)
+	}
+	f.assertNothingPushed(t)
+	if len(f.fanOuts) != 0 {
+		t.Errorf("fanOuts = %q, want none", f.fanOuts)
+	}
 }

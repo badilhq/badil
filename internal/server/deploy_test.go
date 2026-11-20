@@ -396,3 +396,53 @@ func TestDeploy_PushUnauthorized(t *testing.T) {
 		t.Error("a refused push must not comment")
 	}
 }
+
+// previewWriteResult is the write of backend-1 in a three-service preview.
+func previewWriteResult() *store.WriteResult {
+	return &store.WriteResult{
+		Values: preview.PreviewValues{Services: []preview.ServiceEntry{
+			{Name: "backend-1", Branch: "main", CommitSha: "abc1234567890"},
+			{Name: "backend-2", Branch: "main"},
+			{Name: "front", Branch: "main"},
+		}},
+	}
+}
+
+func TestDeploy_PreviewLimitReadErrors(t *testing.T) {
+	cases := []struct {
+		name   string
+		fg     *fakeGitops
+		status int
+		op     string
+	}{
+		{
+			name:   "read preview",
+			fg:     &fakeGitops{previewErr: errors.New("read boom")},
+			status: http.StatusInternalServerError,
+			op:     "read preview: read boom",
+		},
+		{
+			name:   "list previews",
+			fg:     &fakeGitops{listErr: errors.Join(store.ErrUnauthorized, errors.New("list boom"))},
+			status: http.StatusBadGateway,
+			op:     "list previews: ",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.fg.badilYAML = servicesWithCap
+			tc.fg.writeResult = previewWriteResult()
+			rec := postDeploy(t, newTestServer(t, tc.fg), previewBody(), "test-token")
+
+			if rec.Code != tc.status {
+				t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.status, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), tc.op) {
+				t.Errorf("body = %s, want it to contain %q", rec.Body.String(), tc.op)
+			}
+			if tc.fg.capturedSlug != "" || tc.fg.fanOutBodyCalled {
+				t.Error("a failed check must not write nor comment")
+			}
+		})
+	}
+}
