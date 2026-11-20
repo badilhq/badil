@@ -4,13 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
-	"sort"
 	"strings"
 
-	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"gopkg.in/yaml.v3"
 
 	"github.com/badilhq/badil/internal/preview"
 )
@@ -27,10 +25,6 @@ type Tree struct {
 	files map[string][]byte
 	// changes holds, per preview slug, the commit body lines' changes.
 	changes map[string][]string
-
-	catalog    *ServiceCatalog
-	catalogErr error
-	catalogSet bool
 }
 
 // newTree returns a Tree over root, the tree of the remote head, whose
@@ -47,13 +41,8 @@ func (t *Tree) staged() bool {
 // body returns the commit body: one line per change, "<slug>: <change>", by
 // slug, each slug's changes in the order they were made.
 func (t *Tree) body() []string {
-	slugs := make([]string, 0, len(t.changes))
-	for slug := range t.changes {
-		slugs = append(slugs, slug)
-	}
-	slices.Sort(slugs)
 	var lines []string
-	for _, slug := range slugs {
+	for _, slug := range slices.Sorted(maps.Keys(t.changes)) {
 		for _, change := range t.changes[slug] {
 			lines = append(lines, slug+": "+change)
 		}
@@ -74,51 +63,30 @@ func (t *Tree) read(path string) ([]byte, error) {
 		}
 		return content, nil
 	}
-	f, err := t.root.File(path)
-	if errors.Is(err, object.ErrFileNotFound) {
-		return nil, fmt.Errorf("%w: %s", ErrNotFound, path)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	content, err := f.Contents()
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	return []byte(content), nil
+	content, _, err := readTreeFile(t.root, path)
+	return content, err
 }
 
-// Catalog returns the service catalog of the tree's badil.yaml, parsed once.
+// Catalog returns the service catalog of the tree's badil.yaml.
 func (t *Tree) Catalog() (*ServiceCatalog, error) {
-	if !t.catalogSet {
-		t.catalogSet = true
-		raw, err := t.read(configFile)
-		if err == nil {
-			t.catalog, err = ParseCatalog(raw)
-		}
-		if err != nil {
-			t.catalog, t.catalogErr = nil, err
-		}
+	raw, err := t.read(configFile)
+	if err != nil {
+		return nil, err
 	}
-	return t.catalog, t.catalogErr
+	return ParseCatalog(raw)
 }
 
 // ListPreviews returns the sorted names of the directories under previews/,
 // with the operation's changes: a preview whose last file was deleted is
 // gone, one whose file was put is there.
 func (t *Tree) ListPreviews() ([]string, error) {
+	dirs, err := dirNames(t.root, previewsDir)
+	if err != nil {
+		return nil, err
+	}
 	names := map[string]bool{}
-	sub, err := t.root.Tree(previewsDir)
-	switch {
-	case errors.Is(err, object.ErrDirectoryNotFound):
-	case err != nil:
-		return nil, fmt.Errorf("read %s: %w", previewsDir, err)
-	default:
-		for _, e := range sub.Entries {
-			if e.Mode == filemode.Dir {
-				names[e.Name] = true
-			}
-		}
+	for _, name := range dirs {
+		names[name] = true
 	}
 	for path, content := range t.files {
 		slug, ok := previewSlug(path)
@@ -133,12 +101,7 @@ func (t *Tree) ListPreviews() ([]string, error) {
 			delete(names, slug)
 		}
 	}
-	out := make([]string, 0, len(names))
-	for name := range names {
-		out = append(out, name)
-	}
-	slices.Sort(out)
-	return out, nil
+	return slices.Sorted(maps.Keys(names)), nil
 }
 
 // dirHasOtherFiles reports whether the directory of the preview slug holds a
@@ -182,11 +145,7 @@ func (t *Tree) GetPreview(slug string) (*preview.PreviewValues, error) {
 	if err != nil {
 		return nil, err
 	}
-	var vals preview.PreviewValues
-	if err = yaml.Unmarshal(raw, &vals); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", previewPath(slug), err)
-	}
-	return &vals, nil
+	return parsePreview(slug, raw)
 }
 
 // putPreview puts vals at previews/<slug>/values.yaml.
@@ -268,20 +227,8 @@ func (t *Tree) Deploy(
 	if err = t.putPreview(slug, proj.Values); err != nil {
 		return nil, err
 	}
-	t.record(slug, "pin "+serviceName+"@"+ShortSHA(commitSha))
+	t.record(slug, "pin "+serviceName+"@"+preview.ShortSHA(commitSha))
 	return &WriteResult{Values: proj.Values, Excluded: proj.Excluded, Created: !exists}, nil
-}
-
-// shortSHALen is the length of a commit SHA in the commit body lines.
-const shortSHALen = 7
-
-// ShortSHA returns the first 7 characters of sha, the form of the commit
-// body lines.
-func ShortSHA(sha string) string {
-	if len(sha) > shortSHALen {
-		return sha[:shortSHALen]
-	}
-	return sha
 }
 
 // TeardownResult is the outcome of Tree.Teardown and Tree.UnpinServices.
@@ -411,14 +358,4 @@ func summaryChanged(a, b preview.PreviewValues) bool {
 	}) || !slices.EqualFunc(a.Dependencies, b.Dependencies, func(x, y preview.DependencyEntry) bool {
 		return x.Name == y.Name && x.Host == y.Host
 	})
-}
-
-// sortedKeys returns the keys of m, sorted.
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }

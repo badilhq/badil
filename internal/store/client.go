@@ -140,11 +140,20 @@ func (c *GitHubStore) GetPreview(ctx context.Context, slug string) (*preview.Pre
 	if err != nil {
 		return nil, "", err
 	}
-	var vals preview.PreviewValues
-	if err = yaml.Unmarshal(raw, &vals); err != nil {
-		return nil, "", fmt.Errorf("parse %s: %w", previewPath(slug), err)
+	vals, err := parsePreview(slug, raw)
+	if err != nil {
+		return nil, "", err
 	}
-	return &vals, sha, nil
+	return vals, sha, nil
+}
+
+// parsePreview parses raw, the content of previews/<slug>/values.yaml.
+func parsePreview(slug string, raw []byte) (*preview.PreviewValues, error) {
+	var vals preview.PreviewValues
+	if err := yaml.Unmarshal(raw, &vals); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", previewPath(slug), err)
+	}
+	return &vals, nil
 }
 
 // RepoURL returns the git URL of the GitHub repo owner/repo:

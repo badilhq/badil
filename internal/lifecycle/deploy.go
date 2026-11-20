@@ -74,7 +74,7 @@ func DeployPR(
 			var deployErr error
 			write, deployErr = tree.Deploy(slug, catalog, inputs.ServiceName, inputs.CommitSha, inputs, false)
 			subject := fmt.Sprintf("chore(preview): deploy %s@%s to %s",
-				inputs.ServiceName, store.ShortSHA(inputs.CommitSha), slug)
+				inputs.ServiceName, preview.ShortSHA(inputs.CommitSha), slug)
 			return store.Summary{Subject: subject}, deployErr
 		},
 	})
