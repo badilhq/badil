@@ -24,10 +24,19 @@ type waitAnswer struct {
 	err   error
 }
 
+// served is the read API serveWaits serves: the HTTP server, the badil
+// server, the gitops store and remote, and the base URL.
+type served struct {
+	httpSrv *http.Server
+	srv     *server.Server
+	st      *store.GitHubStore
+	remote  *storetest.Remote
+	base    string
+}
+
 // serveWaits serves, as serve wires them, the read API over a gitops repo
-// holding feature-x, pinned by acme/backend-1#42 with no status yet, and
-// returns the HTTP server, the store and the server's base URL.
-func serveWaits(t *testing.T) (*http.Server, *store.GitHubStore, string) {
+// holding feature-x, pinned by acme/backend-1#42 with no status yet.
+func serveWaits(t *testing.T) served {
 	t.Helper()
 	previews := map[string]*preview.PreviewValues{"feature-x": {Services: []preview.ServiceEntry{{
 		Name: "backend-1", CommitSha: "abc1234",
@@ -35,7 +44,7 @@ func serveWaits(t *testing.T) (*http.Server, *store.GitHubStore, string) {
 	}}}}
 	previewStatus := status.NewMemory()
 	wake := server.NewWake()
-	_, st := storetest.Gitops(t, "services:\n  backend-1:\n    repo: https://github.com/acme/backend-1.git\n",
+	remote, st := storetest.Gitops(t, "services:\n  backend-1:\n    repo: https://github.com/acme/backend-1.git\n",
 		previews, nil, nil, statusHooks(previewStatus, wake)...)
 	srv := server.NewServer(&loopFake{}, st, "",
 		server.WithReadToken(serveReadToken), server.WithStatus("", previewStatus), server.WithWake(wake))
@@ -46,7 +55,7 @@ func serveWaits(t *testing.T) (*http.Server, *store.GitHubStore, string) {
 	httpSrv := newHTTPServer(ln.Addr().String(), srv)
 	go func() { _ = httpSrv.Serve(ln) }()
 	t.Cleanup(func() { _ = httpSrv.Close() })
-	return httpSrv, st, "http://" + ln.Addr().String()
+	return served{httpSrv: httpSrv, srv: srv, st: st, remote: remote, base: "http://" + ln.Addr().String()}
 }
 
 // startWaitRequest sends GET path to base with the read token in the
@@ -93,17 +102,18 @@ func assertWaiting(t *testing.T, ch <-chan waitAnswer) {
 }
 
 // TestServe_ShutdownEndsWaits checks that a wait blocked in progressing
-// answers its state as soon as serve's shutdown starts, and that the
-// shutdown returns without hitting its deadline.
+// answers its state as soon as serve's shutdown starts, that the shutdown
+// returns without hitting its deadline, and that ending the waits again
+// does not panic.
 func TestServe_ShutdownEndsWaits(t *testing.T) {
-	httpSrv, _, base := serveWaits(t)
-	ch := startWaitRequest(base, "/v1/previews/feature-x/wait")
+	sv := serveWaits(t)
+	ch := startWaitRequest(sv.base, "/v1/previews/feature-x/wait")
 	assertWaiting(t, ch)
 
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	start := time.Now()
-	if err := shutdownServers(ctx, httpSrv); err != nil {
+	if err := shutdownServers(ctx, sv.httpSrv); err != nil {
 		t.Fatalf("shutdownServers: %v", err)
 	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
@@ -112,16 +122,17 @@ func TestServe_ShutdownEndsWaits(t *testing.T) {
 	if a := awaitAnswer(t, ch); a.err != nil || a.code != http.StatusOK || a.state != "progressing" {
 		t.Errorf("wait answered %+v, want 200 progressing", a)
 	}
+	sv.srv.EndWaits()
 }
 
 // TestServe_AppliedWakesWaits checks that serve's WithApplied callback wakes
 // the waits: an Apply deleting the preview ends its wait with 404.
 func TestServe_AppliedWakesWaits(t *testing.T) {
-	_, st, base := serveWaits(t)
-	ch := startWaitRequest(base, "/v1/previews/feature-x/wait")
+	sv := serveWaits(t)
+	ch := startWaitRequest(sv.base, "/v1/previews/feature-x/wait")
 	assertWaiting(t, ch)
 
-	if _, err := st.Apply(
+	if _, err := sv.st.Apply(
 		context.Background(),
 		store.Op{Kind: store.OpSweep, Change: func(tree *store.Tree) (store.Summary, error) {
 			tree.DeletePreview("feature-x")
@@ -129,6 +140,24 @@ func TestServe_AppliedWakesWaits(t *testing.T) {
 		}},
 	); err != nil {
 		t.Fatalf("Apply: %v", err)
+	}
+	if a := awaitAnswer(t, ch); a.code != http.StatusNotFound {
+		t.Errorf("wait answered %+v, want 404", a)
+	}
+}
+
+// TestServe_HeadMovingFetchWakesWaits checks that serve's WithHeadMoved
+// callback wakes the waits: a fetch moving the head to a commit that deletes
+// the preview ends its wait with 404.
+func TestServe_HeadMovingFetchWakesWaits(t *testing.T) {
+	sv := serveWaits(t)
+	ch := startWaitRequest(sv.base, "/v1/previews/feature-x/wait")
+	assertWaiting(t, ch)
+
+	sv.remote.Set("previews/feature-x/values.yaml", "")
+	sv.st.Invalidate()
+	if _, err := sv.st.ListPreviewFiles(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 	if a := awaitAnswer(t, ch); a.code != http.StatusNotFound {
 		t.Errorf("wait answered %+v, want 404", a)

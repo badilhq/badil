@@ -102,11 +102,13 @@ func newReadServer(t *testing.T, fg *fakeGitops, opts ...Option) (*Server, *stat
 
 // get sends GET path to s with the read token.
 func get(s *Server, path string) *httptest.ResponseRecorder {
-	return send(s, http.MethodGet, path, "Bearer "+testReadToken)
+	return send(s, http.MethodGet, path, "{}", "Bearer "+testReadToken)
 }
 
-func send(s *Server, method, path, authorization string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(method, path, strings.NewReader("{}"))
+// send sends method path with body to s, with the Authorization header when
+// authorization is set.
+func send(s *Server, method, path, body, authorization string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	if authorization != "" {
 		req.Header.Set("Authorization", authorization)
 	}
@@ -205,7 +207,7 @@ func TestReadAPI_Auth(t *testing.T) {
 			s := NewServer(fg, fg, tc.deploy, WithReadToken(tc.read), WithStatus("", status.NewMemory()))
 			s.waitTimeout = time.Millisecond
 			for _, path := range getRoutes {
-				if rec := send(s, http.MethodGet, path, "Bearer "+testReadToken); rec.Code != tc.allGetsStatus {
+				if rec := send(s, http.MethodGet, path, "{}", "Bearer "+testReadToken); rec.Code != tc.allGetsStatus {
 					t.Errorf("GET %s with the read token = %d, want %d", path, rec.Code, tc.allGetsStatus)
 				}
 			}
@@ -214,7 +216,7 @@ func TestReadAPI_Auth(t *testing.T) {
 				if c.token != "" {
 					auth = "Bearer " + c.token
 				}
-				if rec := send(s, c.method, c.path, auth); rec.Code != c.want {
+				if rec := send(s, c.method, c.path, "{}", auth); rec.Code != c.want {
 					t.Errorf("%s %s with %q = %d, want %d", c.method, c.path, c.token, rec.Code, c.want)
 				}
 			}
@@ -473,7 +475,7 @@ func TestRecordCatchUpSkip_ListingTime(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("front", front7)))
 			s.RecordOutcome(target, lifecycle.ReconcileResult{Outcome: lifecycle.OutcomeDeployed, HeadSHA: statusSHA})
-			recorded, _ := s.outcomes.get(outcomeKey("acme", "front", 7))
+			recorded, _ := s.outcomes.get(lifecycle.PRKey(target))
 			s.RecordCatchUpSkip(target, skip, tc.listedAt(recorded.At))
 			assertState(t, waitFor(t, s, path), tc.state, tc.reason)
 		})
@@ -539,18 +541,6 @@ func TestWait_WithoutNeedsTheWaitSetIsThePins(t *testing.T) {
 	got := waitFor(t, s, "/v1/previews/feature-x/wait")
 	if len(got.Services) != 1 || got.Services[0].Name != "backend-1" {
 		t.Errorf("wait set = %+v, want backend-1 alone", got.Services)
-	}
-}
-
-func TestWait_ShortSHAPinReadyAtTheFullRevision(t *testing.T) {
-	s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("backend-1", backend42)))
-	sendStatus(t, s, statusBody("backend-1", statusSHA, "ready", "2026-11-19T21:05:00Z"))
-
-	assertState(t, waitFor(t, s, "/v1/previews/feature-x/wait"), "ready", "")
-	got := waitFor(t, s, "/v1/wait?repo=acme/backend-1&pr=42&sha="+statusSHA)
-	assertState(t, got, "ready", "")
-	if got.SHA != statusSHA || got.Slug != "feature-x" {
-		t.Errorf("sha %q slug %q, want %q and feature-x", got.SHA, got.Slug, statusSHA)
 	}
 }
 

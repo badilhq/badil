@@ -106,7 +106,7 @@ func Sweep(ctx context.Context, api SweepAPI, now time.Time, ttl time.Duration) 
 }
 
 // prStates reads the state of each distinct PR pinned in the previews slugs,
-// keyed by prKey. A preview that can't be read is skipped: the sweep counts
+// keyed by PRKey. A preview that can't be read is skipped: the sweep counts
 // it. A PR whose state can't be read is logged and left out.
 func prStates(ctx context.Context, api SweepAPI, slugs []string) map[string]*forge.PullRequest {
 	states := map[string]*forge.PullRequest{}
@@ -117,7 +117,7 @@ func prStates(ctx context.Context, api SweepAPI, slugs []string) map[string]*for
 			continue
 		}
 		for _, t := range pinnedPRs(slug, *vals) {
-			key := prKey(t)
+			key := PRKey(t)
 			if tried[key] {
 				continue
 			}
@@ -138,8 +138,9 @@ func prStates(ctx context.Context, api SweepAPI, slugs []string) map[string]*for
 	return states
 }
 
-// prKey identifies the PR of t: its lowercase owner/repo and number.
-func prKey(t Target) string {
+// PRKey identifies the PR of t: its owner/repo, lowercased as GitHub
+// compares them case-insensitively, and number.
+func PRKey(t Target) string {
 	return fmt.Sprintf("%s/%s#%d", strings.ToLower(t.Owner), strings.ToLower(t.Repo), t.Number)
 }
 
@@ -221,7 +222,7 @@ func (p *sweepPlan) sweepPreview(tree *store.Tree, slug string, catalog *store.S
 		label = catalog.Label
 	}
 	for _, t := range pinnedPRs(slug, *vals) {
-		pr, ok := p.states[prKey(t)]
+		pr, ok := p.states[PRKey(t)]
 		if !ok {
 			continue
 		}
@@ -430,10 +431,10 @@ func pinnedPRs(slug string, vals preview.PreviewValues) []Target {
 			continue
 		}
 		t := Target{Slug: slug, Owner: owner, Repo: repo, FullName: owner + "/" + repo, Number: number}
-		if seen[prKey(t)] {
+		if seen[PRKey(t)] {
 			continue
 		}
-		seen[prKey(t)] = true
+		seen[PRKey(t)] = true
 		targets = append(targets, t)
 	}
 	return targets
