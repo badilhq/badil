@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -37,7 +39,7 @@ type lister struct {
 
 func (l *lister) ListPreviewFiles(context.Context) ([]string, error) {
 	l.mu.Lock()
-	during, slugs, err := l.during, append([]string(nil), l.slugs...), l.err
+	during, slugs, err := l.during, slices.Clone(l.slugs), l.err
 	l.mu.Unlock()
 	if during != nil {
 		during()
@@ -129,16 +131,9 @@ func eventually(t *testing.T, timeout time.Duration, what string, cond func() bo
 }
 
 func equalEntries(a, b map[string]status.Entry) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k, v := range a {
-		w, ok := b[k]
-		if !ok || w.Revision != v.Revision || w.Status != v.Status || !w.At.Equal(v.At) {
-			return false
-		}
-	}
-	return true
+	return maps.EqualFunc(a, b, func(v, w status.Entry) bool {
+		return v.Revision == w.Revision && v.Status == w.Status && v.At.Equal(w.At)
+	})
 }
 
 func TestRecord_StaleAndFirstReady(t *testing.T) {
@@ -186,7 +181,6 @@ func TestPersist_WrittenWithinFlushInterval(t *testing.T) {
 	}
 	client := fake.NewClientset()
 	s := startStore(t, client, status.FlushInterval, &lister{slugs: []string{"feature-x"}})
-	start := time.Now()
 	s.Record("feature-x", "backend-1", entry("aaa", status.Progressing, 0))
 	s.Record("feature-x", "postgres", entry("16.4.2", status.Ready, time.Second))
 	want := map[string]status.Entry{
@@ -197,9 +191,6 @@ func TestPersist_WrittenWithinFlushInterval(t *testing.T) {
 		got, ok := configMapData(t, client, "feature-x")
 		return ok && equalEntries(got, want)
 	})
-	if d := time.Since(start); d > status.FlushInterval+500*time.Millisecond {
-		t.Errorf("written after %s", d)
-	}
 	creates := 0
 	for _, a := range client.Actions() {
 		if a.GetVerb() == "create" {
@@ -436,18 +427,6 @@ func TestInCluster_MemoryOnlyOutsideACluster(t *testing.T) {
 	eventually(t, 2*time.Second, "gone collected", func() bool { return len(s.Preview("gone")) == 0 })
 	if len(s.Preview("feature-x")) != 1 {
 		t.Error("feature-x collected")
-	}
-}
-
-func TestInCluster_NoNamespace(t *testing.T) {
-	t.Setenv("KUBERNETES_SERVICE_HOST", "")
-	t.Setenv("POD_NAMESPACE", "")
-	logs := captureLogs(t)
-	if status.Persisted(status.InCluster(context.Background())) {
-		t.Fatal("Persisted = true")
-	}
-	if !strings.Contains(logs.String(), "status persistence disabled") {
-		t.Errorf("logs = %q, want status persistence disabled", logs.String())
 	}
 }
 

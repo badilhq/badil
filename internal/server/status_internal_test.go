@@ -11,8 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus/testutil"
-
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/status"
@@ -99,24 +97,6 @@ func sendStatus(t *testing.T, srv *Server, body string) {
 	}
 }
 
-// assertStatusEvents fails t unless badil_status_events_total is exactly
-// samples, one `{result="...",status="..."} n` line each.
-func assertStatusEvents(t *testing.T, m *metrics.Metrics, samples ...string) {
-	t.Helper()
-	var expected strings.Builder
-	if len(samples) > 0 {
-		expected.WriteString("# HELP badil_status_events_total Renderer status events, by reported status and by " +
-			"whether they were recorded, ignored or failed.\n# TYPE badil_status_events_total counter\n")
-	}
-	for _, s := range samples {
-		expected.WriteString("badil_status_events_total" + s + "\n")
-	}
-	if err := testutil.GatherAndCompare(m.Gatherer(), strings.NewReader(expected.String()),
-		"badil_status_events_total"); err != nil {
-		t.Error(err)
-	}
-}
-
 // spinUpCount returns the samples of badil_preview_spinup_seconds for
 // backend-1, and their sum.
 func spinUpCount(t *testing.T, m *metrics.Metrics) (uint64, float64) {
@@ -186,7 +166,7 @@ func TestStatusEvent_Unauthorized(t *testing.T) {
 			if rec.Code != http.StatusUnauthorized {
 				t.Errorf("got %d %q, want 401", rec.Code, rec.Body.String())
 			}
-			assertStatusEvents(t, m)
+			assertCounter(t, m, "badil_status_events_total")
 			if len(st.Preview("feature-x")) != 0 {
 				t.Error("an unauthorized event was recorded")
 			}
@@ -219,7 +199,7 @@ func TestStatusEvent_InvalidPayload(t *testing.T) {
 			if rec.Code != http.StatusBadRequest || !strings.HasPrefix(rec.Body.String(), "invalid payload") {
 				t.Errorf("got %d %q, want 400 invalid payload", rec.Code, rec.Body.String())
 			}
-			assertStatusEvents(t, m)
+			assertCounter(t, m, "badil_status_events_total")
 			if len(st.Preview("feature-x")) != 0 {
 				t.Error("an invalid event was recorded")
 			}
@@ -242,7 +222,8 @@ func TestStatusEvent_Recorded(t *testing.T) {
 	if e := got["postgres"]; e.Revision != "16.4.2,0123456789abcdef" || e.Status != "degraded" {
 		t.Errorf("postgres = %+v", e)
 	}
-	assertStatusEvents(t, m, `{result="recorded",status="degraded"} 1`, `{result="recorded",status="progressing"} 1`)
+	assertCounter(t, m, "badil_status_events_total",
+		`{result="recorded",status="degraded"} 1`, `{result="recorded",status="progressing"} 1`)
 	_, attrs := lastStatusLog(t, capture)
 	want := map[string]string{
 		"preview": "feature-x", "service": "postgres", "revision": "16.4.2,0123456789abcdef",
@@ -284,7 +265,7 @@ func TestStatusEvent_Ignored(t *testing.T) {
 	if len(st.Preview("no-such-preview")) != 0 {
 		t.Error("unknown preview recorded")
 	}
-	assertStatusEvents(t, m,
+	assertCounter(t, m, "badil_status_events_total",
 		`{result="ignored",status="degraded"} 1`,
 		`{result="ignored",status="ready"} 2`,
 		`{result="recorded",status="ready"} 1`,
@@ -304,7 +285,7 @@ func TestStatusEvent_PreviewReadFails(t *testing.T) {
 	if len(st.Preview("feature-x")) != 0 {
 		t.Error("recorded despite the failed read")
 	}
-	assertStatusEvents(t, m, `{result="error",status="ready"} 1`)
+	assertCounter(t, m, "badil_status_events_total", `{result="error",status="ready"} 1`)
 	if n, _ := spinUpCount(t, m); n != 0 {
 		t.Errorf("spin-up observed %d times, want 0", n)
 	}
@@ -464,7 +445,7 @@ func TestStatusEvent_PreviewDeletedWhileRecording(t *testing.T) {
 			if attrs["result"] != "ignored" || attrs["reason"] != "unknown_preview" {
 				t.Errorf("log result, reason = %q, %q, want ignored, unknown_preview", attrs["result"], attrs["reason"])
 			}
-			assertStatusEvents(t, m, `{result="ignored",status="ready"} 1`)
+			assertCounter(t, m, "badil_status_events_total", `{result="ignored",status="ready"} 1`)
 			if n, _ := spinUpCount(t, m); n != 0 {
 				t.Errorf("spin-up observed %d times, want 0", n)
 			}
@@ -505,7 +486,7 @@ func TestStatusEvent_RereadFails(t *testing.T) {
 	if attrs["result"] != "recorded" {
 		t.Errorf("log result = %q, want recorded", attrs["result"])
 	}
-	assertStatusEvents(t, m, `{result="recorded",status="progressing"} 1`)
+	assertCounter(t, m, "badil_status_events_total", `{result="recorded",status="progressing"} 1`)
 	warned := false
 	for _, r := range capture.Records() {
 		if r.Message == "status event preview re-read failed" && r.Level == slog.LevelWarn {
