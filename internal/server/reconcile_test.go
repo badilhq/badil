@@ -26,7 +26,7 @@ const quiet = 100 * time.Millisecond
 // labelEvent is prEvent with the given added or removed label, payload labels
 // and a payload head SHA that differs from the fetched one.
 func labelEvent(action, label string, labels ...string) forge.Event {
-	e := prEvent(action, false)
+	e := prEvent(action)
 	e.PullRequest.Label = label
 	e.PullRequest.Labels = append(e.PullRequest.Labels, labels...)
 	e.PullRequest.HeadSHA = payloadSHA
@@ -83,7 +83,7 @@ func drain(started chan string) []string {
 func TestReconcile_ClosedButReopenedAndLabeledDeploys(t *testing.T) {
 	fg := reconcileFake()
 	s, _ := newTeardownServer(t, fg)
-	deliver(t, s, prEvent("closed", false))
+	deliver(t, s, prEvent("closed"))
 
 	if fg.prCalls != 1 {
 		t.Errorf("GetPullRequest calls = %d, want 1", fg.prCalls)
@@ -115,7 +115,7 @@ func TestReconcile_ClosedFallsBackToPayloadTeardown(t *testing.T) {
 				Removed: []string{"backend-1"}, Deleted: true, CommitURL: teardownCommitURL, CommitMessage: msg,
 			}
 			s, capture := newTeardownServer(t, fg)
-			deliver(t, s, prEvent("closed", true))
+			deliver(t, s, prEvent("closed"))
 
 			if fg.prCalls != tc.wantPRCalls {
 				t.Errorf("GetPullRequest calls = %d, want %d", fg.prCalls, tc.wantPRCalls)
@@ -329,8 +329,8 @@ func waitStarted(t *testing.T, started chan string, want string) {
 func TestJobs_NeverOverlap(t *testing.T) {
 	fg := &fakeGitops{teardownGate: make(chan struct{}), pr: closedPR(), started: make(chan string, 4)}
 	s, _ := newTeardownServer(t, fg)
-	s.handlePullRequest(context.Background(), prEvent("closed", true))
-	s.handlePullRequest(context.Background(), prEvent("closed", true))
+	s.handlePullRequest(context.Background(), prEvent("closed"))
+	s.handlePullRequest(context.Background(), prEvent("closed"))
 
 	waitStarted(t, fg.started, "catalog")
 	waitStarted(t, fg.started, "teardown")

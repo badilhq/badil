@@ -72,9 +72,6 @@ func (c *GitHubStore) observe(op string, start time.Time, err error) {
 // classifyHTTPError translates a go-github response into our sentinel errors
 // for status codes the caller cares about. Other errors pass through unchanged.
 func classifyHTTPError(resp *gh.Response, err error) error {
-	if err == nil {
-		return nil
-	}
 	if resp == nil {
 		return err
 	}

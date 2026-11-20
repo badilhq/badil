@@ -14,12 +14,12 @@ import (
 	ghapp "github.com/badilhq/badil/internal/github"
 )
 
-// PRCommentMarker is the HTML comment used as a sentinel for find-or-create
+// prCommentMarker is the HTML comment used as a sentinel for find-or-create
 // semantics on PR comments.
-const PRCommentMarker = "<!-- badil:preview -->"
+const prCommentMarker = "<!-- badil:preview -->"
 
-// filesPerPage is the page size of ListChangedFiles, GitHub's maximum.
-const filesPerPage = 100
+// perPage is the page size of the list calls, GitHub's maximum.
+const perPage = 100
 
 // Forge is the GitHub forge: pull requests and comments through client, and
 // webhook deliveries signed with app's secret from the installation
@@ -42,9 +42,6 @@ func New(client *gh.Client, app *ghapp.App, installationID int64) *Forge {
 // errors for status codes the caller cares about. Other errors pass through
 // unchanged.
 func classifyHTTPError(resp *gh.Response, err error) error {
-	if err == nil {
-		return nil
-	}
 	if resp == nil {
 		return err
 	}
@@ -64,17 +61,13 @@ func (f *Forge) GetPullRequest(ctx context.Context, owner, repo string, number i
 	if err != nil {
 		return nil, classifyHTTPError(resp, err)
 	}
-	labels := make([]string, 0, len(pr.Labels))
-	for _, l := range pr.Labels {
-		labels = append(labels, l.GetName())
-	}
 	return &forge.PullRequest{
 		Open:         pr.GetState() == "open",
 		HeadRef:      pr.GetHead().GetRef(),
 		HeadSHA:      pr.GetHead().GetSHA(),
 		Author:       pr.GetUser().GetLogin(),
 		URL:          pr.GetHTMLURL(),
-		Labels:       labels,
+		Labels:       labelNames(pr.Labels),
 		FullName:     pr.GetBase().GetRepo().GetFullName(),
 		HeadFullName: pr.GetHead().GetRepo().GetFullName(),
 		ChangedFiles: pr.GetChangedFiles(),
@@ -85,7 +78,7 @@ func (f *Forge) GetPullRequest(ctx context.Context, owner, repo string, number i
 // page (100 files each). GitHub lists at most forge.MaxListedFiles. A failure
 // on any page is returned as an error.
 func (f *Forge) ListChangedFiles(ctx context.Context, owner, repo string, number int) ([]forge.ChangedFile, error) {
-	opts := &gh.ListOptions{PerPage: filesPerPage}
+	opts := &gh.ListOptions{PerPage: perPage}
 	var files []forge.ChangedFile
 	for {
 		page, resp, err := f.gh.PullRequests.ListFiles(ctx, owner, repo, number, opts)
@@ -106,23 +99,18 @@ func (f *Forge) ListChangedFiles(ctx context.Context, owner, repo string, number
 }
 
 // UpsertComment posts body as badil's comment on owner/repo#number, prefixed
-// with PRCommentMarker: the existing marked comment is updated, or a new one
-// is created.
+// with prCommentMarker: the existing marked comment, searched across every
+// page, is updated, or a new one is created.
 func (f *Forge) UpsertComment(ctx context.Context, owner, repo string, number int, body string) error {
-	return f.upsertComment(ctx, owner, repo, number, PRCommentMarker+"\n"+body)
-}
-
-// upsertComment finds an existing comment by marker and updates it, or
-// creates a new one if none is found. Paginates through all comments.
-func (f *Forge) upsertComment(ctx context.Context, owner, repo string, number int, body string) error {
-	opts := &gh.IssueListCommentsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
+	body = prCommentMarker + "\n" + body
+	opts := &gh.IssueListCommentsOptions{ListOptions: gh.ListOptions{PerPage: perPage}}
 	for {
 		comments, resp, err := f.gh.Issues.ListComments(ctx, owner, repo, number, opts)
 		if err != nil {
 			return classifyHTTPError(resp, err)
 		}
 		for _, comment := range comments {
-			if comment.Body == nil || !strings.Contains(*comment.Body, PRCommentMarker) {
+			if comment.Body == nil || !strings.Contains(*comment.Body, prCommentMarker) {
 				continue
 			}
 			_, editResp, editErr := f.gh.Issues.EditComment(
@@ -153,4 +141,13 @@ func (f *Forge) upsertComment(ctx context.Context, owner, repo string, number in
 		return classifyHTTPError(createResp, createErr)
 	}
 	return nil
+}
+
+// labelNames returns the names of labels.
+func labelNames(labels []*gh.Label) []string {
+	names := make([]string, 0, len(labels))
+	for _, l := range labels {
+		names = append(names, l.GetName())
+	}
+	return names
 }

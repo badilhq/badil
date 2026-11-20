@@ -2,6 +2,7 @@ package github_test
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -130,9 +131,12 @@ func TestFanOutPRComments_UpdateAndCreate(t *testing.T) {
 			_, _ = io.WriteString(w, `{"id":999}`)
 		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/issues/7/comments"):
 			sawCreate.Store(true)
-			body, _ := io.ReadAll(r.Body)
-			if !strings.Contains(string(body), "<!-- badil:preview -->") {
-				t.Errorf("POST body missing marker: %s", body)
+			var req struct {
+				Body string `json:"body"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			if want := "<!-- badil:preview -->\n## body"; req.Body != want {
+				t.Errorf("POST body = %q, want %q", req.Body, want)
 			}
 			w.WriteHeader(http.StatusCreated)
 			_, _ = io.WriteString(w, `{"id":222}`)

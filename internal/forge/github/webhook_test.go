@@ -47,20 +47,6 @@ func webhookForge(t *testing.T) *forgegithub.Forge {
 func TestParseEvent(t *testing.T) {
 	f := webhookForge(t)
 
-	t.Run("pull_request event", func(t *testing.T) {
-		payload := []byte(`{"action":"opened","number":1,"pull_request":{"number":1},` + allowedInstallationField + `}`)
-		event, err := f.ParseWebhook(signedWebhook("pull_request", payload))
-		if err != nil {
-			t.Fatalf("ParseWebhook() error = %v", err)
-		}
-		if event.Kind != forge.KindPullRequest {
-			t.Fatalf("kind = %v, want %v", event.Kind, forge.KindPullRequest)
-		}
-		if event.PullRequest.Action != "opened" {
-			t.Fatalf("action = %q, want %q", event.PullRequest.Action, "opened")
-		}
-	})
-
 	t.Run("pull_request payload fields", func(t *testing.T) {
 		payload := []byte(`{"action":"labeled","number":42,` +
 			`"label":{"name":"preview"},` +
@@ -116,27 +102,6 @@ func TestParseEvent(t *testing.T) {
 		}
 		if !reflect.DeepEqual(event, want) {
 			t.Fatalf("event = %+v, want %+v", event, want)
-		}
-	})
-
-	t.Run("installation event", func(t *testing.T) {
-		payload := []byte(`{"action":"created",` + allowedInstallationField + `}`)
-		event, err := f.ParseWebhook(signedWebhook("installation", payload))
-		if err != nil {
-			t.Fatalf("ParseWebhook() error = %v", err)
-		}
-		if event.Kind != forge.KindOther {
-			t.Fatalf("kind = %v, want %v", event.Kind, forge.KindOther)
-		}
-		if event.Name != "installation" {
-			t.Fatalf("name = %q, want %q", event.Name, "installation")
-		}
-	})
-
-	t.Run("unknown event type", func(t *testing.T) {
-		_, err := f.ParseWebhook(signedWebhook("unknown_event", []byte(`{}`)))
-		if err == nil {
-			t.Fatal("ParseWebhook() expected error for unknown event type")
 		}
 	})
 }

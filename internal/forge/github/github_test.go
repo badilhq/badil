@@ -2,7 +2,6 @@ package github_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -174,7 +173,7 @@ func TestListPullRequestFiles(t *testing.T) {
 	)
 	got, err := newForge(t, srv).ListChangedFiles(context.Background(), "acme", "platform", 42)
 	if err != nil {
-		t.Fatalf("ListPullRequestFiles: %v", err)
+		t.Fatalf("ListChangedFiles: %v", err)
 	}
 	want := []forge.ChangedFile{
 		{Filename: "web/src/app.tsx"},
@@ -182,7 +181,7 @@ func TestListPullRequestFiles(t *testing.T) {
 		{Filename: "docs/README.md"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("ListPullRequestFiles = %+v, want %+v", got, want)
+		t.Errorf("ListChangedFiles = %+v, want %+v", got, want)
 	}
 
 	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
@@ -207,37 +206,9 @@ func TestListPullRequestFiles_FailingLaterPage(t *testing.T) {
 	srv := filesPages(t, `[{"filename":"web/src/app.tsx"}]`, "")
 	got, err := newForge(t, srv).ListChangedFiles(context.Background(), "acme", "platform", 42)
 	if err == nil {
-		t.Fatalf("ListPullRequestFiles = %+v, nil; want an error", got)
+		t.Fatalf("ListChangedFiles = %+v, nil; want an error", got)
 	}
 	if got != nil {
 		t.Errorf("files = %+v, want nil", got)
-	}
-}
-
-func TestUpsertPRComment_CreatesWithMarker(t *testing.T) {
-	var body string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/backend-1/issues/42/comments":
-			_, _ = io.WriteString(w, `[]`)
-		case r.Method == http.MethodPost && r.URL.Path == "/repos/acme/backend-1/issues/42/comments":
-			var req struct {
-				Body string `json:"body"`
-			}
-			_ = json.NewDecoder(r.Body).Decode(&req)
-			body = req.Body
-			w.WriteHeader(http.StatusCreated)
-			_, _ = io.WriteString(w, `{"id":1}`)
-		default:
-			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
-		}
-	}))
-	defer srv.Close()
-
-	if err := newForge(t, srv).UpsertComment(context.Background(), "acme", "backend-1", 42, "## gone"); err != nil {
-		t.Fatalf("UpsertPRComment: %v", err)
-	}
-	if want := forgegithub.PRCommentMarker + "\n## gone"; body != want {
-		t.Errorf("comment body = %q, want %q", body, want)
 	}
 }

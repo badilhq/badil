@@ -30,10 +30,8 @@ func newTeardownServer(t *testing.T, fg *fakeGitops, opts ...Option) (*Server, *
 }
 
 // prEvent builds a pull_request event for acme/backend-1#42 on
-// feature/add-pricing. Whether the PR was merged is not part of a
-// forge.Event, which carries only what the server reads: both values of the
-// second argument build the same event.
-func prEvent(action string, _ bool) forge.Event {
+// feature/add-pricing.
+func prEvent(action string) forge.Event {
 	return forge.Event{
 		Name: "pull_request",
 		Kind: forge.KindPullRequest,
@@ -59,7 +57,7 @@ func closedPR() *forge.PullRequest {
 // closeAndWait delivers a closed event and waits for the background teardown.
 func closeAndWait(t *testing.T, s *Server) {
 	t.Helper()
-	s.handlePullRequest(context.Background(), prEvent("closed", true))
+	s.handlePullRequest(context.Background(), prEvent("closed"))
 	if err := s.WaitBackground(context.Background()); err != nil {
 		t.Fatalf("WaitBackground: %v", err)
 	}
@@ -98,27 +96,23 @@ func assertTeardownAttrs(t *testing.T, attrs map[string]slog.Value) {
 }
 
 func TestTeardown_ClosedStartsTeardown(t *testing.T) {
-	for _, merged := range []bool{true, false} {
-		t.Run(map[bool]string{true: "merged", false: "not merged"}[merged], func(t *testing.T) {
-			fg := &fakeGitops{pr: closedPR()}
-			s, _ := newTeardownServer(t, fg)
-			s.handlePullRequest(context.Background(), prEvent("closed", merged))
-			if err := s.WaitBackground(context.Background()); err != nil {
-				t.Fatalf("WaitBackground: %v", err)
-			}
-			if fg.teardownSlug != teardownSlug || fg.teardownOwner != "acme" ||
-				fg.teardownRepo != "backend-1" || fg.teardownNumber != 42 {
-				t.Errorf("teardown(%q, %q, %q, %d), want (%q, acme, backend-1, 42)",
-					fg.teardownSlug, fg.teardownOwner, fg.teardownRepo, fg.teardownNumber, teardownSlug)
-			}
-		})
+	fg := &fakeGitops{pr: closedPR()}
+	s, _ := newTeardownServer(t, fg)
+	s.handlePullRequest(context.Background(), prEvent("closed"))
+	if err := s.WaitBackground(context.Background()); err != nil {
+		t.Fatalf("WaitBackground: %v", err)
+	}
+	if fg.teardownSlug != teardownSlug || fg.teardownOwner != "acme" ||
+		fg.teardownRepo != "backend-1" || fg.teardownNumber != 42 {
+		t.Errorf("teardown(%q, %q, %q, %d), want (%q, acme, backend-1, 42)",
+			fg.teardownSlug, fg.teardownOwner, fg.teardownRepo, fg.teardownNumber, teardownSlug)
 	}
 }
 
 func TestTeardown_OpenedStartsNoTeardown(t *testing.T) {
 	fg := &fakeGitops{}
 	s, _ := newTeardownServer(t, fg)
-	s.handlePullRequest(context.Background(), prEvent("opened", false))
+	s.handlePullRequest(context.Background(), prEvent("opened"))
 	if err := s.WaitBackground(context.Background()); err != nil {
 		t.Fatalf("WaitBackground: %v", err)
 	}
@@ -133,7 +127,7 @@ func TestTeardown_RunsInBackground(t *testing.T) {
 
 	returned := make(chan struct{})
 	go func() {
-		s.handlePullRequest(context.Background(), prEvent("closed", true))
+		s.handlePullRequest(context.Background(), prEvent("closed"))
 		close(returned)
 	}()
 	select {
@@ -337,7 +331,7 @@ func TestTeardown_ClosedEmptyBranchSlugWithNamedLabel(t *testing.T) {
 	pr.HeadRef = "---"
 	fg := &fakeGitops{badilYAML: servicesWithPreview, pr: pr}
 	s, _ := newTeardownServer(t, fg)
-	ev := prEvent("closed", true)
+	ev := prEvent("closed")
 	ev.PullRequest.HeadRef = "---"
 	ev.PullRequest.Labels = []string{"preview:pricing"}
 	s.handlePullRequest(context.Background(), ev)
@@ -356,7 +350,7 @@ func TestTeardown_ClosedEmptyBranchSlugWithNamedLabel(t *testing.T) {
 func TestTeardown_ClosedWithoutSlugSkipped(t *testing.T) {
 	fg := &fakeGitops{pr: closedPR()}
 	s, capture := newTeardownServer(t, fg)
-	ev := prEvent("closed", true)
+	ev := prEvent("closed")
 	ev.PullRequest.HeadRef = "---"
 	ev.PullRequest.Labels = []string{"preview", "preview:---"}
 	s.handlePullRequest(context.Background(), ev)
