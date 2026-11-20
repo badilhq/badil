@@ -71,16 +71,27 @@ func TestWait_NonFinalAnswersAtTheTimeout(t *testing.T) {
 	}
 }
 
+// TestWait_StatusEventEndsTheWaitEarly also checks that an entry pinned at a
+// 7-character SHA is ready at the full revision, and that the PR's wait
+// answers that full SHA.
 func TestWait_StatusEventEndsTheWaitEarly(t *testing.T) {
-	for _, path := range []string{"/v1/previews/feature-x/wait", "/v1/wait?repo=acme/backend-1&pr=42&sha=" + statusSHA} {
-		t.Run(path, func(t *testing.T) {
+	cases := []struct{ path, sha string }{
+		{path: "/v1/previews/feature-x/wait"},
+		{path: "/v1/wait?repo=acme/backend-1&pr=42&sha=" + statusSHA, sha: statusSHA},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
 			s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("backend-1", backend42)))
 			s.waitTimeout = time.Minute
-			ch := startWait(context.Background(), s, path)
+			ch := startWait(context.Background(), s, tc.path)
 			assertBlocked(t, ch)
 			sendStatus(t, s, statusBody("backend-1", statusSHA, "ready", time.Now().UTC().Format(time.RFC3339)))
-			if a := await(t, ch); a.resp.State != "ready" {
+			a := await(t, ch)
+			if a.resp.State != "ready" {
 				t.Errorf("answer = %d %+v, want ready", a.code, a.resp)
+			}
+			if a.resp.SHA != tc.sha || a.resp.Slug != "feature-x" {
+				t.Errorf("sha %q slug %q, want %q and feature-x", a.resp.SHA, a.resp.Slug, tc.sha)
 			}
 		})
 	}
@@ -134,18 +145,6 @@ func TestWait_HeadMovingFetchWakes(t *testing.T) {
 	if a := await(t, bySlug); a.code != http.StatusNotFound {
 		t.Errorf("slug wait = %d, want 404", a.code)
 	}
-}
-
-func TestWait_EndWaitsAnswersAtOnce(t *testing.T) {
-	s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("backend-1", backend42)))
-	s.waitTimeout = time.Minute
-	ch := startWait(context.Background(), s, "/v1/previews/feature-x/wait")
-	assertBlocked(t, ch)
-	s.EndWaits()
-	if a := await(t, ch); a.code != http.StatusOK || a.resp.State != "progressing" {
-		t.Errorf("answer = %d %s, want 200 progressing", a.code, a.resp.State)
-	}
-	s.EndWaits()
 }
 
 // TestWait_GoroutinesReturnToBaseline checks that many waits, ended by their

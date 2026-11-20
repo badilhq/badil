@@ -72,13 +72,7 @@ func newStatusServer(
 }
 
 func postStatus(srv *Server, path, body, authorization string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
-	if authorization != "" {
-		req.Header.Set("Authorization", authorization)
-	}
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, req)
-	return rec
+	return send(srv, http.MethodPost, path, body, authorization)
 }
 
 // statusBody is a status event of feature-x.
