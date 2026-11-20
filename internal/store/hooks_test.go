@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -92,31 +93,13 @@ func TestApply_AppliedNotCalledWithoutPush(t *testing.T) {
 	}
 }
 
-// headMovedCounter counts a store's WithHeadMoved calls.
-type headMovedCounter struct {
-	mu sync.Mutex
-	n  int
-}
-
-func (c *headMovedCounter) moved() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.n++
-}
-
-func (c *headMovedCounter) count() int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.n
-}
-
 // TestFetch_HeadMoved checks that WithHeadMoved is called after a fetch
 // moves the remote-tracking ref, from a read or from Apply, and not for a
 // read or a fetch that finds the head unchanged, nor for the clone.
 func TestFetch_HeadMoved(t *testing.T) {
-	counter := &headMovedCounter{}
+	var moved atomic.Int32
 	f := newGitopsFake(t, applyFiles)
-	c := f.open(t, store.WithHeadMoved(counter.moved))
+	c := f.open(t, store.WithHeadMoved(func() { moved.Add(1) }))
 	clock := &fakeClock{t: time.Now()}
 	store.SetNow(c, clock.now)
 	ctx := context.Background()
@@ -124,7 +107,7 @@ func TestFetch_HeadMoved(t *testing.T) {
 	if _, err := c.ListPreviews(ctx); err != nil {
 		t.Fatalf("ListPreviews: %v", err)
 	}
-	if n := counter.count(); n != 0 {
+	if n := moved.Load(); n != 0 {
 		t.Fatalf("after the clone and a read of an unchanged head: %d calls, want 0", n)
 	}
 
@@ -133,7 +116,7 @@ func TestFetch_HeadMoved(t *testing.T) {
 	if _, err := c.ListPreviews(ctx); err != nil {
 		t.Fatalf("ListPreviews: %v", err)
 	}
-	if n := counter.count(); n != 1 {
+	if n := moved.Load(); n != 1 {
 		t.Fatalf("after a read past a moved head: %d calls, want 1", n)
 	}
 
@@ -142,13 +125,13 @@ func TestFetch_HeadMoved(t *testing.T) {
 	if _, err := apply(c, store.OpSync, rename("a", "renamed", "rename a")); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
-	if n := counter.count(); n != 2 {
+	if n := moved.Load(); n != 2 {
 		t.Fatalf("after an Apply fetching a moved head: %d calls, want 2", n)
 	}
 	if _, err := apply(c, store.OpSync, rename("a", "again", "rename a again")); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
-	if n := counter.count(); n != 2 {
+	if n := moved.Load(); n != 2 {
 		t.Fatalf("after an Apply fetching an unchanged head: %d calls, want 2", n)
 	}
 }

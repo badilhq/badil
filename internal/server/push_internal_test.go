@@ -202,15 +202,20 @@ func TestPush_BoundedBySyncTimeout(t *testing.T) {
 }
 
 // assertCounter fails t unless the counter family name of m is exactly
-// samples, one "{labels} value" (or " value") line each.
+// samples, one "{labels} value" (or " value") line each; none means no
+// sample.
 func assertCounter(t *testing.T, m *metrics.Metrics, name string, samples ...string) {
 	t.Helper()
 	help := map[string]string{
 		"badil_webhook_deliveries_total": "GitHub webhook deliveries, by verified event and HTTP status.",
 		"badil_previews_synced_total":    "Previews rewritten to match badil.yaml, by a sweep, a push or /v1/sync.",
+		"badil_status_events_total": "Renderer status events, by reported status and by whether they were " +
+			"recorded, ignored or failed.",
 	}
 	var expected strings.Builder
-	expected.WriteString("# HELP " + name + " " + help[name] + "\n# TYPE " + name + " counter\n")
+	if len(samples) > 0 {
+		expected.WriteString("# HELP " + name + " " + help[name] + "\n# TYPE " + name + " counter\n")
+	}
 	for _, sample := range samples {
 		expected.WriteString(name + sample + "\n")
 	}

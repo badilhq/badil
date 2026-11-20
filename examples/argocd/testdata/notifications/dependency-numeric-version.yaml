@@ -18,7 +18,6 @@ metadata:
     test.badil.dev/on-preview-degraded: "false"
     test.badil.dev/on-preview-sync-error: "false"
     test.badil.dev/on-preview-unpinned: "false"
-    test.badil.dev/on-preview-healthy: "true"
     test.badil.dev/on-status-progressing: "false"
     test.badil.dev/on-status-ready: "true"
     test.badil.dev/on-status-degraded: "false"

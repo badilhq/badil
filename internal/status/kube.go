@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/retry"
 )
 
 // Labels of the status ConfigMaps.
@@ -69,24 +72,27 @@ func InCluster(ctx context.Context) *Store {
 }
 
 // selector selects the ConfigMaps badil manages.
-func selector() string {
-	return managedByLabel + "=" + managedBy
+const selector = managedByLabel + "=" + managedBy
+
+// managed returns the ConfigMaps badil manages that carry the preview label.
+func (c *configMaps) managed(ctx context.Context) ([]corev1.ConfigMap, error) {
+	items, err := c.client.CoreV1().ConfigMaps(c.namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		return nil, fmt.Errorf("list status configmaps in %s: %w", c.namespace, err)
+	}
+	return slices.DeleteFunc(items.Items, func(cm corev1.ConfigMap) bool { return cm.Labels[previewLabel] == "" }), nil
 }
 
 // list returns, by preview, the status read from the ConfigMaps badil
 // manages that carry the preview label. A value that does not parse is
 // logged and skipped.
 func (c *configMaps) list(ctx context.Context) (map[string]map[string]Entry, error) {
-	items, err := c.client.CoreV1().ConfigMaps(c.namespace).List(ctx, metav1.ListOptions{LabelSelector: selector()})
+	items, err := c.managed(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list status configmaps in %s: %w", c.namespace, err)
+		return nil, err
 	}
 	out := map[string]map[string]Entry{}
-	for _, cm := range items.Items {
-		slug := cm.Labels[previewLabel]
-		if slug == "" {
-			continue
-		}
+	for _, cm := range items {
 		services := map[string]Entry{}
 		for service, raw := range cm.Data {
 			var e Entry
@@ -97,7 +103,7 @@ func (c *configMaps) list(ctx context.Context) (map[string]map[string]Entry, err
 			}
 			services[service] = e
 		}
-		out[slug] = services
+		out[cm.Labels[previewLabel]] = services
 	}
 	return out, nil
 }
@@ -105,15 +111,13 @@ func (c *configMaps) list(ctx context.Context) (map[string]map[string]Entry, err
 // names returns the previews of the ConfigMaps badil manages that carry the
 // preview label.
 func (c *configMaps) names(ctx context.Context) ([]string, error) {
-	items, err := c.client.CoreV1().ConfigMaps(c.namespace).List(ctx, metav1.ListOptions{LabelSelector: selector()})
+	items, err := c.managed(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list status configmaps in %s: %w", c.namespace, err)
+		return nil, err
 	}
-	var slugs []string
-	for _, cm := range items.Items {
-		if slug := cm.Labels[previewLabel]; slug != "" {
-			slugs = append(slugs, slug)
-		}
+	slugs := make([]string, 0, len(items))
+	for _, cm := range items {
+		slugs = append(slugs, cm.Labels[previewLabel])
 	}
 	return slugs, nil
 }
@@ -125,18 +129,17 @@ func (c *configMaps) names(ctx context.Context) ([]string, error) {
 // writer.
 func (c *configMaps) write(ctx context.Context, slug string, snapshot func() (map[string]Entry, bool)) error {
 	api := c.client.CoreV1().ConfigMaps(c.namespace)
-	var err error
-	for range maxWriteAttempts {
+	retriable := func(err error) bool { return apierrors.IsConflict(err) || apierrors.IsAlreadyExists(err) }
+	return retry.OnError(wait.Backoff{Steps: maxWriteAttempts}, retriable, func() error {
 		services, ok := snapshot()
 		if !ok {
 			return nil
 		}
-		var data map[string]string
-		if data, err = encode(services); err != nil {
+		data, err := encode(services)
+		if err != nil {
 			return err
 		}
-		var cm *corev1.ConfigMap
-		cm, err = api.Get(ctx, ConfigMapName(slug), metav1.GetOptions{})
+		cm, err := api.Get(ctx, ConfigMapName(slug), metav1.GetOptions{})
 		switch {
 		case apierrors.IsNotFound(err):
 			_, err = api.Create(ctx, c.configMap(slug, data), metav1.CreateOptions{})
@@ -145,14 +148,11 @@ func (c *configMaps) write(ctx context.Context, slug string, snapshot func() (ma
 			cm.Data = data
 			_, err = api.Update(ctx, cm, metav1.UpdateOptions{})
 		}
-		if !apierrors.IsConflict(err) && !apierrors.IsAlreadyExists(err) {
-			break
+		if err != nil {
+			return fmt.Errorf("write configmap %s: %w", ConfigMapName(slug), err)
 		}
-	}
-	if err != nil {
-		return fmt.Errorf("write configmap %s: %w", ConfigMapName(slug), err)
-	}
-	return nil
+		return nil
+	})
 }
 
 // delete deletes the ConfigMap of the preview slug; one already gone is no

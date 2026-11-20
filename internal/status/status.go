@@ -8,6 +8,7 @@ package status
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"slices"
 	"sync"
 	"time"
@@ -101,11 +102,6 @@ func NewMemory() *Store {
 	return newStore(nil)
 }
 
-// Persisted reports whether s keeps the status in ConfigMaps.
-func (s *Store) Persisted() bool {
-	return s.kube != nil
-}
-
 // Record sets the status of service in the preview slug to e, unless e is
 // older than the stored entry. It reports whether e was recorded and, when
 // it was, whether it is the first ready recorded in this process for that
@@ -138,15 +134,10 @@ func (s *Store) Record(slug, service string, e Entry) (bool, bool) {
 // Preview returns the status of the services of the preview slug, by
 // service; none when nothing is known.
 func (s *Store) Preview(slug string) map[string]Entry {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := map[string]Entry{}
-	if p := s.previews[slug]; p != nil {
-		for name, e := range p.services {
-			out[name] = e
-		}
+	if out, ok := s.snapshot(slug); ok {
+		return out
 	}
-	return out
+	return map[string]Entry{}
 }
 
 // Delete forgets the status of the previews slugs and queues the deletion of
@@ -316,13 +307,9 @@ func (s *Store) collectGarbage(ctx context.Context, lister Lister) {
 // stays queued for the next run, unless the preview was recorded since.
 func (s *Store) deleteGone(ctx context.Context) {
 	s.mu.Lock()
-	slugs := make([]string, 0, len(s.gone))
-	for slug := range s.gone {
-		slugs = append(slugs, slug)
-	}
+	slugs := slices.Sorted(maps.Keys(s.gone))
 	clear(s.gone)
 	s.mu.Unlock()
-	slices.Sort(slugs)
 	for _, slug := range slugs {
 		if err := s.kube.delete(ctx, slug); err != nil {
 			slog.Default().WarnContext(ctx, "deleting status configmap failed",
@@ -340,13 +327,9 @@ func (s *Store) deleteGone(ctx context.Context) {
 // write is logged and the preview stays dirty for the next flush.
 func (s *Store) flush(ctx context.Context) {
 	s.mu.Lock()
-	slugs := make([]string, 0, len(s.dirty))
-	for slug := range s.dirty {
-		slugs = append(slugs, slug)
-	}
+	slugs := slices.Sorted(maps.Keys(s.dirty))
 	clear(s.dirty)
 	s.mu.Unlock()
-	slices.Sort(slugs)
 	for _, slug := range slugs {
 		if err := s.kube.write(ctx, slug, func() (map[string]Entry, bool) { return s.snapshot(slug) }); err != nil {
 			slog.Default().WarnContext(ctx, "writing status configmap failed",
@@ -369,9 +352,5 @@ func (s *Store) snapshot(slug string) (map[string]Entry, bool) {
 	if p == nil {
 		return nil, false
 	}
-	out := make(map[string]Entry, len(p.services))
-	for name, e := range p.services {
-		out[name] = e
-	}
-	return out, true
+	return maps.Clone(p.services), true
 }

@@ -127,8 +127,8 @@ func serveCmd() *cobra.Command {
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
-			previewStatus, err := loadStatus(ctx, status.InCluster(ctx))
-			if err != nil {
+			previewStatus := status.InCluster(ctx)
+			if err = loadStatus(ctx, previewStatus); err != nil {
 				return err
 			}
 			st, f, err := newStoreAndForge(ctx, app, cfg, append(statusHooks(previewStatus), store.WithMetrics(m))...)
@@ -172,11 +172,11 @@ func serveCmd() *cobra.Command {
 
 // loadStatus reads the previews' status back into s (status.Store.Load),
 // before the server listens. A failed read is returned.
-func loadStatus(ctx context.Context, s *status.Store) (*status.Store, error) {
+func loadStatus(ctx context.Context, s *status.Store) error {
 	if err := s.Load(ctx); err != nil {
-		return nil, fmt.Errorf("loading preview status: %w", err)
+		return fmt.Errorf("loading preview status: %w", err)
 	}
-	return s, nil
+	return nil
 }
 
 // statusHooks returns the store options that keep s in step with the gitops
