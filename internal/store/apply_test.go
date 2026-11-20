@@ -17,6 +17,7 @@ import (
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
+	"github.com/badilhq/badil/internal/store/storetest"
 )
 
 // applyFiles are the remote files of the Apply tests.
@@ -96,8 +97,9 @@ func TestApply_OneCommitOnFetchedHead(t *testing.T) {
 	for _, sig := range []struct {
 		name, email string
 	}{{head.Author.Name, head.Author.Email}, {head.Committer.Name, head.Committer.Email}} {
-		if sig.name != testIdentity.Name || sig.email != testIdentity.Email {
-			t.Errorf("signature = %s <%s>, want %s <%s>", sig.name, sig.email, testIdentity.Name, testIdentity.Email)
+		if sig.name != storetest.Identity.Name || sig.email != storetest.Identity.Email {
+			t.Errorf("signature = %s <%s>, want %s <%s>",
+				sig.name, sig.email, storetest.Identity.Name, storetest.Identity.Email)
 		}
 	}
 	if head.Signed {
@@ -339,8 +341,8 @@ func TestApply_PushUnauthorized(t *testing.T) {
 func TestOpen_RejectsEmptyIdentity(t *testing.T) {
 	remote := newRemote(t, applyFiles)
 	for _, id := range []store.CommitIdentity{
-		{Email: testIdentity.Email},
-		{Name: testIdentity.Name},
+		{Email: storetest.Identity.Email},
+		{Name: storetest.Identity.Name},
 		{},
 	} {
 		st, err := store.Open(context.Background(), "acme", "gitops", store.CloneConfig{URL: remote.URL()}, id)

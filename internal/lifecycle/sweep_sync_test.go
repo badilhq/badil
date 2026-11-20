@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store/storetest"
 )
 
 // TestSweep_SyncsKeptPreviews checks rules 1 and 2 delete their previews and
@@ -95,14 +96,14 @@ func TestSweep_SyncComments(t *testing.T) {
 		{
 			name: "unchanged",
 			file: func(t *testing.T) string {
-				return marshal(t, projectOn("feature-x", *values(pin("backend-1", pr42, recent)),
+				return marshal(t, storetest.Project("feature-x", *values(pin("backend-1", pr42, recent)),
 					sweepCatalog(t)))
 			},
 		},
 		{
 			name: "changed without notify",
 			file: func(t *testing.T) string {
-				vals := projectOn("feature-x", *values(pin("backend-1", pr42, recent)), sweepCatalog(t))
+				vals := storetest.Project("feature-x", *values(pin("backend-1", pr42, recent)), sweepCatalog(t))
 				vals.Services[1].Branch = "old"
 				return marshal(t, vals)
 			},

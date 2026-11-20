@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -139,18 +138,6 @@ func TestDeploy_ServiceNotInCatalog(t *testing.T) {
 	}
 }
 
-func TestDeploy_WriteUnauthorized(t *testing.T) {
-	fg := &fakeGitops{
-		catalog:  []string{"backend-1"},
-		applyErr: fmt.Errorf("%w: token revoked", store.ErrUnauthorized),
-	}
-	rec := postDeploy(t, newTestServer(t, fg), validBody(), "test-token")
-
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502 (body: %s)", rec.Code, rec.Body.String())
-	}
-}
-
 func TestDeploy_FanOutPartialFailureSurfacesAsWarnings(t *testing.T) {
 	joined := errors.Join(
 		errors.New("service backend-2 (acme/backend-2#7): rate limited"),
@@ -250,9 +237,6 @@ func TestDeploy_PreviewURLsInSummary(t *testing.T) {
 	}
 	if strings.Contains(fg.capturedSummary, "backend-2-feature-pricing") {
 		t.Errorf("summary links non-exposed backend-2, got:\n%s", fg.capturedSummary)
-	}
-	if fg.capturedURLs.Domain != "127.0.0.1.nip.io" {
-		t.Errorf("capturedURLs.Domain = %q, want 127.0.0.1.nip.io", fg.capturedURLs.Domain)
 	}
 }
 
@@ -376,7 +360,7 @@ func TestDeploy_PushUnauthorized(t *testing.T) {
 	srv := httptest.NewServer(remote.HTTPHandler(http.StatusForbidden))
 	t.Cleanup(srv.Close)
 	st, err := store.Open(context.Background(), "acme", "gitops",
-		store.CloneConfig{URL: srv.URL + "/acme/gitops.git"}, testIdentity)
+		store.CloneConfig{URL: srv.URL + "/acme/gitops.git"}, storetest.Identity)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

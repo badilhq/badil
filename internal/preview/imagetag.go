@@ -37,6 +37,11 @@ func shortSHA(sha string, n int) string {
 	return sha[:min(n, len(sha))]
 }
 
+// ShortSHA returns the first 7 characters of sha, or all of it when shorter.
+func ShortSHA(sha string) string {
+	return shortSHA(sha, shortSHALen)
+}
+
 // ExpandImageTag returns the image tag of format, a ValidImageTagFormat, for
 // an entry pinned to commitSha, or for a branch-tracking entry when commitSha
 // is empty: its placeholder becomes commitSha or its first 7 or 8 characters

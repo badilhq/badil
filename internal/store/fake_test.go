@@ -14,12 +14,6 @@ import (
 	"github.com/badilhq/badil/internal/store/storetest"
 )
 
-// testIdentity is the commit identity of the test stores.
-var testIdentity = store.CommitIdentity{ //nolint:gochecknoglobals // test fixture
-	Name:  "badil-test[bot]",
-	Email: "348525889+badil-test[bot]@users.noreply.github.com",
-}
-
 // newRemote returns a bare repository whose one commit holds files.
 func newRemote(t *testing.T, files map[string]string) *storetest.Remote {
 	t.Helper()
@@ -123,7 +117,7 @@ func (f *gitopsFake) open(t *testing.T, opts ...store.Option) *store.GitHubStore
 func openStore(t *testing.T, remoteURL string, opts ...store.Option) *store.GitHubStore {
 	t.Helper()
 	st, err := store.Open(
-		context.Background(), "acme", "gitops", store.CloneConfig{URL: remoteURL}, testIdentity, opts...,
+		context.Background(), "acme", "gitops", store.CloneConfig{URL: remoteURL}, storetest.Identity, opts...,
 	)
 	if err != nil {
 		t.Fatalf("open store: %v", err)

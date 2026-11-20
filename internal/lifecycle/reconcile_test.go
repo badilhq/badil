@@ -186,15 +186,7 @@ func (f *reconcileFake) lastCommit(t *testing.T) storetest.Commit {
 // and body, and returns it.
 func (f *reconcileFake) assertOneCommit(t *testing.T, subject string, body ...string) storetest.Commit {
 	t.Helper()
-	pushed := f.g.pushed()
-	if len(pushed) != 1 || pushed[0].Subject() != subject || !slices.Equal(pushed[0].Body(), body) {
-		var got []string
-		for _, c := range pushed {
-			got = append(got, c.Message)
-		}
-		t.Fatalf("pushed = %q, want one commit %q with body %q", got, subject, body)
-	}
-	return pushed[0]
+	return f.g.assertOneCommit(t, subject, body...)
 }
 
 // assertNothingPushed fails t when f pushed a commit.
@@ -522,7 +514,7 @@ func TestReconcile_OpLabels(t *testing.T) {
 			m := metrics.New()
 			remote := storetest.NewRemote(t, map[string]string{"badil.yaml": reconcileServices})
 			st, err := store.Open(context.Background(), "acme", "gitops", store.CloneConfig{URL: remote.URL()},
-				testIdentity, store.WithMetrics(m))
+				storetest.Identity, store.WithMetrics(m))
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}

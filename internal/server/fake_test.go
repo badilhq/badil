@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -20,12 +19,6 @@ import (
 	"github.com/badilhq/badil/internal/store"
 	"github.com/badilhq/badil/internal/store/storetest"
 )
-
-// testIdentity is the commit identity of the fake's store.
-var testIdentity = store.CommitIdentity{ //nolint:gochecknoglobals // test fixture
-	Name:  "badil-test[bot]",
-	Email: "1+badil-test[bot]@users.noreply.github.com",
-}
 
 // fakeGitops is the store and the forge of a server test. Its catalog is
 // parsed from badilYAML when set, or lists catalog, each service at
@@ -87,7 +80,6 @@ type fakeGitops struct {
 	writeResult *store.WriteResult
 
 	capturedInputs   preview.DeployInputs
-	capturedURLs     preview.URLConfig
 	capturedService  string
 	capturedSlug     string
 	fanOutBodyCalled bool
@@ -127,39 +119,7 @@ func (f *fakeGitops) open(t *testing.T) {
 		return
 	}
 	f.t = t
-	files := map[string]string{"badil.yaml": f.badil()}
-	catalog, _ := store.ParseCatalog([]byte(f.badil()))
-	for slug, vals := range f.previews {
-		v := *vals
-		if catalog != nil && !f.stale[slug] {
-			v = projectOn(slug, v, catalog)
-		}
-		out, err := yaml.Marshal(v)
-		if err != nil {
-			t.Fatalf("marshal %s: %v", slug, err)
-		}
-		files["previews/"+slug+"/values.yaml"] = string(out)
-	}
-	for path, content := range f.raw {
-		files[path] = content
-	}
-	f.remote = storetest.NewRemote(t, files)
-	st, err := store.Open(context.Background(), "acme", "gitops", store.CloneConfig{URL: f.remote.URL()}, testIdentity)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	f.st = st
-}
-
-// projectOn returns vals projected on catalog, as a sync writes it.
-func projectOn(slug string, vals preview.PreviewValues, catalog *store.ServiceCatalog) preview.PreviewValues {
-	cat := catalog.Catalog
-	cat.GitopsRepoURL = "https://github.com/acme/gitops.git"
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.DiscardHandler))
-	defer slog.SetDefault(prev)
-	return preview.ApplyHosts(preview.ApplyCatalog(vals, cat).Values, slug, catalog.URLs)
+	f.remote, f.st = storetest.Gitops(t, f.badil(), f.previews, f.stale, f.raw)
 }
 
 func (f *fakeGitops) FetchServiceCatalog(_ context.Context) (*store.ServiceCatalog, error) {
@@ -169,11 +129,7 @@ func (f *fakeGitops) FetchServiceCatalog(_ context.Context) (*store.ServiceCatal
 	if f.catalogErr != nil {
 		return nil, f.catalogErr
 	}
-	catalog, err := store.ParseCatalog([]byte(f.badil()))
-	if err == nil {
-		f.capturedURLs = catalog.URLs
-	}
-	return catalog, err
+	return store.ParseCatalog([]byte(f.badil()))
 }
 
 // prRef matches the owner/repo#number a commit subject names.

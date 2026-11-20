@@ -115,7 +115,7 @@ func TestOpen_TempDirPerStore(t *testing.T) {
 	remote := newRemote(t, map[string]string{"previews/a/values.yaml": previewFile("first")})
 	open := func() *store.GitHubStore {
 		st, err := store.Open(context.Background(), "acme", "gitops",
-			store.CloneConfig{URL: remote.URL()}, testIdentity)
+			store.CloneConfig{URL: remote.URL()}, storetest.Identity)
 		if err != nil {
 			t.Fatalf("Open: %v", err)
 		}
@@ -154,7 +154,7 @@ func TestOpen_CloneDirClonedAgain(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "gitops")
 	open := func() *store.GitHubStore {
 		st, err := store.Open(context.Background(), "acme", "gitops",
-			store.CloneConfig{URL: remote.URL(), Dir: dir}, testIdentity)
+			store.CloneConfig{URL: remote.URL(), Dir: dir}, storetest.Identity)
 		if err != nil {
 			t.Fatalf("Open: %v", err)
 		}
@@ -348,7 +348,7 @@ func TestOpen_RemoteRefusesCredentials(t *testing.T) {
 			t.Cleanup(srv.Close)
 			creds := func(context.Context) (string, string, error) { return "x-access-token", "revoked", nil }
 			_, err := store.Open(context.Background(), "acme", "gitops",
-				store.CloneConfig{URL: srv.URL + "/acme/gitops.git", Credentials: creds}, testIdentity)
+				store.CloneConfig{URL: srv.URL + "/acme/gitops.git", Credentials: creds}, storetest.Identity)
 			if !errors.Is(err, store.ErrUnauthorized) {
 				t.Errorf("Open = %v, want ErrUnauthorized", err)
 			}
@@ -365,7 +365,7 @@ func TestOpen_CredentialProviderError(t *testing.T) {
 	t.Cleanup(srv.Close)
 	creds := func(context.Context) (string, string, error) { return "", "", errors.New("token mint failed") }
 	_, err := store.Open(context.Background(), "acme", "gitops",
-		store.CloneConfig{URL: srv.URL + "/acme/gitops.git", Credentials: creds}, testIdentity)
+		store.CloneConfig{URL: srv.URL + "/acme/gitops.git", Credentials: creds}, storetest.Identity)
 	if !errors.Is(err, store.ErrUnauthorized) || !strings.Contains(err.Error(), "token mint failed") {
 		t.Errorf("Open = %v, want ErrUnauthorized with the provider's error", err)
 	}
@@ -389,7 +389,7 @@ func TestCredentials_BeforeEachGitCall(t *testing.T) {
 		return "x-access-token", "token", nil
 	}
 	st, err := store.Open(context.Background(), "acme", "gitops",
-		store.CloneConfig{URL: remote.URL(), Credentials: creds}, testIdentity)
+		store.CloneConfig{URL: remote.URL(), Credentials: creds}, storetest.Identity)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -446,7 +446,7 @@ func TestFreshness_CancelledRefreshRetriedByWaiter(t *testing.T) {
 		return "x-access-token", "token", nil
 	}
 	st, err := store.Open(context.Background(), "acme", "gitops",
-		store.CloneConfig{URL: remote.URL(), Credentials: creds}, testIdentity)
+		store.CloneConfig{URL: remote.URL(), Credentials: creds}, storetest.Identity)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"math/rand/v2"
+	"sort"
 	"strings"
 	"time"
 
@@ -267,11 +267,7 @@ func (c *gitClone) subject(h plumbing.Hash) (string, error) {
 func (c *gitClone) commit(parent plumbing.Hash, tree *Tree, message string, id CommitIdentity) (plumbing.Hash, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	changes := map[string]*[]byte{}
-	for path, content := range tree.files {
-		changes[path] = &content
-	}
-	treeHash, err := c.writeTree(tree.root, changes)
+	treeHash, err := c.writeTree(tree.root, tree.files)
 	if err != nil {
 		return plumbing.ZeroHash, err
 	}
@@ -306,20 +302,24 @@ func (c *gitClone) commit(parent plumbing.Hash, tree *Tree, message string, id C
 // writeTree stores the tree base (nil for none) with changes applied and
 // returns its hash, the zero hash when it is left empty. changes maps a path
 // relative to base to its new content, a nil content deleting it.
-func (c *gitClone) writeTree(base *object.Tree, changes map[string]*[]byte) (plumbing.Hash, error) {
+func (c *gitClone) writeTree(base *object.Tree, changes map[string][]byte) (plumbing.Hash, error) {
 	files, dirs := splitChanges(changes)
 	current := map[string]object.TreeEntry{}
+	names := map[string]bool{}
 	if base != nil {
 		for _, e := range base.Entries {
 			current[e.Name] = e
+			names[e.Name] = true
 		}
 	}
-	names := map[string]bool{}
-	for _, m := range []map[string]bool{keySet(current), keySet(files), keySet(dirs)} {
-		maps.Copy(names, m)
+	for name := range files {
+		names[name] = true
+	}
+	for name := range dirs {
+		names[name] = true
 	}
 	var entries []object.TreeEntry
-	for _, name := range sortedKeys(names) {
+	for name := range names {
 		e, ok := current[name]
 		if !ok {
 			e = object.TreeEntry{Name: name, Mode: filemode.Regular}
@@ -327,7 +327,8 @@ func (c *gitClone) writeTree(base *object.Tree, changes map[string]*[]byte) (plu
 				e.Mode = filemode.Dir
 			}
 		}
-		entry, keep, err := c.changeEntry(e, files[name], dirs[name])
+		content, changed := files[name]
+		entry, keep, err := c.changeEntry(e, content, changed, dirs[name])
 		if err != nil {
 			return plumbing.ZeroHash, err
 		}
@@ -338,7 +339,7 @@ func (c *gitClone) writeTree(base *object.Tree, changes map[string]*[]byte) (plu
 	if len(entries) == 0 {
 		return plumbing.ZeroHash, nil
 	}
-	sortEntries(entries)
+	sort.Sort(object.TreeEntrySorter(entries))
 	obj := c.repo.Storer.NewEncodedObject()
 	if err := (&object.Tree{Entries: entries}).Encode(obj); err != nil {
 		return plumbing.ZeroHash, fmt.Errorf("encode tree: %w", err)
@@ -346,20 +347,11 @@ func (c *gitClone) writeTree(base *object.Tree, changes map[string]*[]byte) (plu
 	return c.repo.Storer.SetEncodedObject(obj)
 }
 
-// keySet returns the keys of m as a set.
-func keySet[V any](m map[string]V) map[string]bool {
-	out := make(map[string]bool, len(m))
-	for k := range m {
-		out[k] = true
-	}
-	return out
-}
-
 // splitChanges splits changes into the files directly in their tree and,
 // by directory name, the changes under each directory.
-func splitChanges(changes map[string]*[]byte) (map[string]*[]byte, map[string]map[string]*[]byte) {
-	files := map[string]*[]byte{}
-	dirs := map[string]map[string]*[]byte{}
+func splitChanges(changes map[string][]byte) (map[string][]byte, map[string]map[string][]byte) {
+	files := map[string][]byte{}
+	dirs := map[string]map[string][]byte{}
 	for path, content := range changes {
 		dir, rest, ok := strings.Cut(path, "/")
 		if !ok {
@@ -367,7 +359,7 @@ func splitChanges(changes map[string]*[]byte) (map[string]*[]byte, map[string]ma
 			continue
 		}
 		if dirs[dir] == nil {
-			dirs[dir] = map[string]*[]byte{}
+			dirs[dir] = map[string][]byte{}
 		}
 		dirs[dir][rest] = content
 	}
@@ -375,10 +367,10 @@ func splitChanges(changes map[string]*[]byte) (map[string]*[]byte, map[string]ma
 }
 
 // changeEntry returns the tree entry e once changed: a directory by
-// dirChanges, a file by file (nil leaves it; a nil content deletes it). It
+// dirChanges, a file by content when changed (a nil content deletes it). It
 // reports false when the entry is gone. A new entry has a zero hash.
 func (c *gitClone) changeEntry(
-	e object.TreeEntry, file *[]byte, dirChanges map[string]*[]byte,
+	e object.TreeEntry, content []byte, changed bool, dirChanges map[string][]byte,
 ) (object.TreeEntry, bool, error) {
 	switch {
 	case dirChanges != nil && e.Mode == filemode.Dir:
@@ -393,24 +385,13 @@ func (c *gitClone) changeEntry(
 		return object.TreeEntry{Name: e.Name, Mode: filemode.Dir, Hash: h}, !h.IsZero(), err
 	case dirChanges != nil:
 		return e, false, fmt.Errorf("write %s/: a file has its name", e.Name)
-	case file == nil:
+	case !changed:
 		return e, true, nil
-	case *file == nil:
+	case content == nil:
 		return e, false, nil
 	}
-	h, err := c.writeBlob(*file)
+	h, err := c.writeBlob(content)
 	return object.TreeEntry{Name: e.Name, Mode: filemode.Regular, Hash: h}, err == nil, err
-}
-
-// sortEntries sorts entries as git does, a directory's name compared with a
-// trailing slash.
-func sortEntries(entries []object.TreeEntry) {
-	sorter := object.TreeEntrySorter(entries)
-	for i := 1; i < len(entries); i++ {
-		for j := i; j > 0 && sorter.Less(j, j-1); j-- {
-			sorter.Swap(j, j-1)
-		}
-	}
 }
 
 // writeBlob stores content as a blob and returns its hash.

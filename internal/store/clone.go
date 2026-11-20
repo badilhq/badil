@@ -369,18 +369,28 @@ func (c *gitClone) readFile(ctx context.Context, path string) ([]byte, string, e
 	if err != nil {
 		return nil, "", err
 	}
-	f, err := tree.File(path)
+	content, hash, err := readTreeFile(tree, path)
+	if err != nil {
+		return nil, "", err
+	}
+	return content, hash.String(), nil
+}
+
+// readTreeFile returns the content and blob hash of path in root, or
+// ErrNotFound when it has no such file.
+func readTreeFile(root *object.Tree, path string) ([]byte, plumbing.Hash, error) {
+	f, err := root.File(path)
 	if errors.Is(err, object.ErrFileNotFound) {
-		return nil, "", fmt.Errorf("%w: %s", ErrNotFound, path)
+		return nil, plumbing.ZeroHash, fmt.Errorf("%w: %s", ErrNotFound, path)
 	}
 	if err != nil {
-		return nil, "", fmt.Errorf("read %s: %w", path, err)
+		return nil, plumbing.ZeroHash, fmt.Errorf("read %s: %w", path, err)
 	}
 	content, err := f.Contents()
 	if err != nil {
-		return nil, "", fmt.Errorf("read %s: %w", path, err)
+		return nil, plumbing.ZeroHash, fmt.Errorf("read %s: %w", path, err)
 	}
-	return []byte(content), f.Hash.String(), nil
+	return []byte(content), f.Hash, nil
 }
 
 // listDirs returns the sorted names of the directories directly under dir in
@@ -395,7 +405,13 @@ func (c *gitClone) listDirs(ctx context.Context, dir string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	sub, err := tree.Tree(dir)
+	return dirNames(tree, dir)
+}
+
+// dirNames returns the sorted names of the directories directly under dir in
+// root; none when dir does not exist.
+func dirNames(root *object.Tree, dir string) ([]string, error) {
+	sub, err := root.Tree(dir)
 	if errors.Is(err, object.ErrDirectoryNotFound) {
 		return []string{}, nil
 	}
