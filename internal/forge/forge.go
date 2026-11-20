@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 )
 
 // MaxListedFiles is the most files a forge lists for a pull request: GitHub
@@ -71,6 +72,11 @@ type PullRequest struct {
 	Number int
 	// ChangedFiles is the number of files the PR changes (changed_files).
 	ChangedFiles int
+}
+
+// Fork reports whether p's head repository is not its base repository.
+func (p PullRequest) Fork() bool {
+	return !strings.EqualFold(p.HeadFullName, p.FullName)
 }
 
 // ChangedFile is a file a pull request changes, its path relative to the

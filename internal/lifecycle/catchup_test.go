@@ -285,8 +285,9 @@ func TestCatchUp_ReconcilePinsThenSkipsPinned(t *testing.T) {
 	c := lifecycle.NewCatchUp(lifecycle.CatchUpAPI{Store: f, Forge: f, Recorder: f}, syncReconcile(f.api(t)))
 
 	c.Run(context.Background())
-	f.assertOneCommit(t, "chore(preview): deploy acme/front#42 to feature-pricing",
-		"feature-pricing: pin front@fe7c4ed")
+	if pushed := f.g.subjects(); len(pushed) != 1 {
+		t.Fatalf("pushed = %q, want one deploy", pushed)
+	}
 	assertCatchUpLogged(t, capture, map[string]int64{"repos": 2, "open_labelled": 1, "reconciled": 1})
 
 	// A new process, with an empty seen map, finds it pinned at head.

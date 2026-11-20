@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -133,22 +134,27 @@ func getPullRequest(t *testing.T, status int, body string) (*forge.PullRequest, 
 	return newForge(t, srv).GetPullRequest(context.Background(), "acme", "backend-1", 42)
 }
 
-// filesPages serves GET /repos/acme/platform/pulls/42/files, one page per
-// entry of pages, linking each page to the next. A page that is "" answers
-// 500.
-func filesPages(t *testing.T, pages ...string) *httptest.Server {
+// pagedServer serves GET path, one page per entry of pages, linking each
+// page to the next. Every request must carry per_page=100 and the values of
+// query. A page that is "" answers 500.
+func pagedServer(t *testing.T, path string, query url.Values, pages ...string) *httptest.Server {
 	t.Helper()
+	want := url.Values{"per_page": {"100"}}
+	maps.Copy(want, query)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/repos/acme/platform/pulls/42/files" {
+		if r.Method != http.MethodGet || r.URL.Path != path {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		if got := r.URL.Query().Get("per_page"); got != "100" {
-			t.Errorf("per_page = %q, want 100", got)
+		q := r.URL.Query()
+		for k := range want {
+			if got := q.Get(k); got != want.Get(k) {
+				t.Errorf("%s = %q, want %q", k, got, want.Get(k))
+			}
 		}
 		page := 1
-		if p := r.URL.Query().Get("page"); p != "" {
+		if p := q.Get("page"); p != "" {
 			_, _ = fmt.Sscan(p, &page)
 		}
 		if page < 1 || page > len(pages) || pages[page-1] == "" {
@@ -157,8 +163,9 @@ func filesPages(t *testing.T, pages ...string) *httptest.Server {
 			return
 		}
 		if page < len(pages) {
-			w.Header().Set("Link", fmt.Sprintf(`<%s%s?per_page=100&page=%d>; rel="next"`,
-				"http://"+r.Host, r.URL.Path, page+1))
+			link := maps.Clone(want)
+			link.Set("page", strconv.Itoa(page+1))
+			w.Header().Set("Link", fmt.Sprintf(`<http://%s%s?%s>; rel="next"`, r.Host, r.URL.Path, link.Encode()))
 		}
 		_, _ = io.WriteString(w, pages[page-1])
 	}))
@@ -167,7 +174,7 @@ func filesPages(t *testing.T, pages ...string) *httptest.Server {
 }
 
 func TestListPullRequestFiles(t *testing.T) {
-	srv := filesPages(t,
+	srv := pagedServer(t, "/repos/acme/platform/pulls/42/files", nil,
 		`[{"filename":"web/src/app.tsx","status":"modified"},`+
 			`{"filename":"tools/x.go","status":"renamed","previous_filename":"api/x.go"}]`,
 		`[{"filename":"docs/README.md","status":"added"}]`,
@@ -204,7 +211,7 @@ func TestListPullRequestFiles(t *testing.T) {
 }
 
 func TestListPullRequestFiles_FailingLaterPage(t *testing.T) {
-	srv := filesPages(t, `[{"filename":"web/src/app.tsx"}]`, "")
+	srv := pagedServer(t, "/repos/acme/platform/pulls/42/files", nil, `[{"filename":"web/src/app.tsx"}]`, "")
 	got, err := newForge(t, srv).ListChangedFiles(context.Background(), "acme", "platform", 42)
 	if err == nil {
 		t.Fatalf("ListChangedFiles = %+v, nil; want an error", got)
@@ -212,40 +219,6 @@ func TestListPullRequestFiles_FailingLaterPage(t *testing.T) {
 	if got != nil {
 		t.Errorf("files = %+v, want nil", got)
 	}
-}
-
-// pullsPages serves GET /repos/acme/platform/pulls?state=open, one page per
-// entry of pages, linking each page to the next. A page that is "" answers
-// 500.
-func pullsPages(t *testing.T, pages ...string) *httptest.Server {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		if r.Method != http.MethodGet || r.URL.Path != "/repos/acme/platform/pulls" {
-			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		if q.Get("state") != "open" || q.Get("per_page") != "100" {
-			t.Errorf("query = %q, want state=open and per_page=100", r.URL.RawQuery)
-		}
-		page := 1
-		if p := q.Get("page"); p != "" {
-			_, _ = fmt.Sscan(p, &page)
-		}
-		if page < 1 || page > len(pages) || pages[page-1] == "" {
-			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = io.WriteString(w, `{"message":"boom"}`)
-			return
-		}
-		if page < len(pages) {
-			w.Header().Set("Link", fmt.Sprintf(`<%s%s?state=open&per_page=100&page=%d>; rel="next"`,
-				"http://"+r.Host, r.URL.Path, page+1))
-		}
-		_, _ = io.WriteString(w, pages[page-1])
-	}))
-	t.Cleanup(srv.Close)
-	return srv
 }
 
 // listedPR is a listed pull request of acme/platform, its head in headRepo.
@@ -257,7 +230,7 @@ func listedPR(number int, sha, headRepo, labels string) string {
 }
 
 func TestListOpenPullRequests(t *testing.T) {
-	srv := pullsPages(t,
+	srv := pagedServer(t, "/repos/acme/platform/pulls", url.Values{"state": {"open"}},
 		"["+listedPR(7, "aaa", "acme/platform", `{"name":"preview"}`)+","+
 			listedPR(8, "bbb", "octocat/platform", "")+"]",
 		"["+listedPR(9, "ccc", "acme/platform", `{"name":"preview:demo"},{"name":"bug"}`)+"]",
@@ -293,7 +266,8 @@ func TestListOpenPullRequests(t *testing.T) {
 }
 
 func TestListOpenPullRequests_FailingLaterPage(t *testing.T) {
-	srv := pullsPages(t, "["+listedPR(7, "aaa", "acme/platform", "")+"]", "")
+	srv := pagedServer(t, "/repos/acme/platform/pulls", url.Values{"state": {"open"}},
+		"["+listedPR(7, "aaa", "acme/platform", "")+"]", "")
 	got, err := newForge(t, srv).ListOpenPullRequests(context.Background(), "acme", "platform")
 	if err == nil {
 		t.Fatalf("ListOpenPullRequests = %+v, nil; want an error", got)

@@ -46,7 +46,6 @@ type loopFake struct {
 	calls     int
 	active    int
 	maxActive int
-	catchUps  int
 	// sweepsAtCatchUp is the number of ListPreviews calls at each Run.
 	sweepsAtCatchUp []int
 	listings        int
@@ -55,7 +54,6 @@ type loopFake struct {
 func (f *loopFake) Run(context.Context) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.catchUps++
 	f.sweepsAtCatchUp = append(f.sweepsAtCatchUp, f.calls)
 }
 
@@ -309,9 +307,9 @@ func TestRunSweepLoop_NoCatchUpAfterShutdown(t *testing.T) {
 
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		if f.calls != 1 || f.catchUps != 0 {
+		if f.calls != 1 || len(f.sweepsAtCatchUp) != 0 {
 			t.Errorf("sweeps = %d, catch-ups = %d; want 1 sweep cancelled by shutdown and no catch-up",
-				f.calls, f.catchUps)
+				f.calls, len(f.sweepsAtCatchUp))
 		}
 	})
 }
