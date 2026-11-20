@@ -170,7 +170,7 @@ The state of a PR is decided in this order:
 3. `pending` when no preview has an entry whose `metadata.pr-url` names the PR (owner and repo in any letter case) and, with `sha`, whose `commitSha` matches it.
 4. The state of the wait set in that preview: `failed`, reason `<service> is <status> at <revision>`, when an entry is failed; `ready` when every entry is ready; `progressing` otherwise.
 
-badil keeps the latest reconcile outcome of each PR in memory only. After a restart, [catch-up](EVENTS.md#catch-up) reconciles each open labelled PR not pinned at head, and records `not labeled` and `fork pr` for the other open PRs of the catalog's repos; until then, a refused PR reads `pending`. The reconciles of `badil cleanup` run in another process and are not recorded: their effect reaches the waits through badil's next fetch of the gitops repo.
+badil keeps the latest reconcile outcome of each PR in memory only. After a restart, [catch-up](EVENTS.md#catch-up) reconciles each open labelled PR not pinned at head, and records `not labeled` and `fork pr` for the other open PRs of the catalog's repos, unless the PR's outcome was recorded after catch-up started listing its repo; until then, a refused PR reads `pending`. The reconciles of `badil cleanup` run in another process and are not recorded: their effect reaches the waits through badil's next fetch of the gitops repo.
 
 **SHAs.** Two SHAs, `sha` against a `commitSha` or a reconcile's head SHA, match when both are set and, in lowercase, the longer starts with the shorter: `POST /v1/deploy` accepts a short `commit_sha`, while Argo CD reports full SHAs. A status's revision is at a pin when it starts with the entry's `commitSha`.
 

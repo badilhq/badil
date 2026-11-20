@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/preview"
@@ -35,9 +36,10 @@ type CatchUpAPI struct {
 	Forge    forge.Forge
 	Recorder CatchUpRecorder
 	// Skipped, when set, is called with the target of each listed PR that
-	// Run leaves alone at its step 1 or 2, and the skipped result it would
-	// get: reason NotLabeledReason or ForkPRReason, at its listed head SHA.
-	Skipped func(Target, ReconcileResult)
+	// Run leaves alone at its step 1 or 2, the skipped result it would get
+	// (reason NotLabeledReason or ForkPRReason, at its listed head SHA), and
+	// listedAt, taken just before Run listed the PR's repo.
+	Skipped func(t Target, res ReconcileResult, listedAt time.Time)
 }
 
 // ReconcileFunc reconciles ev, as ReconcilePR does, and calls done with
@@ -81,7 +83,8 @@ type catchUpStats struct {
 //  1. a PR without a preview label (the plain label, or a named one with a
 //     slug) is left alone;
 //  2. so is a fork PR (its head repo differs from its base repo). A PR left
-//     alone at step 1 or 2 is passed to the Skipped callback, when set;
+//     alone at step 1 or 2 is passed to the Skipped callback, when set,
+//     with the time taken just before its repo was listed;
 //  3. its target preview is resolved from its labels (preview.ResolveTarget);
 //     with conflicting labels it has none, and goes on to step 5;
 //  4. a PR with a target whose preview file has an entry whose pr-url names
@@ -110,6 +113,7 @@ func (c *CatchUp) Run(ctx context.Context) {
 		if ctx.Err() != nil {
 			break
 		}
+		listedAt := time.Now()
 		prs, listErr := c.api.Forge.ListOpenPullRequests(ctx, r.Owner, r.Repo)
 		if listErr != nil {
 			stats.listErrors++
@@ -123,7 +127,7 @@ func (c *CatchUp) Run(ctx context.Context) {
 			if ctx.Err() != nil {
 				break
 			}
-			c.consider(ctx, catalog.Label, pr, &stats)
+			c.consider(ctx, catalog.Label, pr, listedAt, &stats)
 		}
 	}
 	slog.InfoContext(ctx, "catch-up",
@@ -136,16 +140,18 @@ func (c *CatchUp) Run(ctx context.Context) {
 	)
 }
 
-// consider applies Run's decision order to the listed pr, label being the
-// preview label, and counts it in stats.
-func (c *CatchUp) consider(ctx context.Context, label string, pr forge.PullRequest, stats *catchUpStats) {
+// consider applies Run's decision order to pr, listed at listedAt, label
+// being the preview label, and counts it in stats.
+func (c *CatchUp) consider(ctx context.Context, label string, pr forge.PullRequest, listedAt time.Time,
+	stats *catchUpStats,
+) {
 	if !hasPreviewLabel(pr.Labels, label) {
-		c.skipped(pr, NotLabeledReason)
+		c.skipped(pr, NotLabeledReason, listedAt)
 		return
 	}
 	stats.openLabelled++
 	if pr.Fork() {
-		c.skipped(pr, ForkPRReason)
+		c.skipped(pr, ForkPRReason, listedAt)
 		return
 	}
 	if t := preview.ResolveTarget(pr.Labels, pr.HeadRef, label); t.Slug != "" && c.pinnedAtHead(ctx, t.Slug, pr) {
@@ -164,14 +170,14 @@ func (c *CatchUp) consider(ctx context.Context, label string, pr forge.PullReque
 	c.reconcile(ctx, catchUpEvent(pr), func(res ReconcileResult) { c.release(pr, res) })
 }
 
-// skipped passes pr, left alone for reason, to the Skipped callback when it
-// is set.
-func (c *CatchUp) skipped(pr forge.PullRequest, reason string) {
+// skipped passes pr, listed at listedAt and left alone for reason, to the
+// Skipped callback when it is set.
+func (c *CatchUp) skipped(pr forge.PullRequest, reason string, listedAt time.Time) {
 	if c.api.Skipped == nil {
 		return
 	}
 	c.api.Skipped(catchUpEvent(pr).Target,
-		ReconcileResult{Outcome: OutcomeSkipped, Reason: reason, HeadSHA: pr.HeadSHA})
+		ReconcileResult{Outcome: OutcomeSkipped, Reason: reason, HeadSHA: pr.HeadSHA}, listedAt)
 }
 
 // pinnedAtHead reports whether the preview slug has an entry pinned by pr at

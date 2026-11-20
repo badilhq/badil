@@ -146,7 +146,7 @@ func serveCmd() *cobra.Command {
 				server.WithMetrics(m), server.WithStatus(cfg.StatusToken, previewStatus),
 				server.WithReadToken(cfg.ReadToken), server.WithPreviewTTL(ttl), server.WithWake(wake))
 			catchUpCfg := catchUpAPI(st, f, m)
-			catchUpCfg.Skipped = srv.RecordOutcome
+			catchUpCfg.Skipped = srv.RecordCatchUpSkip
 			catchUp := lifecycle.NewCatchUp(catchUpCfg, srv.QueueReconcile)
 			httpSrv := newHTTPServer(cfg.ListenAddr, srv)
 

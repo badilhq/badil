@@ -55,6 +55,8 @@ type fakeGitops struct {
 
 	// openPRs is what ListOpenPullRequests returns, by owner/repo.
 	openPRs map[string][]forge.PullRequest
+	// afterList, when set, runs after each ListOpenPullRequests.
+	afterList func()
 
 	// pr is what GetPullRequest returns, unless prErr is set.
 	pr      *forge.PullRequest
@@ -242,6 +244,9 @@ func (f *fakeGitops) ListChangedFiles(context.Context, string, string, int) ([]f
 }
 
 func (f *fakeGitops) ListOpenPullRequests(_ context.Context, owner, repo string) ([]forge.PullRequest, error) {
+	if f.afterList != nil {
+		defer f.afterList()
+	}
 	return f.openPRs[owner+"/"+repo], nil
 }
 

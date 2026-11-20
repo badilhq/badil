@@ -402,7 +402,7 @@ func TestWait_CatchUpRecordsTheFilteredPRs(t *testing.T) {
 		reconciled++
 		s.QueueReconcile(ctx, ev, done)
 	}
-	api := lifecycle.CatchUpAPI{Store: fg, Forge: fg, Recorder: s.metrics, Skipped: s.RecordOutcome}
+	api := lifecycle.CatchUpAPI{Store: fg, Forge: fg, Recorder: s.metrics, Skipped: s.RecordCatchUpSkip}
 	lifecycle.NewCatchUp(api, reconcile).Run(context.Background())
 	if err := s.WaitBackground(context.Background()); err != nil {
 		t.Fatal(err)
@@ -413,6 +413,77 @@ func TestWait_CatchUpRecordsTheFilteredPRs(t *testing.T) {
 	}
 	assertState(t, waitFor(t, s, "/v1/wait?repo=acme/front&pr=1&sha=aaaa111"), "skipped", "not labeled")
 	assertState(t, waitFor(t, s, "/v1/wait?repo=acme/front&pr=2&sha=bbbb222"), "refused", "fork pr")
+}
+
+func TestWait_CatchUpSkipAndNewerOutcome(t *testing.T) {
+	unlabeled := forge.PullRequest{
+		Open: true, HeadRef: "feature/x", HeadSHA: statusSHA, URL: front7,
+		FullName: "acme/front", HeadFullName: "acme/front", Number: 7, Labels: []string{"bug"},
+	}
+	target := lifecycle.Target{Owner: "acme", Repo: "front", Number: 7}
+	deployed := lifecycle.ReconcileResult{Outcome: lifecycle.OutcomeDeployed, HeadSHA: statusSHA}
+	path := "/v1/wait?repo=acme/front&pr=7&sha=" + statusSHA
+	run := func(t *testing.T, fg *fakeGitops, s *Server) {
+		t.Helper()
+		api := lifecycle.CatchUpAPI{Store: fg, Forge: fg, Recorder: s.metrics, Skipped: s.RecordCatchUpSkip}
+		lifecycle.NewCatchUp(api, s.QueueReconcile).Run(context.Background())
+		if err := s.WaitBackground(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("an outcome recorded after the listing stays", func(t *testing.T) {
+		fg := readFake(readBadil, pinnedEntry("front", front7))
+		fg.openPRs = map[string][]forge.PullRequest{"acme/front": {unlabeled}}
+		s, _, _ := newReadServer(t, fg)
+		fg.afterList = func() { s.RecordOutcome(target, deployed) }
+		run(t, fg, s)
+		assertState(t, waitFor(t, s, path), "progressing", "")
+	})
+
+	t.Run("a listing started after the outcome replaces it", func(t *testing.T) {
+		fg := readFake(readBadil, pinnedEntry("front", front7))
+		fg.openPRs = map[string][]forge.PullRequest{"acme/front": {unlabeled}}
+		s, _, _ := newReadServer(t, fg)
+		s.RecordOutcome(target, deployed)
+		run(t, fg, s)
+		assertState(t, waitFor(t, s, path), "skipped", "not labeled")
+	})
+}
+
+func TestRecordCatchUpSkip_ListingTime(t *testing.T) {
+	target := lifecycle.Target{Owner: "acme", Repo: "front", Number: 7}
+	skip := lifecycle.ReconcileResult{
+		Outcome: lifecycle.OutcomeSkipped, Reason: lifecycle.NotLabeledReason, HeadSHA: statusSHA,
+	}
+	path := "/v1/wait?repo=acme/front&pr=7"
+	cases := []struct {
+		name          string
+		listedAt      func(recorded time.Time) time.Time
+		state, reason string
+	}{
+		{name: "listed before", listedAt: func(r time.Time) time.Time { return r.Add(-time.Second) }, state: "progressing"},
+		{name: "listed at", listedAt: func(r time.Time) time.Time { return r }, state: "progressing"},
+		{
+			name: "listed after", listedAt: func(r time.Time) time.Time { return r.Add(time.Second) },
+			state: "skipped", reason: "not labeled",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("front", front7)))
+			s.RecordOutcome(target, lifecycle.ReconcileResult{Outcome: lifecycle.OutcomeDeployed, HeadSHA: statusSHA})
+			recorded, _ := s.outcomes.get(outcomeKey("acme", "front", 7))
+			s.RecordCatchUpSkip(target, skip, tc.listedAt(recorded.At))
+			assertState(t, waitFor(t, s, path), tc.state, tc.reason)
+		})
+	}
+
+	t.Run("no stored outcome", func(t *testing.T) {
+		s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("front", front7)))
+		s.RecordCatchUpSkip(target, skip, time.Now())
+		assertState(t, waitFor(t, s, path), "skipped", "not labeled")
+	})
 }
 
 func TestWait_PinAndWaitSet(t *testing.T) {

@@ -38,7 +38,8 @@ func (w *Wake) wait() <-chan struct{} {
 }
 
 // outcome is the latest reconcile outcome of a PR, its reason and head SHA,
-// and when it was recorded.
+// and when it was recorded. At keeps time.Now's monotonic reading, so it
+// compares with a catch-up listing time on the monotonic clock.
 type outcome struct {
 	lifecycle.ReconcileResult
 
@@ -68,6 +69,18 @@ func (o *outcomes) set(key string, v outcome) {
 	o.m[key] = v
 }
 
+// setIfOlder sets v under key unless the outcome stored there was recorded
+// at or after since, and reports whether it did.
+func (o *outcomes) setIfOlder(key string, v outcome, since time.Time) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if old, ok := o.m[key]; ok && !old.At.Before(since) {
+		return false
+	}
+	o.m[key] = v
+	return true
+}
+
 func (o *outcomes) get(key string) (outcome, bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -83,8 +96,20 @@ func (s *Server) RecordOutcome(t lifecycle.Target, res lifecycle.ReconcileResult
 	if res.Outcome == lifecycle.OutcomeSkipped && res.Reason == lifecycle.OtherLabelReason {
 		return
 	}
-	s.outcomes.set(outcomeKey(t.Owner, t.Repo, t.Number), outcome{ReconcileResult: res, At: time.Now().UTC()})
+	s.outcomes.set(outcomeKey(t.Owner, t.Repo, t.Number), outcome{ReconcileResult: res, At: time.Now()})
 	s.wake.Notify()
+}
+
+// RecordCatchUpSkip records res, the skip catch-up gives a PR it filters
+// out, as the latest outcome of the PR of t, and wakes the waits, only when
+// the PR's stored outcome was recorded before listedAt, the time catch-up
+// started listing the PR's repo. A stale listing then never replaces an
+// outcome a reconcile recorded after it.
+func (s *Server) RecordCatchUpSkip(t lifecycle.Target, res lifecycle.ReconcileResult, listedAt time.Time) {
+	if s.outcomes.setIfOlder(outcomeKey(t.Owner, t.Repo, t.Number), outcome{ReconcileResult: res, At: time.Now()},
+		listedAt) {
+		s.wake.Notify()
+	}
 }
 
 // EndWaits ends every blocked wait, which answers its current state at once,
