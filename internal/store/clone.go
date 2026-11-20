@@ -150,14 +150,15 @@ func (c *gitClone) Close() error {
 }
 
 // auth returns the basic auth of c.creds, nil without a provider. A provider
-// error is ErrUnauthorized.
+// error is ErrUnauthorized and keeps its cause in the chain, so a refresh cut
+// short by its caller's context is still seen as cancelled by ensureFresh.
 func (c *gitClone) auth(ctx context.Context) (transport.AuthMethod, error) {
 	if c.creds == nil {
 		return nil, nil
 	}
 	user, password, err := c.creds(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnauthorized, err)
+		return nil, fmt.Errorf("%w: %w", ErrUnauthorized, err)
 	}
 	return &githttp.BasicAuth{Username: user, Password: password}, nil
 }

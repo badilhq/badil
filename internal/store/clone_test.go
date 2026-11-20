@@ -407,6 +407,67 @@ func TestCredentials_BeforeEachGitCall(t *testing.T) {
 	}
 }
 
+// notifyCtx is a background context that closes waiting the first time its
+// Done is called: when a read starts waiting on a check in flight.
+type notifyCtx struct {
+	context.Context
+	once    sync.Once
+	waiting chan struct{}
+}
+
+func (c *notifyCtx) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.waiting) })
+	return c.Context.Done()
+}
+
+// TestFreshness_CancelledRefreshRetriedByWaiter cancels the read that started
+// a shared check while its provider refreshes the token, as ghinstallation
+// wraps the context error, and checks a waiting read retries and succeeds.
+func TestFreshness_CancelledRefreshRetriedByWaiter(t *testing.T) {
+	remote := newRemote(t, map[string]string{"previews/a/values.yaml": previewFile("first")})
+	var calls atomic.Int32
+	refreshing := make(chan struct{})
+	creds := func(ctx context.Context) (string, string, error) {
+		if calls.Add(1) == 2 {
+			close(refreshing)
+			<-ctx.Done()
+			return "", "", fmt.Errorf("could not refresh installation id 1's token: %w", ctx.Err())
+		}
+		return "x-access-token", "token", nil
+	}
+	st, err := store.Open(context.Background(), gh.NewClient(nil), "acme", "gitops",
+		store.CloneConfig{URL: remote.url(), Credentials: creds})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	st.Invalidate()
+
+	starterCtx, cancel := context.WithCancel(context.Background())
+	starterErr := make(chan error, 1)
+	go func() {
+		_, _, readErr := st.GetPreview(starterCtx, "a")
+		starterErr <- readErr
+	}()
+	<-refreshing
+
+	waiterCtx := &notifyCtx{Context: context.Background(), waiting: make(chan struct{})}
+	waiterErr := make(chan error, 1)
+	go func() {
+		_, _, readErr := st.GetPreview(waiterCtx, "a")
+		waiterErr <- readErr
+	}()
+	<-waiterCtx.waiting
+	cancel()
+
+	if err := <-starterErr; !errors.Is(err, context.Canceled) {
+		t.Errorf("starter GetPreview = %v, want context.Canceled", err)
+	}
+	if err := <-waiterErr; err != nil {
+		t.Errorf("waiter GetPreview = %v, want the check retried", err)
+	}
+}
+
 // TestGetPreview_SHAIsGitHashObject checks the SHA against git hash-object's
 // definition: the SHA-1 of "blob <size>\x00" and the content.
 func TestGetPreview_SHAIsGitHashObject(t *testing.T) {
