@@ -144,7 +144,7 @@ func TestMetrics_GitopsOp(t *testing.T) {
 	m.GitopsOp("teardown", "error", 2*time.Second)
 
 	assertGathered(t, m, `
-# HELP badil_gitops_operation_duration_seconds Duration of gitops repo writes, teardowns and syncs, retries included.
+# HELP badil_gitops_operation_duration_seconds Duration of gitops repo writes, teardowns and syncs, retries included, and of the gitops clone's git clone, ls-remote and fetch.
 # TYPE badil_gitops_operation_duration_seconds histogram
 badil_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="0.005"} 0
 badil_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="0.01"} 0

@@ -25,6 +25,9 @@ type Config struct {
 	// ArgoCDWebhookToken authenticates POST /webhooks/argocd, "" when it is
 	// disabled.
 	ArgoCDWebhookToken string
+	// GitOpsCloneDir is the directory of the gitops repo clone, "" for a
+	// temporary directory of the process.
+	GitOpsCloneDir string
 }
 
 // Load reads configuration from environment variables and validates it.
@@ -74,6 +77,7 @@ func Load() (*Config, error) {
 		DeployToken:        os.Getenv("BADIL_DEPLOY_TOKEN"),
 		MetricsAddr:        metricsAddr,
 		ArgoCDWebhookToken: os.Getenv("ARGOCD_WEBHOOK_TOKEN"),
+		GitOpsCloneDir:     os.Getenv("GITOPS_CLONE_DIR"),
 	}, nil
 }
 

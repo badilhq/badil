@@ -89,7 +89,8 @@ func (s *Server) handlePullRequest(ctx context.Context, ev forge.Event) {
 }
 
 // handlePush starts a config sync in the background for a push to the gitops
-// repo's default branch that did not delete it. Any other push is ignored.
+// repo's default branch that did not delete it, once the store is told to
+// check the remote on its next read. Any other push is ignored.
 func (s *Server) handlePush(ctx context.Context, e forge.PushEvent) {
 	repo := e.FullName
 	reason := ""
@@ -112,6 +113,7 @@ func (s *Server) handlePush(ctx context.Context, e forge.PushEvent) {
 	}
 	slog.InfoContext(ctx, "webhook push", attrs...)
 	if reason == "" {
+		s.store.Invalidate()
 		s.startPushSync(ctx)
 	}
 }

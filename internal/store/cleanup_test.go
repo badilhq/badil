@@ -2,9 +2,8 @@ package store_test
 
 import (
 	"context"
-	"io"
+	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"testing"
 
@@ -13,19 +12,12 @@ import (
 )
 
 func TestListPreviews(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/repos/acme/gitops/contents/previews" {
-			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
-		}
-		_, _ = io.WriteString(w, `[
-			{"type":"dir","name":"feature-b","path":"previews/feature-b"},
-			{"type":"file","name":"README.md","path":"previews/README.md"},
-			{"type":"dir","name":"feature-a","path":"previews/feature-a"}
-		]`)
-	}))
-	defer srv.Close()
-
-	got, err := newClient(t, srv).ListPreviews(context.Background())
+	c, _ := readStore(t, map[string]string{
+		"previews/feature-b/values.yaml": "services: []\n",
+		"previews/README.md":             "previews\n",
+		"previews/feature-a/values.yaml": "services: []\n",
+	})
+	got, err := c.ListPreviews(context.Background())
 	if err != nil {
 		t.Fatalf("ListPreviews: %v", err)
 	}
@@ -34,14 +26,29 @@ func TestListPreviews(t *testing.T) {
 	}
 }
 
-func TestListPreviews_NotFound(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = io.WriteString(w, `{"message":"Not Found"}`)
-	}))
-	defer srv.Close()
+// TestListPreviews_NoLimit checks that every preview is listed, past the
+// contents API's 1,000 entries.
+func TestListPreviews_NoLimit(t *testing.T) {
+	files := map[string]string{}
+	want := make([]string, 0, 1500)
+	for i := range 1500 {
+		slug := fmt.Sprintf("preview-%04d", i)
+		files["previews/"+slug+"/values.yaml"] = "services: []\n"
+		want = append(want, slug)
+	}
+	c, _ := readStore(t, files)
+	got, err := c.ListPreviews(context.Background())
+	if err != nil {
+		t.Fatalf("ListPreviews: %v", err)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("ListPreviews returned %d previews, want the %d sorted", len(got), len(want))
+	}
+}
 
-	got, err := newClient(t, srv).ListPreviews(context.Background())
+func TestListPreviews_NotFound(t *testing.T) {
+	c, _ := readStore(t, map[string]string{"badil.yaml": "services: {}\n"})
+	got, err := c.ListPreviews(context.Background())
 	if err != nil {
 		t.Fatalf("ListPreviews: %v", err)
 	}
@@ -68,35 +75,32 @@ func runDelete(
 	stillDelete func(preview.PreviewValues) bool,
 ) (*store.DeleteResult, error) {
 	t.Helper()
-	g.t = t
-	srv := httptest.NewServer(g)
-	t.Cleanup(srv.Close)
-	return newClient(t, srv).DeletePreviewWithRetry(
+	return g.open(t).DeletePreviewWithRetry(
 		context.Background(), "feature-x", "chore(preview): expire feature-x preview", stillDelete,
 	)
 }
 
 func TestDeletePreviewWithRetry_Deletes(t *testing.T) {
-	g := &teardownGitHub{gets: []fileState{{sha: "blob-1", body: onlyPR42}}}
+	g := &teardownGitHub{gets: []string{onlyPR42}}
 	res, err := runDelete(t, g, singlePin)
 	if err != nil {
 		t.Fatalf("DeletePreviewWithRetry: %v", err)
 	}
-	if !res.Deleted || res.CommitURL != "https://github.com/acme/gitops/commit/c0ffee" {
+	if !res.Deleted || res.CommitURL != fakeCommitURL {
 		t.Errorf("result = %+v, want deleted with the commit url", res)
 	}
 	if len(res.Values.Services) != 2 || res.Values.Services[0].CommitSha != "aaa" {
 		t.Errorf("Values = %+v, want the deleted file", res.Values)
 	}
 	reqs := g.requests()
-	if len(reqs) != 1 || reqs[0].method != http.MethodDelete || reqs[0].sha != "blob-1" ||
+	if len(reqs) != 1 || reqs[0].method != http.MethodDelete || reqs[0].sha != blobSHA(onlyPR42) ||
 		reqs[0].message != "chore(preview): expire feature-x preview" {
-		t.Errorf("requests = %+v, want one DELETE at blob-1", reqs)
+		t.Errorf("requests = %+v, want one DELETE at the file's blob", reqs)
 	}
 }
 
 func TestDeletePreviewWithRetry_StillDeleteFalse(t *testing.T) {
-	g := &teardownGitHub{gets: []fileState{{sha: "blob-1", body: pr42AndPR7}}}
+	g := &teardownGitHub{gets: []string{pr42AndPR7}}
 	res, err := runDelete(t, g, singlePin)
 	if err != nil {
 		t.Fatalf("DeletePreviewWithRetry: %v", err)
@@ -111,7 +115,7 @@ func TestDeletePreviewWithRetry_StillDeleteFalse(t *testing.T) {
 
 func TestDeletePreviewWithRetry_ConflictThenRecheckFalse(t *testing.T) {
 	g := &teardownGitHub{
-		gets:   []fileState{{sha: "blob-1", body: onlyPR42}, {sha: "blob-2", body: pr42AndPR7}},
+		gets:   []string{onlyPR42, pr42AndPR7},
 		writes: []int{http.StatusConflict},
 	}
 	res, err := runDelete(t, g, singlePin)
@@ -127,9 +131,9 @@ func TestDeletePreviewWithRetry_ConflictThenRecheckFalse(t *testing.T) {
 }
 
 func TestDeletePreviewWithRetry_LastConflictThenRecheckFalse(t *testing.T) {
-	gets := slices.Repeat([]fileState{{sha: "blob-1", body: onlyPR42}}, store.MaxWriteRetries)
+	gets := slices.Repeat([]string{onlyPR42}, store.MaxWriteRetries)
 	g := &teardownGitHub{
-		gets:   append(gets, fileState{sha: "blob-2", body: pr42AndPR7}),
+		gets:   append(gets, pr42AndPR7),
 		writes: slices.Repeat([]int{http.StatusConflict}, store.MaxWriteRetries),
 	}
 	res, err := runDelete(t, g, singlePin)
@@ -147,20 +151,20 @@ func TestDeletePreviewWithRetry_LastConflictThenRecheckFalse(t *testing.T) {
 func TestDeletePreviewWithRetry_NotFound(t *testing.T) {
 	cases := []struct {
 		name    string
-		gets    []fileState
+		gets    []string
 		writes  []int
 		deletes int
 	}{
-		{name: "on read", gets: []fileState{{}}},
+		{name: "on read", gets: []string{""}},
 		{
 			name:    "on re-fetch",
-			gets:    []fileState{{sha: "blob-1", body: onlyPR42}, {}},
+			gets:    []string{onlyPR42, ""},
 			writes:  []int{http.StatusConflict},
 			deletes: 1,
 		},
 		{
 			name:    "on delete",
-			gets:    []fileState{{sha: "blob-1", body: onlyPR42}},
+			gets:    []string{onlyPR42},
 			writes:  []int{http.StatusNotFound},
 			deletes: 1,
 		},
@@ -184,7 +188,7 @@ func TestDeletePreviewWithRetry_NotFound(t *testing.T) {
 
 func TestDeletePreviewWithRetry_ConflictsExhausted(t *testing.T) {
 	g := &teardownGitHub{
-		gets:   []fileState{{sha: "blob-1", body: onlyPR42}},
+		gets:   []string{onlyPR42},
 		writes: slices.Repeat([]int{http.StatusConflict}, store.MaxWriteRetries),
 	}
 	_, err := runDelete(t, g, singlePin)

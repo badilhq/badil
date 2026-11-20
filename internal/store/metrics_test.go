@@ -2,45 +2,19 @@ package store_test
 
 import (
 	"context"
-	"io"
 	"maps"
-	"net/http"
-	"net/http/httptest"
-	"net/url"
-	"strings"
 	"testing"
-
-	gh "github.com/google/go-github/v71/github"
 
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/store"
 )
 
 func TestClientMetrics_TimesRetryOperations(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/broken/"):
-			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = io.WriteString(w, `{"message":"boom"}`)
-		case r.Method == http.MethodGet:
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = io.WriteString(w, `{"message":"Not Found"}`)
-		case r.Method == http.MethodPut:
-			w.WriteHeader(http.StatusCreated)
-			_, _ = io.WriteString(w, `{"commit":{"html_url":"https://github.com/x/y/commit/c0ffee"}}`)
-		default:
-			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
-		}
-	}))
-	t.Cleanup(srv.Close)
-	u, parseErr := url.Parse(srv.URL + "/")
-	if parseErr != nil {
-		t.Fatal(parseErr)
-	}
-	ghc := gh.NewClient(nil)
-	ghc.BaseURL = u
 	m := metrics.New()
-	c := store.NewClient(ghc, "acme", "gitops", store.WithMetrics(m))
+	f := newGitopsFake(t, map[string]string{"previews/broken/values.yaml": "services: [\n"})
+	c := f.open(t, store.WithMetrics(m))
+	// The clone made when the store opened is timed too.
+	want := map[string]uint64{"clone/ok": 1}
 
 	ctx := context.Background()
 	if _, err := c.WritePreviewWithRetry(ctx, "fresh", testCatalog("backend-1"),
@@ -84,9 +58,11 @@ func TestClientMetrics_TimesRetryOperations(t *testing.T) {
 			got[labels["op"]+"/"+labels["result"]] = metric.GetHistogram().GetSampleCount()
 		}
 	}
-	if want := map[string]uint64{
-		"write/ok": 1, "teardown/error": 2, "teardown/ok": 2, "sync/error": 1, "sync/ok": 1,
-	}; !maps.Equal(got, want) {
+	want["write/ok"], want["teardown/error"], want["teardown/ok"], want["sync/error"], want["sync/ok"] = 1, 2, 2, 1, 1
+	// The first read after the write checks the remote, whose head the write
+	// moved.
+	want["ls_remote/ok"], want["fetch/ok"] = 1, 1
+	if !maps.Equal(got, want) {
 		t.Errorf("gitops operation counts = %v, want %v", got, want)
 	}
 }

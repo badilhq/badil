@@ -44,6 +44,8 @@ Server environment.
   value: {{ required "config.gitopsRepo is required" .Values.config.gitopsRepo | quote }}
 - name: LISTEN_ADDR
   value: ":{{ .Values.service.port }}"
+- name: GITOPS_CLONE_DIR
+  value: /var/lib/badil/gitops
 - name: GITHUB_PRIVATE_KEY
   valueFrom:
     secretKeyRef:

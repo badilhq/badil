@@ -74,8 +74,7 @@ func TestWritePreviewWithRetry_Dependencies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WritePreviewWithRetry: %v", err)
 	}
-	written, _ := s.written.Load().(string)
-	got := decode(t, written)
+	got := decode(t, s.written())
 	want := got
 	want.GitopsRepoURL = "https://github.com/acme/gitops.git"
 	want.Dependencies = decode(t, withDependenciesFile()).Dependencies
@@ -133,7 +132,7 @@ func TestSyncPreviewWithRetry_ShadowedDependency(t *testing.T) {
 		t.Fatalf("SyncPreviewWithRetry: %v", err)
 	}
 	if result.Changed {
-		t.Errorf("Changed = true, want the file kept without the dependency:\n%s", s.written.Load())
+		t.Errorf("Changed = true, want the file kept without the dependency:\n%s", s.written())
 	}
 	if len(logs.records) != 1 {
 		t.Fatalf("logged %d records, want 1 warning", len(logs.records))

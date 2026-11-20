@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/bradleyfalzon/ghinstallation/v2"
-	gh "github.com/google/go-github/v71/github"
 )
 
 // AppConfig holds the configuration for a GitHub App.
@@ -48,8 +47,9 @@ func (a *App) GetInstallationToken(ctx context.Context, installationID int64) (s
 	return itr.Token(ctx)
 }
 
-// ClientForInstallation returns an authenticated GitHub client for the given installation.
-func (a *App) ClientForInstallation(installationID int64) *gh.Client {
-	itr := ghinstallation.NewFromAppsTransport(a.transport, installationID)
-	return gh.NewClient(&http.Client{Transport: itr})
+// InstallationTransport returns a transport authenticated as the given
+// installation. It caches the installation token and mints a new one only when
+// the cached one is due for refresh, so a process builds one and shares it.
+func (a *App) InstallationTransport(installationID int64) *ghinstallation.Transport {
+	return ghinstallation.NewFromAppsTransport(a.transport, installationID)
 }

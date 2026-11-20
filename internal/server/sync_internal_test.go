@@ -3,11 +3,14 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/go-git/go-git/v5/plumbing/transport"
 
 	"github.com/badilhq/badil/internal/store"
 )
@@ -114,7 +117,9 @@ func TestSync_Refused(t *testing.T) {
 		},
 		{
 			name: "gitops unauthorized", body: `{}`, status: http.StatusBadGateway,
-			wantErr: "gitops: unauthorized", listErr: store.ErrUnauthorized,
+			wantErr: "gitops: unauthorized",
+			// As the store wraps a git call the remote refused.
+			listErr: fmt.Errorf("%w: %v", store.ErrUnauthorized, transport.ErrAuthenticationRequired),
 		},
 	}
 	for _, tc := range cases {

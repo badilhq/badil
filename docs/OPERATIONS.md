@@ -16,7 +16,7 @@ Every label has a closed set of values. Go runtime (`go_*`) and process (`proces
 | `badil_reconciles_total` | counter | `outcome` | One per pull request reconcile: `failed` (catalog, PR or preview read error, preview list error, PR files list error, failed unpin of untouched services, or no service write succeeded and at least one failed), else `skipped`, else `deployed` (a service write succeeded), else `torn_down`. |
 | `badil_reconcile_skips_total` | counter | `reason` | Skipped reconciles by reason: `other label`, `not labeled`, `repo not in catalog`, `fork pr`, `service held by another pr`, `preview limit reached`, `conflicting preview labels`, `already deployed`, `no service changed`. |
 | `badil_teardowns_total` | counter | `trigger`, `result` | Teardowns of a PR from a preview. `trigger` is `webhook` or `sweep`; `result` is `deleted`, `unpinned`, `noop` (nothing pinned) or `error`. |
-| `badil_gitops_operation_duration_seconds` | histogram | `op`, `result` | Duration of gitops `write`, `teardown` and `sync` operations, 409 retries included; `result` is `ok` or `error`. |
+| `badil_gitops_operation_duration_seconds` | histogram | `op`, `result` | Duration of gitops `write`, `teardown` and `sync` operations, 409 retries included, and of the git `clone`, `ls_remote` and `fetch` of the gitops clone; `result` is `ok` or `error`. |
 | `badil_sweep_runs_total` | counter | `result` | In-server sweep runs, `ok` or `error`. A run cancelled by shutdown is not counted. |
 | `badil_sweep_last_success_timestamp_seconds` | gauge | | Unix time of the last successful in-server sweep. |
 | `badil_sweep_previews_deleted_total` | counter | `rule` | Previews deleted by the sweep: `no_pin` (rule 1) or `ttl` (rule 2). |

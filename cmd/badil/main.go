@@ -98,10 +98,14 @@ func serveCmd() *cobra.Command {
 				return err
 			}
 
-			st, f, err := newStoreAndForge(app, cfg, store.WithMetrics(m))
+			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			defer stop()
+
+			st, f, err := newStoreAndForge(ctx, app, cfg, store.WithMetrics(m))
 			if err != nil {
 				return err
 			}
+			defer closeStore(ctx, st)
 
 			srv := server.NewServer(f, st, cfg.DeployToken,
 				server.WithMetrics(m), server.WithArgoCDToken(cfg.ArgoCDWebhookToken))
@@ -110,9 +114,6 @@ func serveCmd() *cobra.Command {
 				Handler:           srv.Handler(),
 				ReadHeaderTimeout: readHeaderTimeout,
 			}
-
-			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-			defer stop()
 
 			if cfg.DeployToken == "" {
 				slog.InfoContext(ctx, "deploy API disabled", slog.String("reason", "BADIL_DEPLOY_TOKEN is unset"))
@@ -285,17 +286,46 @@ func shutdownServers(ctx context.Context, servers ...*http.Server) error {
 }
 
 // newStoreAndForge builds the gitops repo store and the GitHub forge from
-// cfg, over one client authenticated as the GitHub App installation. The
-// store is configured by opts.
+// cfg. One installation transport of the GitHub App backs both the API client
+// and the store's git credentials, so its cached installation token is shared.
+// The store clones the gitops repo into cfg.GitOpsCloneDir and is configured
+// by opts; a failed clone is an error.
 func newStoreAndForge(
-	app *github.App, cfg *config.Config, opts ...store.Option,
+	ctx context.Context, app *github.App, cfg *config.Config, opts ...store.Option,
 ) (*store.GitHubStore, *forgegithub.Forge, error) {
 	owner, repo, ok := strings.Cut(cfg.GitOpsRepo, "/")
 	if !ok || owner == "" || repo == "" {
 		return nil, nil, fmt.Errorf("GITOPS_REPO must be 'owner/repo', got %q", cfg.GitOpsRepo)
 	}
-	client := app.ClientForInstallation(cfg.InstallationID)
-	return store.NewClient(client, owner, repo, opts...), forgegithub.New(client, app, cfg.InstallationID), nil
+	itr := app.InstallationTransport(cfg.InstallationID)
+	client := gh.NewClient(&http.Client{Transport: itr})
+	st, err := store.Open(ctx, client, owner, repo, store.CloneConfig{
+		URL:         "https://github.com/" + owner + "/" + repo + ".git",
+		Dir:         cfg.GitOpsCloneDir,
+		Credentials: gitCredentials(itr),
+	}, opts...)
+	if err != nil {
+		return nil, nil, err
+	}
+	return st, forgegithub.New(client, app, cfg.InstallationID), nil
+}
+
+// gitCredentials authenticates the store's git calls as the installation of
+// itr: user x-access-token, with the installation token itr caches and
+// refreshes before it expires.
+func gitCredentials(itr *ghinstallation.Transport) store.CredentialProvider {
+	return func(ctx context.Context) (string, string, error) {
+		token, err := itr.Token(ctx)
+		return "x-access-token", token, err
+	}
+}
+
+// closeStore removes the store's clone directory when it made one, logging a
+// failure.
+func closeStore(ctx context.Context, st *store.GitHubStore) {
+	if err := st.Close(); err != nil {
+		slog.Default().WarnContext(ctx, "removing the gitops clone failed", slog.String("err", err.Error()))
+	}
 }
 
 // newApp builds the GitHub App from the loaded config.
@@ -331,12 +361,13 @@ func cleanupCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			st, f, err := newStoreAndForge(app, cfg)
+			ctx, cancel := context.WithTimeout(cmd.Context(), cleanupTimeout)
+			defer cancel()
+			st, f, err := newStoreAndForge(ctx, app, cfg)
 			if err != nil {
 				return err
 			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), cleanupTimeout)
-			defer cancel()
+			defer closeStore(ctx, st)
 			return lifecycle.Sweep(ctx, sweepAPI(st, f, nil), time.Now().UTC(), ttl)
 		},
 	}

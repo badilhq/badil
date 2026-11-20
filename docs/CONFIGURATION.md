@@ -316,6 +316,7 @@ badil reads these environment variables:
 | `GITHUB_WEBHOOK_SECRET` | yes | | GitHub App webhook secret |
 | `GITHUB_INSTALLATION_ID` | yes | | the only installation badil accepts webhooks from |
 | `GITOPS_REPO` | yes | | the gitops repo, `owner/repo` |
+| `GITOPS_CLONE_DIR` | no | unset: a temporary directory per process, removed on exit | directory of the gitops repo's git clone, removed and cloned again on start; the chart sets `/var/lib/badil/gitops`, on an `emptyDir` |
 | `BADIL_DEPLOY_TOKEN` | no | unset | bearer token for `/v1/deploy` and `/v1/sync`; when unset, both answer 404 |
 | `LISTEN_ADDR` | no | `:8080` | API and webhook listener |
 | `METRICS_ADDR` | no | `:9090` when unset | Prometheus `/metrics` listener; set to `""` to disable `/metrics` |

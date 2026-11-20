@@ -264,3 +264,24 @@ func TestLoad_ArgoCDWebhookToken(t *testing.T) {
 		t.Errorf("ArgoCDWebhookToken = %q, want %q", cfg.ArgoCDWebhookToken, "argocd-secret")
 	}
 }
+
+func TestLoad_GitOpsCloneDir(t *testing.T) {
+	setEnv(t, validEnv())
+	t.Setenv("GITOPS_CLONE_DIR", "")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.GitOpsCloneDir != "" {
+		t.Errorf("GitOpsCloneDir = %q, want empty when unset", cfg.GitOpsCloneDir)
+	}
+
+	t.Setenv("GITOPS_CLONE_DIR", "/var/lib/badil/gitops")
+	cfg, err = config.Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.GitOpsCloneDir != "/var/lib/badil/gitops" {
+		t.Errorf("GitOpsCloneDir = %q, want %q", cfg.GitOpsCloneDir, "/var/lib/badil/gitops")
+	}
+}

@@ -62,6 +62,8 @@ The [cleanup sweep](#cleanup-sweep) catches what events missed. Every step is de
 
 badil never talks to the cluster or to Argo CD. It reads one file, `badil.yaml`, and writes one file per preview. Argo CD does every deploy and deletion.
 
+badil reads the gitops repo from a full git clone of its default branch, made on start in `GITOPS_CLONE_DIR`. Before a read, it checks the remote branch head with `ls-remote`, at most once every 5 seconds, and fetches only when the head moved. A push to the gitops repo and each of badil's writes make the next read check at once. A failed check fails the read: badil never reads a clone it could not check. badil writes through the GitHub contents API, with the blob SHAs read from the clone. Each fetch adds a pack to the clone; past 50 packs, the default of git's `gc.autoPackLimit`, badil repacks them into one. `badil serve` listens only once the clone is made: the chart's startup probe allows 5 minutes for it before the liveness probe applies.
+
 `badil.yaml` is the only preview config, and badil is its only reader. badil writes everything a renderer needs into each preview file. The renderer reads only that file, so it can be swapped: [Preview contract](CONTRACT.md) publishes the file for any renderer.
 
 Keys: [Configuration reference](CONFIGURATION.md).

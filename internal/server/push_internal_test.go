@@ -120,6 +120,11 @@ func TestPush_DefaultBranchSyncsEveryPreview(t *testing.T) {
 			if got := fg.synced(); !slices.Equal(got, []string{"a", "b"}) {
 				t.Errorf("synced = %v, want every preview", got)
 			}
+			// The sync reads badil.yaml after the store was told to check the
+			// remote.
+			if total, beforeCatalog := fg.invalidated(); total != 1 || beforeCatalog != 1 {
+				t.Errorf("invalidations = %d, %d before the badil.yaml read; want 1, 1", total, beforeCatalog)
+			}
 			assertCounter(t, m, "badil_webhook_deliveries_total", `{event="push",status="200"} 1`)
 		})
 	}
@@ -146,6 +151,9 @@ func TestPush_OtherPushesIgnored(t *testing.T) {
 			}
 			if got := drain(fg.started); len(got) != 0 || len(fg.synced()) != 0 {
 				t.Errorf("gitops calls = %v, syncs = %v, want none", got, fg.synced())
+			}
+			if total, _ := fg.invalidated(); total != 0 {
+				t.Errorf("invalidations = %d, want none", total)
 			}
 			assertCounter(t, m, "badil_webhook_deliveries_total", `{event="push",status="200"} 1`)
 			if _, attrs := teardownRecord(t, capture, "webhook push"); attrs["reason"].String() != tc.reason {

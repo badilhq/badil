@@ -55,6 +55,14 @@ spec:
             {{- end }}
             {{- end }}
             {{- end }}
+          # serve clones the gitops repo before it listens: allow 5 minutes
+          # for the clone before the liveness probe takes over.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            failureThreshold: 30
           livenessProbe:
             httpGet:
               path: /healthz
@@ -69,3 +77,9 @@ spec:
           {{- end }}
           securityContext:
             {{- include "badil.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: gitops
+              mountPath: /var/lib/badil
+      volumes:
+        - name: gitops
+          emptyDir: {}

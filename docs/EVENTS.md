@@ -135,7 +135,7 @@ The cap check of `/v1/deploy` is described in [`POST /v1/deploy`](API.md#post-v1
 
 The cap is soft. The check and the write are not atomic, and `/v1/deploy` runs outside the reconcile queue, so a concurrent manual deploy and reconcile can both pass the check and each exceed the cap by one.
 
-The check costs one extra GitHub call, only when the cap is set and the target does not exist.
+The check reads the gitops clone, so it costs no extra GitHub call.
 
 ## Reconcile queue
 

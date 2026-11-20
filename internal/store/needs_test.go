@@ -40,8 +40,7 @@ func TestWritePreviewWithRetry_Needs(t *testing.T) {
 		if writeErr != nil {
 			t.Fatalf("WritePreviewWithRetry %s: %v", service, writeErr)
 		}
-		written, _ := s.written.Load().(string)
-		return res, written
+		return res, s.written()
 	}
 
 	first, written := deploy([]string{""}, "front")
