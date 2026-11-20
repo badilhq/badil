@@ -35,6 +35,8 @@ func assertMetrics(t *testing.T, m *metrics.Metrics, want map[string]float64, na
 		"badil_previews_synced_total": "# HELP badil_previews_synced_total " +
 			"Previews rewritten to match badil.yaml, by a sweep, a push or /v1/sync.\n" +
 			"# TYPE badil_previews_synced_total counter\n",
+		"badil_catchup_reconciles_total": "# HELP badil_catchup_reconciles_total " +
+			"Pull request reconciles started by catch-up.\n# TYPE badil_catchup_reconciles_total counter\n",
 	}
 	var expected strings.Builder
 	matched := 0

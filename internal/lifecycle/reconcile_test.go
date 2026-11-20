@@ -36,7 +36,9 @@ const fetchedSHA = "fe7c4ed0000000000000000000000000000000ff"
 // (projected on the catalog) and raw. It is made on the first api call, and
 // kept by the next ones. FetchServiceCatalog fails with catalogErr when set.
 // GetPullRequest returns pr, unless prErr is set; ListChangedFiles returns
-// files, unless filesErr is set. Each push first runs beforePush when set,
+// files, unless filesErr is set. ListOpenPullRequests returns, for
+// "owner/repo", openPRs, unless listErrs holds an error for it; listed logs
+// the repos listed, in order. Each push first runs beforePush when set,
 // whose error fails the push. calls logs, in order, "files", "apply",
 // "upsert" and "fanout". Metrics records the outcomes; nil records nothing.
 type reconcileFake struct {
@@ -54,8 +56,11 @@ type reconcileFake struct {
 	files       []forge.ChangedFile
 	filesErr    error
 	beforePush  func(*storetest.Remote) error
+	openPRs     map[string][]forge.PullRequest
+	listErrs    map[string]error
 
 	g       *gitops
+	listed  []string
 	prReads int
 	fanOuts []string
 	upserts []string
@@ -67,6 +72,10 @@ func (f *reconcileFake) FetchServiceCatalog(ctx context.Context) (*store.Service
 		return nil, f.catalogErr
 	}
 	return f.g.st.FetchServiceCatalog(ctx)
+}
+
+func (f *reconcileFake) GetPreview(ctx context.Context, slug string) (*preview.PreviewValues, string, error) {
+	return f.g.st.GetPreview(ctx, slug)
 }
 
 func (f *reconcileFake) Apply(ctx context.Context, op store.Op) (store.Result, error) {
@@ -93,6 +102,15 @@ func (f *reconcileFake) ListChangedFiles(context.Context, string, string, int) (
 		return nil, f.filesErr
 	}
 	return f.files, nil
+}
+
+func (f *reconcileFake) ListOpenPullRequests(_ context.Context, owner, repo string) ([]forge.PullRequest, error) {
+	key := owner + "/" + repo
+	f.listed = append(f.listed, key)
+	if err := f.listErrs[key]; err != nil {
+		return nil, err
+	}
+	return f.openPRs[key], nil
 }
 
 func (f *reconcileFake) GetPullRequest(context.Context, string, string, int) (*forge.PullRequest, error) {

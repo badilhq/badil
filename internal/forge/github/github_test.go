@@ -37,7 +37,7 @@ func TestGetPullRequest(t *testing.T) {
 	const (
 		head = `"head":{"ref":"feature/pricing","sha":"abc123","repo":{"full_name":"%s"}}`
 		base = `"base":{"repo":{"full_name":"acme/backend-1"}}`
-		rest = `"user":{"login":"octocat"},"html_url":"https://github.com/acme/backend-1/pull/42","changed_files":3`
+		rest = `"number":42,"user":{"login":"octocat"},"html_url":"https://github.com/acme/backend-1/pull/42","changed_files":3`
 	)
 	pr := func(open bool, headFullName string, labels ...string) *forge.PullRequest {
 		if labels == nil {
@@ -52,6 +52,7 @@ func TestGetPullRequest(t *testing.T) {
 			Labels:       labels,
 			FullName:     "acme/backend-1",
 			HeadFullName: headFullName,
+			Number:       42,
 			ChangedFiles: 3,
 		}
 	}
@@ -210,5 +211,94 @@ func TestListPullRequestFiles_FailingLaterPage(t *testing.T) {
 	}
 	if got != nil {
 		t.Errorf("files = %+v, want nil", got)
+	}
+}
+
+// pullsPages serves GET /repos/acme/platform/pulls?state=open, one page per
+// entry of pages, linking each page to the next. A page that is "" answers
+// 500.
+func pullsPages(t *testing.T, pages ...string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if r.Method != http.MethodGet || r.URL.Path != "/repos/acme/platform/pulls" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if q.Get("state") != "open" || q.Get("per_page") != "100" {
+			t.Errorf("query = %q, want state=open and per_page=100", r.URL.RawQuery)
+		}
+		page := 1
+		if p := q.Get("page"); p != "" {
+			_, _ = fmt.Sscan(p, &page)
+		}
+		if page < 1 || page > len(pages) || pages[page-1] == "" {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, `{"message":"boom"}`)
+			return
+		}
+		if page < len(pages) {
+			w.Header().Set("Link", fmt.Sprintf(`<%s%s?state=open&per_page=100&page=%d>; rel="next"`,
+				"http://"+r.Host, r.URL.Path, page+1))
+		}
+		_, _ = io.WriteString(w, pages[page-1])
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// listedPR is a listed pull request of acme/platform, its head in headRepo.
+func listedPR(number int, sha, headRepo, labels string) string {
+	return fmt.Sprintf(`{"number":%d,"state":"open","html_url":"https://github.com/acme/platform/pull/%d",`+
+		`"user":{"login":"octocat"},"labels":[%s],`+
+		`"head":{"ref":"feature/%d","sha":"%s","repo":{"full_name":"%s"}},`+
+		`"base":{"repo":{"full_name":"acme/platform"}}}`, number, number, labels, number, sha, headRepo)
+}
+
+func TestListOpenPullRequests(t *testing.T) {
+	srv := pullsPages(t,
+		"["+listedPR(7, "aaa", "acme/platform", `{"name":"preview"}`)+","+
+			listedPR(8, "bbb", "octocat/platform", "")+"]",
+		"["+listedPR(9, "ccc", "acme/platform", `{"name":"preview:demo"},{"name":"bug"}`)+"]",
+	)
+	got, err := newForge(t, srv).ListOpenPullRequests(context.Background(), "acme", "platform")
+	if err != nil {
+		t.Fatalf("ListOpenPullRequests: %v", err)
+	}
+	pr := func(number int, sha, headRepo string, labels ...string) forge.PullRequest {
+		if labels == nil {
+			labels = []string{}
+		}
+		return forge.PullRequest{
+			Open:         true,
+			HeadRef:      "feature/" + strconv.Itoa(number),
+			HeadSHA:      sha,
+			Author:       "octocat",
+			URL:          "https://github.com/acme/platform/pull/" + strconv.Itoa(number),
+			Labels:       labels,
+			FullName:     "acme/platform",
+			HeadFullName: headRepo,
+			Number:       number,
+		}
+	}
+	want := []forge.PullRequest{
+		pr(7, "aaa", "acme/platform", "preview"),
+		pr(8, "bbb", "octocat/platform"),
+		pr(9, "ccc", "acme/platform", "preview:demo", "bug"),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ListOpenPullRequests = %+v, want %+v", got, want)
+	}
+}
+
+func TestListOpenPullRequests_FailingLaterPage(t *testing.T) {
+	srv := pullsPages(t, "["+listedPR(7, "aaa", "acme/platform", "")+"]", "")
+	got, err := newForge(t, srv).ListOpenPullRequests(context.Background(), "acme", "platform")
+	if err == nil {
+		t.Fatalf("ListOpenPullRequests = %+v, nil; want an error", got)
+	}
+	if got != nil {
+		t.Errorf("pull requests = %+v, want nil", got)
 	}
 }

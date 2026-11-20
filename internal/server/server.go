@@ -76,7 +76,7 @@ func NewServer(
 		store:       st,
 		fanOut:      lifecycle.FanOutPRComments,
 		deployToken: deployToken,
-		jobTimeout:  reconcileTimeout,
+		jobTimeout:  ReconcileTimeout,
 		now:         time.Now,
 	}
 	for _, opt := range opts {

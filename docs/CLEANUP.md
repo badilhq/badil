@@ -57,6 +57,8 @@ The sweep runs in one of two places. Use one or the other: both run the same ide
 
 The chart runs the sweep in the server (`cleanup.interval`, `1h` by default) unless `cleanup.enabled=true` switches it to the CronJob.
 
+In both places, each sweep is followed by a [catch-up](EVENTS.md#catch-up), whether the sweep succeeded or failed: it reconciles the open labelled PRs not pinned at their head SHA, which repairs deploys whose deliveries were missed. `badil cleanup` exits with the sweep's error, whatever the catch-up does.
+
 ### Rules
 
 The sweep lists `previews/*` and applies to each preview the first matching rule of 1 to 3. It then syncs every preview it keeps (step 4).

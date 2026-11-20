@@ -12,9 +12,9 @@ import (
 	"github.com/badilhq/badil/internal/store"
 )
 
-// reconcileTimeout caps the background work for a single reconcile, shared by
+// ReconcileTimeout caps the background work for a single reconcile, shared by
 // every service it deploys or by its teardown.
-const reconcileTimeout = 20 * time.Second
+const ReconcileTimeout = 20 * time.Second
 
 // prTarget builds the Target of a pull_request event, without its slug.
 func prTarget(e forge.PullRequestEvent) lifecycle.Target {
@@ -75,7 +75,14 @@ func (s *Server) startReconcile(ctx context.Context, e forge.PullRequestEvent) {
 		)
 		return
 	}
+	s.QueueReconcile(ctx, ev, func(lifecycle.ReconcileResult) {})
+}
 
+// QueueReconcile reconciles ev in a background job (runJob), as a
+// pull_request delivery does: after the jobs before it, alone, and capped at
+// the job timeout. done gets ReconcilePR's result once it completes, or the
+// failed outcome when it panics. It is a lifecycle.ReconcileFunc.
+func (s *Server) QueueReconcile(ctx context.Context, ev lifecycle.Event, done func(lifecycle.ReconcileResult)) {
 	s.runJob(ctx, func(rec any) {
 		slog.ErrorContext(ctx, "preview reconcile panicked",
 			slog.String("repo", ev.FullName),
@@ -83,8 +90,9 @@ func (s *Server) startReconcile(ctx context.Context, e forge.PullRequestEvent) {
 			slog.String("action", ev.Action),
 			slog.Any("panic", rec),
 		)
+		done(lifecycle.ReconcileResult{Outcome: lifecycle.OutcomeFailed})
 	}, func(jctx context.Context) {
-		lifecycle.ReconcilePR(jctx, s.reconcileAPI(), ev)
+		done(lifecycle.ReconcilePR(jctx, s.reconcileAPI(), ev))
 	})
 }
 

@@ -60,6 +60,32 @@ func (c *ServiceCatalog) ServicesForRepo(owner, repo string) []string {
 	return out
 }
 
+// GitHubRepo is a GitHub repository, owner/repo.
+type GitHubRepo struct {
+	Owner string
+	Repo  string
+}
+
+// GitHubRepos returns, in catalog order and once each, the repositories of
+// the services whose git URL ServicesForRepo matches: owner and repo of
+// https://github.com/<owner>/<repo>, lowercased.
+func (c *ServiceCatalog) GitHubRepos() []GitHubRepo {
+	var out []GitHubRepo
+	for _, name := range c.Services {
+		path, ok := strings.CutPrefix(normalizeRepoURL(c.Repos[name]), "https://github.com/")
+		if !ok {
+			continue
+		}
+		owner, repo, ok := strings.Cut(path, "/")
+		r := GitHubRepo{Owner: owner, Repo: repo}
+		if !ok || owner == "" || repo == "" || strings.Contains(repo, "/") || slices.Contains(out, r) {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
 // normalizeRepoURL lowercases url and removes a trailing "/" then ".git".
 func normalizeRepoURL(url string) string {
 	u := strings.ToLower(url)

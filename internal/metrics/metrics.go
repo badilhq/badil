@@ -43,6 +43,7 @@ type Metrics struct {
 	previews          prometheus.Gauge
 	spinUp            *prometheus.HistogramVec
 	argoCDEvents      *prometheus.CounterVec
+	catchUpReconciles prometheus.Counter
 
 	// previewsMu guards previewsN, the value of previews, which never goes
 	// below 0.
@@ -123,6 +124,11 @@ func New() *Metrics {
 			Name:      "argocd_events_total",
 			Help:      "Argo CD notification events, by whether they were recorded as a spin-up.",
 		}, []string{labelResult}),
+		catchUpReconciles: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "catchup_reconciles_total",
+			Help:      "Pull request reconciles started by catch-up.",
+		}),
 	}
 	m.registry.MustRegister(
 		collectors.NewGoCollector(),
@@ -140,6 +146,7 @@ func New() *Metrics {
 		m.previews,
 		m.spinUp,
 		m.argoCDEvents,
+		m.catchUpReconciles,
 	)
 	return m
 }
@@ -293,4 +300,12 @@ func (m *Metrics) ArgoCDEventIgnored() {
 		return
 	}
 	m.argoCDEvents.WithLabelValues(resultIgnored).Inc()
+}
+
+// CatchUpReconcile counts one reconcile started by catch-up.
+func (m *Metrics) CatchUpReconcile() {
+	if m == nil {
+		return
+	}
+	m.catchUpReconciles.Inc()
 }

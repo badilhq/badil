@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,18 +30,37 @@ var errUnexpected = errors.New("unexpected call")
 // previews are all gone by the time they are read: its Apply changes
 // nothing. ListPreviews returns slugs or listErr and, while block is
 // open, waits for it to close or for its context to end. It tracks how many
-// ListPreviews calls ran and the most that ran at once.
+// ListPreviews calls ran and the most that ran at once. Its catalog holds
+// front, on acme/front, whose open PRs are openPRs, or openErr. Run counts
+// the catch-ups of a sweep loop.
 type loopFake struct {
 	*metrics.Metrics
 
 	slugs   []string
 	listErr error
 	block   chan struct{}
+	openPRs []forge.PullRequest
+	openErr error
 
 	mu        sync.Mutex
 	calls     int
 	active    int
 	maxActive int
+	catchUps  int
+	// sweepsAtCatchUp is the number of ListPreviews calls at each Run.
+	sweepsAtCatchUp []int
+	listings        int
+}
+
+func (f *loopFake) Run(context.Context) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.catchUps++
+	f.sweepsAtCatchUp = append(f.sweepsAtCatchUp, f.calls)
+}
+
+func (f *loopFake) FetchServiceCatalog(context.Context) (*store.ServiceCatalog, error) {
+	return store.ParseCatalog([]byte("services:\n  front: {repo: https://github.com/acme/front.git}\n"))
 }
 
 func (f *loopFake) ListPreviews(ctx context.Context) ([]string, error) {
@@ -94,6 +114,13 @@ func (f *loopFake) ListChangedFiles(context.Context, string, string, int) ([]for
 	return nil, errUnexpected
 }
 
+func (f *loopFake) ListOpenPullRequests(context.Context, string, string) ([]forge.PullRequest, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.listings++
+	return f.openPRs, f.openErr
+}
+
 func (f *loopFake) ParseWebhook(*http.Request) (forge.Event, error) {
 	return forge.Event{}, errUnexpected
 }
@@ -121,7 +148,8 @@ func assertSweepMetrics(t *testing.T, m *metrics.Metrics, expected string) {
 	}
 }
 
-// startLoop runs runSweepLoop over f in the background and returns a func
+// startLoop runs runSweepLoop over f, f also counting the catch-ups, in the
+// background and returns a func
 // that cancels it and waits for it to return; calling it again is a no-op.
 // It must run in a synctest bubble, where a loop that never returns
 // deadlocks the test.
@@ -130,7 +158,7 @@ func startLoop(f *loopFake, interval time.Duration, now func() time.Time) func()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		runSweepLoop(ctx, f.api(), f.Metrics, interval, 0, now)
+		runSweepLoop(ctx, f.api(), f, f.Metrics, interval, 0, now)
 	}()
 	return func() {
 		cancel()
@@ -246,11 +274,106 @@ func TestRunSweepLoop_CancelStopsAnInFlightSweepUnrecorded(t *testing.T) {
 	})
 }
 
+func TestRunSweepLoop_CatchUpAfterEachSweep(t *testing.T) {
+	cases := []struct {
+		name    string
+		listErr error
+	}{
+		{name: "sweep succeeded"},
+		{name: "sweep failed", listErr: errors.New("boom")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				f := &loopFake{listErr: tc.listErr}
+				stop := startLoop(f, time.Minute, time.Now)
+				advance(2*time.Minute + time.Second)
+				stop()
+
+				f.mu.Lock()
+				defer f.mu.Unlock()
+				if want := []int{1, 2}; !slices.Equal(f.sweepsAtCatchUp, want) {
+					t.Errorf("sweeps run at each catch-up = %v, want %v", f.sweepsAtCatchUp, want)
+				}
+			})
+		})
+	}
+}
+
+func TestRunSweepLoop_NoCatchUpAfterShutdown(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := &loopFake{block: make(chan struct{})}
+		stop := startLoop(f, time.Minute, time.Now)
+		advance(time.Minute + time.Second)
+		stop()
+
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if f.calls != 1 || f.catchUps != 0 {
+			t.Errorf("sweeps = %d, catch-ups = %d; want 1 sweep cancelled by shutdown and no catch-up",
+				f.calls, f.catchUps)
+		}
+	})
+}
+
+func TestRunCleanup_ExitsWithTheSweepsError(t *testing.T) {
+	labelled := forge.PullRequest{
+		Open: true, HeadRef: "feature/x", HeadSHA: "abc", URL: "https://github.com/acme/front/pull/7",
+		Labels: []string{"preview"}, FullName: "acme/front", HeadFullName: "acme/front", Number: 7,
+	}
+	cases := []struct {
+		name    string
+		listErr error
+		openErr error
+		openPRs []forge.PullRequest
+		wantErr string
+		wantLog string
+	}{
+		{name: "failed sweep", listErr: errors.New("boom"), wantErr: "boom"},
+		{
+			name: "failed sweep and catch-up listing", listErr: errors.New("boom"), openErr: errors.New("down"),
+			wantErr: "boom", wantLog: "catch-up list failed",
+		},
+		{name: "failed catch-up listing", openErr: errors.New("down"), wantLog: "catch-up list failed"},
+		{
+			name: "failed catch-up reconcile", openPRs: []forge.PullRequest{labelled},
+			wantLog: "preview reconcile failed",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := captureText(t)
+			f := &loopFake{listErr: tc.listErr, openErr: tc.openErr, openPRs: tc.openPRs}
+			reconcile := reconcileNow(lifecycle.ReconcileAPI{Store: f, Forge: f, Recorder: f, FanOut: f.api().FanOut})
+			c := lifecycle.NewCatchUp(lifecycle.CatchUpAPI{Store: f, Forge: f, Recorder: f}, reconcile)
+			sweepCtx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			err := runCleanup(context.Background(), sweepCtx, f.api(), c, time.Now(), 0)
+			if tc.wantErr == "" && err != nil {
+				t.Errorf("runCleanup = %v, want nil", err)
+			}
+			if tc.wantErr != "" && (err == nil || err.Error() != tc.wantErr) {
+				t.Errorf("runCleanup = %v, want the sweep's %q", err, tc.wantErr)
+			}
+			if f.listings != 1 {
+				t.Errorf("catch-up listings = %d, want 1", f.listings)
+			}
+			if tc.wantLog != "" && !strings.Contains(logs.String(), `msg="`+tc.wantLog+`"`) {
+				t.Errorf("logs = %s, want %q", logs, tc.wantLog)
+			}
+			if !strings.Contains(logs.String(), `msg=catch-up `) {
+				t.Errorf("logs = %s, want the catch-up line", logs)
+			}
+		})
+	}
+}
+
 func TestStartSweepLoop_TrackedByServer(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		srv := server.NewServer(nil, nil, "t")
 		ctx, cancel := context.WithCancel(context.Background())
-		startSweepLoop(ctx, srv, (&loopFake{}).api(), nil, time.Hour, 0)
+		startSweepLoop(ctx, srv, (&loopFake{}).api(), &loopFake{}, nil, time.Hour, 0)
 
 		short, cancelShort := context.WithTimeout(context.Background(), time.Second)
 		defer cancelShort()
@@ -267,7 +390,7 @@ func TestStartSweepLoop_TrackedByServer(t *testing.T) {
 func TestStartSweepLoop_OffStartsNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		srv := server.NewServer(nil, nil, "t")
-		startSweepLoop(context.Background(), srv, (&loopFake{}).api(), nil, 0, 0)
+		startSweepLoop(context.Background(), srv, (&loopFake{}).api(), &loopFake{}, nil, 0, 0)
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()

@@ -34,6 +34,7 @@ func TestMetrics_Counters(t *testing.T) {
 	m.SweepRun(false, time.Unix(1, 0))
 	m.PreviewSynced()
 	m.PreviewSynced()
+	m.CatchUpReconcile()
 
 	assertGathered(t, m, `
 # HELP badil_webhook_deliveries_total GitHub webhook deliveries, by verified event and HTTP status.
@@ -58,6 +59,9 @@ badil_sweep_runs_total{result="error"} 1
 # HELP badil_previews_synced_total Previews rewritten to match badil.yaml, by a sweep, a push or /v1/sync.
 # TYPE badil_previews_synced_total counter
 badil_previews_synced_total 2
+# HELP badil_catchup_reconciles_total Pull request reconciles started by catch-up.
+# TYPE badil_catchup_reconciles_total counter
+badil_catchup_reconciles_total 1
 `,
 		"badil_webhook_deliveries_total",
 		"badil_reconciles_total",
@@ -65,6 +69,7 @@ badil_previews_synced_total 2
 		"badil_teardowns_total",
 		"badil_sweep_runs_total",
 		"badil_previews_synced_total",
+		"badil_catchup_reconciles_total",
 	)
 	if got := testutil.ToFloat64(m.SweepLastSuccessGauge()); got != 0 {
 		t.Errorf("sweep last success = %v, want 0", got)
@@ -242,6 +247,7 @@ func TestMetrics_NilIsSafe(t *testing.T) {
 	m.SweepRun(true, time.Now())
 	m.SpinUp("backend-1", time.Minute)
 	m.ArgoCDEventIgnored()
+	m.CatchUpReconcile()
 
 	rec := httptest.NewRecorder()
 	m.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
