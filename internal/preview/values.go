@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"cmp"
 	"slices"
-	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -318,11 +317,7 @@ func ApplyHosts(vals PreviewValues, slug string, urls URLConfig) PreviewValues {
 
 // belongsToPR reports whether entry was deployed by owner/repo#number.
 func belongsToPR(entry ServiceEntry, owner, repo string, number int) bool {
-	if entry.Metadata == nil {
-		return false
-	}
-	o, r, n, ok := ParsePRURL(entry.Metadata.PRURL)
-	return ok && n == number && strings.EqualFold(o, owner) && strings.EqualFold(r, repo)
+	return entry.Metadata != nil && MatchesPR(entry.Metadata.PRURL, owner, repo, number)
 }
 
 // LastDeploy returns the newest updated-at (RFC3339) across the pinned entries

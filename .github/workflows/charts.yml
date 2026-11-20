@@ -337,6 +337,16 @@ jobs:
             exit 1
           fi
 
+      - name: Render badil optional read token
+        run: |
+          got=$(helm template t charts/badil -f charts/badil/ci/test-values.yaml \
+            | yq -N 'select(.kind == "Deployment") | .spec.template.spec.containers[0].env[] | select(.name == "BADIL_READ_TOKEN") | .valueFrom.secretKeyRef | .name + " " + .key + " " + (.optional | to_string)')
+          if [ "$got" != 'badil read-token true' ]; then
+            echo '::error::expected BADIL_READ_TOKEN from optional key read-token of Secret badil on the Deployment'
+            printf 'got: %s\n' "$got"
+            exit 1
+          fi
+
       - name: Render badil with numeric github ids
         run: |
           out=$(helm template t charts/badil -f - <<'EOF'

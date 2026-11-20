@@ -317,7 +317,8 @@ badil reads these environment variables:
 | `GITHUB_INSTALLATION_ID` | yes | | the only installation badil accepts webhooks from |
 | `GITOPS_REPO` | yes | | the gitops repo, `owner/repo` |
 | `GITOPS_CLONE_DIR` | no | unset: a temporary directory per process, removed on exit | directory of the gitops repo's git clone, removed and cloned again on start; the chart sets `/var/lib/badil/gitops`, on an `emptyDir` |
-| `BADIL_DEPLOY_TOKEN` | no | unset | bearer token for `/v1/deploy` and `/v1/sync`; when unset, both answer 404 |
+| `BADIL_DEPLOY_TOKEN` | no | unset | bearer token for `/v1/deploy` and `/v1/sync`, which answer 404 when it is unset; also grants the `GET /v1` routes |
+| `BADIL_READ_TOKEN` | no | unset | `serve` only: bearer token of the `GET /v1` routes ([`/v1/previews`](API.md#get-v1previews), [`/v1/wait`](API.md#get-v1wait)); `BADIL_DEPLOY_TOKEN` grants them too. With neither set, they answer 404. In the chart, it is the optional `read-token` key of `existingSecret` |
 | `LISTEN_ADDR` | no | `:8080` | API and webhook listener |
 | `METRICS_ADDR` | no | `:9090` when unset | Prometheus `/metrics` listener; set to `""` to disable `/metrics` |
 | `BADIL_STATUS_TOKEN` | no | unset | `serve` only: bearer token of the renderer's status callback; enables `/webhooks/status`, which answers 404 when unset |

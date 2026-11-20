@@ -19,6 +19,9 @@ type Config struct {
 	// DeployToken authenticates POST /v1/deploy and POST /v1/sync, "" when
 	// they are disabled.
 	DeployToken string
+	// ReadToken authenticates the GET /v1 routes, which DeployToken also
+	// grants, "" when only DeployToken does.
+	ReadToken string
 	// MetricsAddr is the listen address of the metrics server, "" when it is
 	// disabled.
 	MetricsAddr string
@@ -75,6 +78,7 @@ func Load() (*Config, error) {
 		GitOpsRepo:     gitOpsRepo,
 		ListenAddr:     listenAddr,
 		DeployToken:    os.Getenv("BADIL_DEPLOY_TOKEN"),
+		ReadToken:      os.Getenv("BADIL_READ_TOKEN"),
 		MetricsAddr:    metricsAddr,
 		StatusToken:    os.Getenv("BADIL_STATUS_TOKEN"),
 		GitOpsCloneDir: os.Getenv("GITOPS_CLONE_DIR"),

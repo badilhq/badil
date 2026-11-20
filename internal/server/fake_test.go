@@ -53,6 +53,11 @@ type fakeGitops struct {
 	// afterGetPreview, when set, runs after each GetPreview.
 	afterGetPreview func()
 
+	// openPRs is what ListOpenPullRequests returns, by owner/repo.
+	openPRs map[string][]forge.PullRequest
+	// afterList, when set, runs after each ListOpenPullRequests.
+	afterList func()
+
 	// pr is what GetPullRequest returns, unless prErr is set.
 	pr      *forge.PullRequest
 	prErr   error
@@ -76,8 +81,10 @@ type fakeGitops struct {
 	invalidations        int
 	catalogInvalidations int
 
-	remote *storetest.Remote
-	st     *store.GitHubStore
+	// storeOpts configures the store open makes.
+	storeOpts []store.Option
+	remote    *storetest.Remote
+	st        *store.GitHubStore
 
 	// writeResult is not read: Apply writes the remote. Tests written for
 	// the contents API store still set it.
@@ -123,7 +130,7 @@ func (f *fakeGitops) open(t *testing.T) {
 		return
 	}
 	f.t = t
-	f.remote, f.st = storetest.Gitops(t, f.badil(), f.previews, f.stale, f.raw)
+	f.remote, f.st = storetest.Gitops(t, f.badil(), f.previews, f.stale, f.raw, f.storeOpts...)
 }
 
 func (f *fakeGitops) FetchServiceCatalog(_ context.Context) (*store.ServiceCatalog, error) {
@@ -236,8 +243,11 @@ func (f *fakeGitops) ListChangedFiles(context.Context, string, string, int) ([]f
 	return nil, nil
 }
 
-func (f *fakeGitops) ListOpenPullRequests(context.Context, string, string) ([]forge.PullRequest, error) {
-	return nil, nil
+func (f *fakeGitops) ListOpenPullRequests(_ context.Context, owner, repo string) ([]forge.PullRequest, error) {
+	if f.afterList != nil {
+		defer f.afterList()
+	}
+	return f.openPRs[owner+"/"+repo], nil
 }
 
 func (f *fakeGitops) ParseWebhook(*http.Request) (forge.Event, error) {
@@ -265,6 +275,11 @@ func (f *fakeGitops) GetPreview(ctx context.Context, slug string) (*preview.Prev
 		return nil, "", f.getPreviewErr
 	}
 	return f.st.GetPreview(ctx, slug)
+}
+
+// ListPreviewFiles lists the preview files of the fake's store.
+func (f *fakeGitops) ListPreviewFiles(ctx context.Context) ([]string, error) {
+	return f.st.ListPreviewFiles(ctx)
 }
 
 func (f *fakeGitops) Invalidate() {

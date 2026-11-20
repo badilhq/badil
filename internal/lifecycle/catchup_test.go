@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
@@ -154,6 +155,98 @@ func TestCatchUp_DecisionOrder(t *testing.T) {
 	}
 	assertMetrics(t, f.Metrics, map[string]float64{"badil_catchup_reconciles_total": 3},
 		"badil_catchup_reconciles_total")
+}
+
+// TestCatchUp_PinnedPRURLInAnotherCase checks that an entry whose pr-url
+// names the listed PR in another letter case, as a manual deploy may write
+// it, counts as pinned at head.
+func TestCatchUp_PinnedPRURLInAnotherCase(t *testing.T) {
+	capture := captureLogs(t)
+	pr := listed(7, "s7", "preview")
+	entry := pinnedBy("front", "https://github.com/Acme/Front/pull/7")
+	entry.CommitSha = "s7"
+	f := &reconcileFake{
+		previews: map[string]*preview.PreviewValues{"feature-7": values(entry)},
+		openPRs:  map[string][]forge.PullRequest{"acme/front": {pr}},
+	}
+	r := &reconciles{}
+	catchUp(t, f, r).Run(context.Background())
+
+	if got := r.take(""); len(got) != 0 {
+		t.Errorf("reconciled = %v, want none", got)
+	}
+	assertCatchUpLogged(t, capture, map[string]int64{"repos": 2, "open_labelled": 1, "skipped_pinned": 1})
+}
+
+// timedList is a reconcileFake that notes when each repo listing starts.
+type timedList struct {
+	*reconcileFake
+
+	listStarts []time.Time
+}
+
+func (f *timedList) ListOpenPullRequests(ctx context.Context, owner, repo string) ([]forge.PullRequest, error) {
+	f.listStarts = append(f.listStarts, time.Now())
+	return f.reconcileFake.ListOpenPullRequests(ctx, owner, repo)
+}
+
+func TestCatchUp_SkippedCallback(t *testing.T) {
+	captureLogs(t)
+	unlabeled := listed(1, "s1", "bug")
+	fork := listed(2, "s2", "preview")
+	fork.HeadFullName = "octocat/front"
+	f := &reconcileFake{openPRs: map[string][]forge.PullRequest{
+		"acme/front": {unlabeled, fork, listed(3, "s3", "preview")},
+	}}
+	f.open(t)
+	type skip struct {
+		t   lifecycle.Target
+		res lifecycle.ReconcileResult
+	}
+	var skips []skip
+	var listedAts []time.Time
+	r := &reconciles{}
+	fg := &timedList{reconcileFake: f}
+	api := lifecycle.CatchUpAPI{
+		Store:    f,
+		Forge:    fg,
+		Recorder: f,
+		Skipped: func(t lifecycle.Target, res lifecycle.ReconcileResult, listedAt time.Time) {
+			skips = append(skips, skip{t, res})
+			listedAts = append(listedAts, listedAt)
+		},
+	}
+	start := time.Now()
+	lifecycle.NewCatchUp(api, r.reconcile).Run(context.Background())
+
+	target := func(n int) lifecycle.Target {
+		return lifecycle.Target{Owner: "acme", Repo: "front", FullName: "acme/front", Number: n}
+	}
+	want := []skip{
+		{target(1), lifecycle.ReconcileResult{Outcome: "skipped", Reason: "not labeled", HeadSHA: "s1"}},
+		{target(2), lifecycle.ReconcileResult{Outcome: "skipped", Reason: "fork pr", HeadSHA: "s2"}},
+	}
+	if !slices.Equal(skips, want) {
+		t.Errorf("skipped = %+v, want %+v", skips, want)
+	}
+	// Each skip's listedAt is taken after the repo listed before acme/front
+	// and before acme/front's listing starts.
+	i := slices.Index(f.listed, "acme/front")
+	if i < 0 {
+		t.Fatalf("listed %v, want acme/front", f.listed)
+	}
+	after := start
+	if i > 0 {
+		after = fg.listStarts[i-1]
+	}
+	for n, at := range listedAts {
+		if at.Before(after) || at.After(fg.listStarts[i]) {
+			t.Errorf("skip %d listedAt %v, want between %v and acme/front's listing %v", n, at, after, fg.listStarts[i])
+		}
+	}
+	if got := r.take(""); !slices.Equal(got, []int{3}) {
+		t.Errorf("reconciled = %v, want [3]", got)
+	}
 }
 
 func TestCatchUp_SeenMap(t *testing.T) {

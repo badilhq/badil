@@ -78,7 +78,7 @@ func runCatchUp(ctx context.Context, c catchUpRunner) {
 
 func main() {
 	if err := rootCmd().Execute(); err != nil {
-		os.Exit(1)
+		os.Exit(exitCode(err))
 	}
 }
 
@@ -93,6 +93,8 @@ func rootCmd() *cobra.Command {
 
 	root.AddCommand(serveCmd())
 	root.AddCommand(cleanupCmd())
+	root.AddCommand(listCmd())
+	root.AddCommand(waitCmd())
 	root.AddCommand(verifyAppCmd())
 	root.AddCommand(bootstrapAppCmd())
 	root.AddCommand(versionCmd())
@@ -131,7 +133,9 @@ func serveCmd() *cobra.Command {
 			if err = loadStatus(ctx, previewStatus); err != nil {
 				return err
 			}
-			st, f, err := newStoreAndForge(ctx, app, cfg, append(statusHooks(previewStatus), store.WithMetrics(m))...)
+			wake := server.NewWake()
+			st, f, err := newStoreAndForge(ctx, app, cfg,
+				append(statusHooks(previewStatus, wake), store.WithMetrics(m))...)
 			if err != nil {
 				return err
 			}
@@ -139,13 +143,12 @@ func serveCmd() *cobra.Command {
 			previewStatus.Start(ctx, st)
 
 			srv := server.NewServer(f, st, cfg.DeployToken,
-				server.WithMetrics(m), server.WithStatus(cfg.StatusToken, previewStatus))
-			catchUp := lifecycle.NewCatchUp(catchUpAPI(st, f, m), srv.QueueReconcile)
-			httpSrv := &http.Server{
-				Addr:              cfg.ListenAddr,
-				Handler:           srv.Handler(),
-				ReadHeaderTimeout: readHeaderTimeout,
-			}
+				server.WithMetrics(m), server.WithStatus(cfg.StatusToken, previewStatus),
+				server.WithReadToken(cfg.ReadToken), server.WithPreviewTTL(ttl), server.WithWake(wake))
+			catchUpCfg := catchUpAPI(st, f, m)
+			catchUpCfg.Skipped = srv.RecordCatchUpSkip
+			catchUp := lifecycle.NewCatchUp(catchUpCfg, srv.QueueReconcile)
+			httpSrv := newHTTPServer(cfg.ListenAddr, srv)
 
 			if cfg.DeployToken == "" {
 				slog.InfoContext(ctx, "deploy API disabled", slog.String("reason", "BADIL_DEPLOY_TOKEN is unset"))
@@ -182,12 +185,31 @@ func loadStatus(ctx context.Context, s *status.Store) error {
 // statusHooks returns the store options that keep s in step with the gitops
 // repo: the status of the previews a landed push deleted is deleted, and
 // every fetch that moves the head collects the status of the previews no
-// longer there.
-func statusHooks(s *status.Store) []store.Option {
+// longer there. Both wake the waits through wake.
+func statusHooks(s *status.Store, wake *server.Wake) []store.Option {
 	return []store.Option{
-		store.WithApplied(func(res store.Result) { s.Delete(res.Deleted...) }),
-		store.WithHeadMoved(s.CollectGarbage),
+		store.WithApplied(func(res store.Result) {
+			s.Delete(res.Deleted...)
+			wake.Notify()
+		}),
+		store.WithHeadMoved(func() {
+			s.CollectGarbage()
+			wake.Notify()
+		}),
 	}
+}
+
+// newHTTPServer returns the HTTP server of srv on addr. When its shutdown
+// starts, srv's waits end at once (server.Server.EndWaits), so that shutdown
+// does not wait for their long polls.
+func newHTTPServer(addr string, srv *server.Server) *http.Server {
+	httpSrv := &http.Server{
+		Addr:              addr,
+		Handler:           srv.Handler(),
+		ReadHeaderTimeout: readHeaderTimeout,
+	}
+	httpSrv.RegisterOnShutdown(srv.EndWaits)
+	return httpSrv
 }
 
 // startMetricsServer serves GET /metrics from m on addr in the background and

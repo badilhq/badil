@@ -46,6 +46,12 @@ spec:
                   name: {{ .Values.existingSecret }}
                   key: status-token
                   optional: true
+            - name: BADIL_READ_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: read-token
+                  optional: true
             - name: POD_NAMESPACE
               valueFrom:
                 fieldRef:

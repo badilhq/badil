@@ -22,6 +22,7 @@ config:
 
 # Required: existing Secret with keys github-private-key and github-webhook-secret.
 # Optional key deploy-token enables POST /v1/deploy and POST /v1/sync (BADIL_DEPLOY_TOKEN).
+# Optional key read-token enables the GET /v1 routes (BADIL_READ_TOKEN); deploy-token grants them too.
 # Optional key status-token enables POST /webhooks/status (BADIL_STATUS_TOKEN).
 existingSecret: ""
 
@@ -29,7 +30,7 @@ existingSecret: ""
 service:
   port: 8080
 
-# Ingress routing every path of the host to the server port (/webhooks/github, /webhooks/status, /v1/deploy, /healthz); host is required when enabled.
+# Ingress routing every path of the host to the server port (/webhooks/github, /webhooks/status, /v1/deploy, /v1/previews, /v1/wait, /healthz); host is required when enabled.
 ingress:
   enabled: false
   className: ""

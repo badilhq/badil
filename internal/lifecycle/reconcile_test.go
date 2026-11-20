@@ -635,3 +635,51 @@ func TestReconcile_TeardownOnRetriedTree(t *testing.T) {
 		`badil_teardowns_total{result="unpinned",trigger="webhook"}`: 1,
 	}, "badil_reconciles_total", "badil_teardowns_total")
 }
+
+func TestReconcilePR_HeadSHA(t *testing.T) {
+	const payload = "0000000000000000000000000000000000000001"
+	cases := []struct {
+		name string
+		f    *reconcileFake
+		ev   lifecycle.Event
+		want lifecycle.ReconcileResult
+	}{
+		{
+			name: "the read PR's head",
+			f:    &reconcileFake{pr: fetchedPR("front", true, "preview")},
+			ev:   event("synchronize", "front", "", "preview"),
+			want: lifecycle.ReconcileResult{Outcome: lifecycle.OutcomeDeployed, HeadSHA: fetchedSHA},
+		},
+		{
+			name: "the event's on a skip before the PR is read",
+			f:    &reconcileFake{pr: fetchedPR("front", true, "preview")},
+			ev:   event("synchronize", "front", ""),
+			want: lifecycle.ReconcileResult{
+				Outcome: lifecycle.OutcomeSkipped, Reason: lifecycle.NotLabeledReason, HeadSHA: payload,
+			},
+		},
+		{
+			name: "the event's on a repo outside the catalog",
+			f:    &reconcileFake{pr: fetchedPR("front", true, "preview")},
+			ev:   event("synchronize", "elsewhere", "", "preview"),
+			want: lifecycle.ReconcileResult{
+				Outcome: lifecycle.OutcomeSkipped, Reason: lifecycle.RepoNotInCatalogReason, HeadSHA: payload,
+			},
+		},
+		{
+			name: "the event's when the PR can't be read",
+			f:    &reconcileFake{prErr: errors.New("boom")},
+			ev:   event("synchronize", "front", "", "preview"),
+			want: lifecycle.ReconcileResult{Outcome: lifecycle.OutcomeFailed, HeadSHA: payload},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			captureLogs(t)
+			tc.ev.HeadSHA = payload
+			if got := lifecycle.ReconcilePR(context.Background(), tc.f.api(t), tc.ev); got != tc.want {
+				t.Errorf("ReconcilePR = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}

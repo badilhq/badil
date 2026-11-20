@@ -39,6 +39,32 @@ func WithStatus(token string, st *status.Store) Option {
 	}
 }
 
+// WithReadToken enables the GET /v1 routes with the Bearer token, besides the
+// deploy token. An empty token leaves them to the deploy token alone.
+func WithReadToken(token string) Option {
+	return func(s *Server) {
+		s.readToken = token
+	}
+}
+
+// WithPreviewTTL sets the TTL of the in-server sweep, which a preview's
+// expiresAt adds to its updatedAt; 0, the default, omits expiresAt.
+func WithPreviewTTL(ttl time.Duration) Option {
+	return func(s *Server) {
+		s.previewTTL = ttl
+	}
+}
+
+// WithWake has the wait routes block on w, which the caller also notifies
+// on the changes the server does not see itself: a landed Apply
+// (store.WithApplied) and a fetch that moved the gitops head
+// (store.WithHeadMoved). Without it, the server makes its own.
+func WithWake(w *Wake) Option {
+	return func(s *Server) {
+		s.wake = w
+	}
+}
+
 type Server struct {
 	forge forge.Forge
 	store storeAPI
@@ -52,7 +78,21 @@ type Server struct {
 	statusToken string
 	// status holds the status the renderer reports.
 	status *status.Store
-	router chi.Router
+	// readToken authenticates the GET /v1 routes, besides deployToken.
+	readToken string
+	// previewTTL is the in-server sweep's TTL, 0 when it does not expire
+	// previews.
+	previewTTL time.Duration
+	// outcomes holds the latest reconcile outcome of each PR.
+	outcomes *outcomes
+	// wake is notified on every change a wait may be waiting for.
+	wake *Wake
+	// waitTimeout is the longest a wait blocks.
+	waitTimeout time.Duration
+	// shutdown is closed when the HTTP server's shutdown starts (EndWaits).
+	shutdown     chan struct{}
+	shutdownOnce sync.Once
+	router       chi.Router
 	// bg tracks background jobs (reconciles), queued or running,
 	// for WaitBackground.
 	bg sync.WaitGroup
@@ -66,7 +106,7 @@ type Server struct {
 
 // NewServer returns the server of the webhooks of f, over the gitops repo
 // st, configured by opts. The deploy API is served only when deployToken is
-// set.
+// set, and the read API when deployToken or the read token is.
 func NewServer(
 	f forge.Forge,
 	st storeAPI,
@@ -79,9 +119,15 @@ func NewServer(
 		fanOut:      lifecycle.FanOutPRComments,
 		deployToken: deployToken,
 		jobTimeout:  ReconcileTimeout,
+		outcomes:    newOutcomes(),
+		waitTimeout: waitTimeout,
+		shutdown:    make(chan struct{}),
 	}
 	for _, opt := range opts {
 		opt(s)
+	}
+	if s.wake == nil {
+		s.wake = NewWake()
 	}
 	s.syncer = lifecycle.NewSyncer(s.syncAPI(), syncTimeout)
 	r := chi.NewRouter()
@@ -93,11 +139,19 @@ func NewServer(
 	if s.statusToken != "" && s.status != nil {
 		r.With(requireBearer(s.statusToken)).Post(statusPath, s.handleStatusEvent)
 	}
-	if deployToken != "" {
+	if deployToken != "" || s.readToken != "" {
 		r.Route("/v1", func(r chi.Router) {
-			r.Use(requireBearer(deployToken))
-			r.Post("/deploy", s.handleDeploy)
-			r.Post("/sync", s.handleSync)
+			if deployToken != "" {
+				r.With(requireBearer(deployToken)).Post("/deploy", s.handleDeploy)
+				r.With(requireBearer(deployToken)).Post("/sync", s.handleSync)
+			}
+			r.Group(func(r chi.Router) {
+				r.Use(requireBearer(s.readToken, deployToken))
+				r.Get("/previews", s.handleListPreviews)
+				r.Get("/previews/{slug}", s.handleGetPreview)
+				r.Get("/previews/{slug}/wait", s.handleSlugWait)
+				r.Get("/wait", s.handleWait)
+			})
 		})
 	}
 	s.router = r

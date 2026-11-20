@@ -61,6 +61,7 @@ func (s *Server) startReconcile(ctx context.Context, e forge.PullRequestEvent) {
 		HeadRef: e.HeadRef,
 		Label:   e.Label,
 		Labels:  e.Labels,
+		HeadSHA: e.HeadSHA,
 	}
 	if ev.Action == "closed" {
 		s.startClosed(ctx, ev)
@@ -81,7 +82,9 @@ func (s *Server) startReconcile(ctx context.Context, e forge.PullRequestEvent) {
 // QueueReconcile reconciles ev in a background job (runJob), as a
 // pull_request delivery does: after the jobs before it, alone, and capped at
 // the job timeout. done gets ReconcilePR's result once it completes, or the
-// failed outcome when it panics. It is a lifecycle.ReconcileFunc.
+// failed outcome at ev's head SHA when it panics; that result is first
+// recorded as the PR's latest outcome (RecordOutcome). It is a
+// lifecycle.ReconcileFunc.
 func (s *Server) QueueReconcile(ctx context.Context, ev lifecycle.Event, done func(lifecycle.ReconcileResult)) {
 	s.runJob(ctx, func(rec any) {
 		slog.ErrorContext(ctx, "preview reconcile panicked",
@@ -90,16 +93,30 @@ func (s *Server) QueueReconcile(ctx context.Context, ev lifecycle.Event, done fu
 			slog.String("action", ev.Action),
 			slog.Any("panic", rec),
 		)
-		done(lifecycle.ReconcileResult{Outcome: lifecycle.OutcomeFailed})
+		done(s.recordReconcile(ev, panicResult(ev)))
 	}, func(jctx context.Context) {
-		done(lifecycle.ReconcilePR(jctx, s.reconcileAPI(), ev))
+		done(s.recordReconcile(ev, lifecycle.ReconcilePR(jctx, s.reconcileAPI(), ev)))
 	})
 }
 
+// panicResult is the result of a reconcile of ev that panicked: failed, at
+// ev's head SHA.
+func panicResult(ev lifecycle.Event) lifecycle.ReconcileResult {
+	return lifecycle.ReconcileResult{Outcome: lifecycle.OutcomeFailed, HeadSHA: ev.HeadSHA}
+}
+
+// recordReconcile records res as the latest outcome of ev's PR and returns
+// it.
+func (s *Server) recordReconcile(ev lifecycle.Event, res lifecycle.ReconcileResult) lifecycle.ReconcileResult {
+	s.RecordOutcome(ev.Target, res)
+	return res
+}
+
 // startClosed reconciles a closed event, logging as a teardown of the
-// payload's head branch. It starts nothing when the event misses the fields
-// needed to find the PR, or when neither its head branch nor a named label of
-// its payload has a slug.
+// payload's head branch, and records its result as the PR's latest outcome.
+// It starts nothing when the event misses the fields needed to find the PR,
+// or when neither its head branch nor a named label of its payload has a
+// slug.
 func (s *Server) startClosed(ctx context.Context, ev lifecycle.Event) {
 	slug := preview.Slugify(ev.HeadRef)
 	reason := ""
@@ -126,8 +143,9 @@ func (s *Server) startClosed(ctx context.Context, ev lifecycle.Event) {
 			slog.Int("pr_number", ev.Number),
 			slog.Any("panic", rec),
 		)
+		s.recordReconcile(ev, panicResult(ev))
 	}, func(jctx context.Context) {
-		lifecycle.ReconcilePR(jctx, s.reconcileAPI(), ev)
+		s.recordReconcile(ev, lifecycle.ReconcilePR(jctx, s.reconcileAPI(), ev))
 	})
 }
 

@@ -29,7 +29,7 @@ flowchart LR
 - The deployment status is optional: Argo CD's notifications controller posts it as GitHub Deployments, through its own GitHub App (see [Preview deployments on GitHub](#preview-deployments-on-github)).
 - The status callback is optional: the same controller reports each preview service's status to badil (see [Preview status](#preview-status)).
 - Closing or unlabelling a PR, and the [cleanup sweep](#cleanup-sweep), unpin services or delete preview files; a push changing `badil.yaml`, or `POST /v1/sync`, resyncs every preview (see [Config sync](#config-sync)); Argo CD prunes what was removed.
-- `POST /v1/deploy` and `POST /v1/sync` exist only when `BADIL_DEPLOY_TOKEN` is set.
+- `POST /v1/deploy` and `POST /v1/sync` exist only when `BADIL_DEPLOY_TOKEN` is set. The read routes, `GET /v1/previews` and the waits `GET /v1/wait` and `GET /v1/previews/{slug}/wait`, exist when `BADIL_READ_TOKEN` or `BADIL_DEPLOY_TOKEN` is set.
 
 ## Components
 

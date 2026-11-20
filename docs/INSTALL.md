@@ -122,7 +122,7 @@ helm install badil oci://ghcr.io/badilhq/charts/badil -n badil \
 ```
 
 - Without `--version`, Helm installs the latest chart. Add `--version X.Y.Z` to pin a release (do so in production), and take the step 3 example files from the same `vX.Y.Z` tag. The image tag defaults to the chart `appVersion`.
-- When the Secret has `deploy-token`, the Ingress also exposes `POST /v1/deploy`, the manual trigger, and `POST /v1/sync`, which syncs every preview (or one) with `badil.yaml` at once, both protected by that bearer token (see [README](../README.md)). `deploy-token` is optional: leave out the `--from-literal=deploy-token=...` line to turn both endpoints off (404). The Ingress also exposes `POST /webhooks/status`, the renderer's status callback, protected by the optional `status-token` bearer token (see [Preview status](#preview-status-optional)).
+- When the Secret has `deploy-token`, the Ingress also exposes `POST /v1/deploy`, the manual trigger, and `POST /v1/sync`, which syncs every preview (or one) with `badil.yaml` at once, both protected by that bearer token (see [README](../README.md)). `deploy-token` is optional: leave out the `--from-literal=deploy-token=...` line to turn both endpoints off (404). The Ingress also exposes `POST /webhooks/status`, the renderer's status callback, protected by the optional `status-token` bearer token (see [Preview status](#preview-status-optional)). When the Secret has `read-token` or `deploy-token`, the Ingress also exposes the read routes `GET /v1/previews` and `GET /v1/wait`, protected by either token (see [Wait for a preview](#wait-for-a-preview)).
 - `cleanup.ttl` (e.g. `168h`) is optional: it also deletes previews with no deploy for that long.
 - The cleanup sweep runs in the server every hour by default (`cleanup.interval`, `1h`): it deletes stale previews and rewrites every kept preview to match `badil.yaml`, and exports its metrics (with the Prometheus Operator, scrape them with `metrics.serviceMonitor.enabled=true` and `metrics.serviceMonitor.labels` matching its selector, e.g. `release: <kube-prometheus-stack release>`). `cleanup.enabled=true` switches it to an hourly CronJob without metrics and turns the in-server sweep off.
 - Keep `replicaCount: 1`.
@@ -246,6 +246,26 @@ badil sets no quota or network policy on previews. To cap each preview's resourc
 3. With preview URLs, the comment links each exposed service.
 4. Removing the label or closing the PR tears the preview down.
 5. PRs from forks never get a preview.
+
+### Wait for a preview
+
+A CI job or an agent can wait until a PR's preview is ready at its commit, or learn at once why it never will be, instead of sleeping. Generate a read token (e.g. `openssl rand -hex 32`) as `BADIL_READ_TOKEN`, add it to the badil Secret as `read-token` and restart badil. The deploy token is accepted too, but it also grants deploys. A preview reaches `ready` only through the [status callback](#preview-status-optional): without it badil never learns a service's state, so a pinned PR stays `progressing` and `badil wait` exits 2 when `--timeout` passes.
+
+```bash
+kubectl patch secret badil -n badil --type merge \
+  -p "{\"stringData\":{\"read-token\":\"$BADIL_READ_TOKEN\"}}"
+kubectl rollout restart deployment/badil -n badil
+```
+
+Then, where the job runs:
+
+```bash
+go install github.com/badilhq/badil/cmd/badil@latest
+export BADIL_SERVER=https://badil.example.com BADIL_TOKEN="$BADIL_READ_TOKEN"
+badil wait --repo acme/backend-1 --pr 42 --sha "$HEAD_SHA"   # or: badil wait --slug feature-pricing
+```
+
+`badil wait` exits 0 when the preview is ready or the PR needs none, 1 when it failed or was refused, 2 when `--timeout` (default `15m`) passes first, and 3 on an error. `badil list` lists the previews. Details: [`GET /v1/wait`](API.md#get-v1wait) and [`badil wait`](API.md#badil-wait).
 
 ## 9. Preview URLs (optional)
 

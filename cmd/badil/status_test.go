@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
+	"github.com/badilhq/badil/internal/server"
 	"github.com/badilhq/badil/internal/status"
 	"github.com/badilhq/badil/internal/store"
 	"github.com/badilhq/badil/internal/store/storetest"
@@ -73,7 +74,7 @@ func TestStatusHooks(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, err := store.Open(ctx, "acme", "gitops", store.CloneConfig{URL: remote.URL()}, storetest.Identity,
-		statusHooks(previewStatus)...)
+		statusHooks(previewStatus, server.NewWake())...)
 	if err != nil {
 		t.Fatal(err)
 	}
