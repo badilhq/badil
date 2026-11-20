@@ -9,8 +9,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	gh "github.com/google/go-github/v71/github"
-
 	"github.com/badilhq/badil/internal/github"
 )
 
@@ -72,47 +70,6 @@ func TestValidateWebhook(t *testing.T) {
 		_, err := app.ValidateWebhook(req)
 		if err == nil {
 			t.Fatal("ValidateWebhook() expected error for missing signature")
-		}
-	})
-}
-
-func TestParseEvent(t *testing.T) {
-	app := newApp(t, "secret")
-
-	t.Run("pull_request event", func(t *testing.T) {
-		payload := []byte(`{"action":"opened","number":1,"pull_request":{"number":1}}`)
-		event, err := app.ParseEvent("pull_request", payload)
-		if err != nil {
-			t.Fatalf("ParseEvent() error = %v", err)
-		}
-		pr, ok := event.(*gh.PullRequestEvent)
-		if !ok {
-			t.Fatalf("expected *PullRequestEvent, got %T", event)
-		}
-		if pr.GetAction() != "opened" {
-			t.Fatalf("action = %q, want %q", pr.GetAction(), "opened")
-		}
-	})
-
-	t.Run("installation event", func(t *testing.T) {
-		payload := []byte(`{"action":"created","installation":{"id":123}}`)
-		event, err := app.ParseEvent("installation", payload)
-		if err != nil {
-			t.Fatalf("ParseEvent() error = %v", err)
-		}
-		inst, ok := event.(*gh.InstallationEvent)
-		if !ok {
-			t.Fatalf("expected *InstallationEvent, got %T", event)
-		}
-		if inst.GetAction() != "created" {
-			t.Fatalf("action = %q, want %q", inst.GetAction(), "created")
-		}
-	})
-
-	t.Run("unknown event type", func(t *testing.T) {
-		_, err := app.ParseEvent("unknown_event", []byte(`{}`))
-		if err == nil {
-			t.Fatal("ParseEvent() expected error for unknown event type")
 		}
 	})
 }

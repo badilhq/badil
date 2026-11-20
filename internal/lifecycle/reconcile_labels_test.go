@@ -7,15 +7,15 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/badilhq/badil/internal/gitops"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store"
 )
 
 // removedFront is the teardown result of a PR that pinned front in slug, the
 // preview's last pin.
-func removedFront(slug string) *gitops.TeardownResult {
-	return &gitops.TeardownResult{
+func removedFront(slug string) *store.TeardownResult {
+	return &store.TeardownResult{
 		Removed:       []string{"front"},
 		Deleted:       true,
 		CommitURL:     sweepCommitURL,
@@ -37,7 +37,11 @@ func TestReconcile_NamedLabelSharesPreviewAcrossRepos(t *testing.T) {
 
 	f.pr = fetchedPR("front", true, "preview:pricing")
 	f.pr.HeadRef = "x"
-	lifecycle.ReconcilePR(context.Background(), f, event("labeled", "front", "preview:pricing", "preview:pricing"))
+	lifecycle.ReconcilePR(
+		context.Background(),
+		f.api(),
+		event("labeled", "front", "preview:pricing", "preview:pricing"),
+	)
 	// The second PR reads the preview the first one pinned front in.
 	f.previews = map[string]*preview.PreviewValues{"pricing": {Services: []preview.ServiceEntry{{
 		Name:      "front",
@@ -47,7 +51,11 @@ func TestReconcile_NamedLabelSharesPreviewAcrossRepos(t *testing.T) {
 	f.pr = fetchedPR("monorepo", true, "Preview:Pricing")
 	f.pr.HeadRef = "y"
 	f.calls, f.upserts = nil, nil
-	lifecycle.ReconcilePR(context.Background(), f, event("labeled", "monorepo", "Preview:Pricing", "Preview:Pricing"))
+	lifecycle.ReconcilePR(
+		context.Background(),
+		f.api(),
+		event("labeled", "monorepo", "Preview:Pricing", "Preview:Pricing"),
+	)
 	if !slices.Contains(f.calls, "get:pricing") {
 		t.Errorf("calls = %v, want the holder check to read pricing", f.calls)
 	}
@@ -71,7 +79,11 @@ func TestReconcile_NamedLabelSharesPreviewAcrossRepos(t *testing.T) {
 	f.teardowns = nil
 	f.pr = fetchedPR("front", true, "preview:other")
 	f.pr.HeadRef = "x"
-	lifecycle.ReconcilePR(context.Background(), f, event("unlabeled", "front", "preview:pricing", "preview:other"))
+	lifecycle.ReconcilePR(
+		context.Background(),
+		f.api(),
+		event("unlabeled", "front", "preview:pricing", "preview:other"),
+	)
 	want := []teardownCall{
 		{slug: "pricing", owner: "acme", repo: "front", number: 42},
 		{slug: "x", owner: "acme", repo: "front", number: 42},
@@ -120,9 +132,9 @@ func TestReconcile_Moves(t *testing.T) {
 			captureLogs(t)
 			f := &reconcileFake{
 				pr:             fetchedPR("front", true, tc.labels...),
-				teardownBySlug: map[string]*gitops.TeardownResult{tc.removed: removedFront(tc.removed)},
+				teardownBySlug: map[string]*store.TeardownResult{tc.removed: removedFront(tc.removed)},
 			}
-			lifecycle.ReconcilePR(context.Background(), f, tc.ev)
+			lifecycle.ReconcilePR(context.Background(), f.api(), tc.ev)
 
 			if !slices.Equal(f.calls, tc.calls) {
 				t.Errorf("calls = %v, want %v", f.calls, tc.calls)
@@ -143,9 +155,9 @@ func TestReconcile_ConflictingNamedLabels(t *testing.T) {
 	capture := captureLogs(t)
 	f := &reconcileFake{
 		pr:             fetchedPR("front", true, "preview:b", "Preview:A", "preview"),
-		teardownBySlug: map[string]*gitops.TeardownResult{"a": removedFront("a")},
+		teardownBySlug: map[string]*store.TeardownResult{"a": removedFront("a")},
 	}
-	lifecycle.ReconcilePR(context.Background(), f, event("labeled", "front", "preview:b", "preview:b"))
+	lifecycle.ReconcilePR(context.Background(), f.api(), event("labeled", "front", "preview:b", "preview:b"))
 
 	want := []string{"teardown:a", "upsert", "teardown:b", "teardown:feature-pricing", "upsert"}
 	if !slices.Equal(f.calls, want) {
@@ -169,7 +181,7 @@ func TestReconcile_ConflictCommentFailure(t *testing.T) {
 		pr:        fetchedPR("front", true, "preview:a", "preview:b"),
 		upsertErr: errors.New("comment boom"),
 	}
-	lifecycle.ReconcilePR(context.Background(), f, event("labeled", "front", "preview:b", "preview:b"))
+	lifecycle.ReconcilePR(context.Background(), f.api(), event("labeled", "front", "preview:b", "preview:b"))
 
 	logs := capture.find(slog.LevelWarn, "preview conflict comment failed")
 	if len(logs) != 1 || logs[0]["err"].String() != "comment boom" || logs[0]["repo"].String() != "acme/front" ||
@@ -182,9 +194,9 @@ func TestReconcile_ClosedWithNamedLabel(t *testing.T) {
 	captureLogs(t)
 	f := &reconcileFake{
 		pr:             fetchedPR("front", false, "preview:a"),
-		teardownBySlug: map[string]*gitops.TeardownResult{"a": removedFront("a")},
+		teardownBySlug: map[string]*store.TeardownResult{"a": removedFront("a")},
 	}
-	lifecycle.ReconcilePR(context.Background(), f, event("closed", "front", "", "preview:a"))
+	lifecycle.ReconcilePR(context.Background(), f.api(), event("closed", "front", "", "preview:a"))
 
 	if want := []string{"teardown:a", "upsert", "teardown:feature-pricing"}; !slices.Equal(f.calls, want) {
 		t.Errorf("calls = %v, want %v", f.calls, want)
@@ -207,7 +219,7 @@ func TestReconcile_PayloadTeardownWithNamedLabel(t *testing.T) {
 			captureLogs(t)
 			ev := event("closed", "front", "", "preview:a", "preview:feature-pricing", "bug")
 			ev.HeadRef = "feature/pricing"
-			lifecycle.ReconcilePR(context.Background(), tc.f, ev)
+			lifecycle.ReconcilePR(context.Background(), tc.f.api(), ev)
 
 			if want := []string{"teardown:feature-pricing", "teardown:a"}; !slices.Equal(tc.f.calls, want) {
 				t.Errorf("calls = %v, want %v", tc.f.calls, want)
@@ -221,7 +233,7 @@ func TestReconcile_PayloadTeardownSkipsEmptyBranchSlug(t *testing.T) {
 	f := &reconcileFake{prErr: errors.New("boom")}
 	ev := event("closed", "front", "", "preview:a")
 	ev.HeadRef = "---"
-	lifecycle.ReconcilePR(context.Background(), f, ev)
+	lifecycle.ReconcilePR(context.Background(), f.api(), ev)
 
 	if want := []string{"teardown:a"}; !slices.Equal(f.calls, want) {
 		t.Errorf("calls = %v, want %v", f.calls, want)
@@ -231,7 +243,7 @@ func TestReconcile_PayloadTeardownSkipsEmptyBranchSlug(t *testing.T) {
 func TestReconcile_IgnoredNamedLabelLogged(t *testing.T) {
 	capture := captureLogs(t)
 	f := &reconcileFake{pr: fetchedPR("front", true, "preview", "preview:")}
-	lifecycle.ReconcilePR(context.Background(), f, event("labeled", "front", "preview", "preview", "preview:"))
+	lifecycle.ReconcilePR(context.Background(), f.api(), event("labeled", "front", "preview", "preview", "preview:"))
 
 	if want := []string{"get:feature-pricing", "write:feature-pricing", "fanout"}; !slices.Equal(f.calls, want) {
 		t.Errorf("calls = %v, want %v", f.calls, want)
@@ -253,7 +265,11 @@ func TestReconcile_ServiceHeldByAnotherPR(t *testing.T) {
 			pin("front", holder, recent),
 		)},
 	}
-	lifecycle.ReconcilePR(context.Background(), f, event("labeled", "front", "preview:pricing", "preview:pricing"))
+	lifecycle.ReconcilePR(
+		context.Background(),
+		f.api(),
+		event("labeled", "front", "preview:pricing", "preview:pricing"),
+	)
 
 	want := []string{"teardown:feature-pricing", "get:pricing", "upsert"}
 	if !slices.Equal(f.calls, want) {
@@ -293,7 +309,7 @@ func TestReconcile_HolderCheckDeploys(t *testing.T) {
 			}
 			lifecycle.ReconcilePR(
 				context.Background(),
-				f,
+				f.api(),
 				event("labeled", "front", "preview:pricing", "preview:pricing"),
 			)
 
@@ -307,7 +323,11 @@ func TestReconcile_HolderCheckDeploys(t *testing.T) {
 func TestReconcile_HolderCheckReadError(t *testing.T) {
 	capture := captureLogs(t)
 	f := &reconcileFake{pr: fetchedPR("front", true, "preview:pricing"), previewErr: errors.New("read boom")}
-	lifecycle.ReconcilePR(context.Background(), f, event("labeled", "front", "preview:pricing", "preview:pricing"))
+	lifecycle.ReconcilePR(
+		context.Background(),
+		f.api(),
+		event("labeled", "front", "preview:pricing", "preview:pricing"),
+	)
 
 	if len(f.writes) != 0 || len(f.upserts) != 0 {
 		t.Errorf("writes = %+v, upserts = %q; want none", f.writes, f.upserts)

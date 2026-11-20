@@ -19,11 +19,13 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/badilhq/badil/internal/config"
+	"github.com/badilhq/badil/internal/forge"
+	forgegithub "github.com/badilhq/badil/internal/forge/github"
 	"github.com/badilhq/badil/internal/github"
-	"github.com/badilhq/badil/internal/gitops"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/server"
+	"github.com/badilhq/badil/internal/store"
 )
 
 // shutdownTimeout bounds graceful shutdown: draining in-flight requests and
@@ -42,11 +44,10 @@ const minCleanupInterval = time.Minute
 // previewsCountTimeout bounds the startup listing of the previews.
 const previewsCountTimeout = 10 * time.Second
 
-// sweepAPI is the gitops client with the metrics recorder lifecycle.Sweep
+// sweepAPI is st, f and the fan-out with the metrics recorder lifecycle.Sweep
 // expects. A nil *metrics.Metrics records nothing.
-type sweepAPI struct {
-	*gitops.Client
-	*metrics.Metrics
+func sweepAPI(st *store.GitHubStore, f forge.Forge, m *metrics.Metrics) lifecycle.SweepAPI {
+	return lifecycle.SweepAPI{Store: st, Forge: f, Recorder: m, FanOut: lifecycle.FanOutPRComments}
 }
 
 func main() {
@@ -97,12 +98,12 @@ func serveCmd() *cobra.Command {
 				return err
 			}
 
-			gitopsClient, err := newGitopsClient(app, cfg, gitops.WithMetrics(m))
+			st, f, err := newStoreAndForge(app, cfg, store.WithMetrics(m))
 			if err != nil {
 				return err
 			}
 
-			srv := server.NewServer(app, gitopsClient, cfg.DeployToken, cfg.InstallationID,
+			srv := server.NewServer(f, st, cfg.DeployToken,
 				server.WithMetrics(m), server.WithArgoCDToken(cfg.ArgoCDWebhookToken))
 			httpSrv := &http.Server{
 				Addr:              cfg.ListenAddr,
@@ -116,10 +117,10 @@ func serveCmd() *cobra.Command {
 			if cfg.DeployToken == "" {
 				slog.InfoContext(ctx, "deploy API disabled", slog.String("reason", "BADIL_DEPLOY_TOKEN is unset"))
 			}
-			countPreviews(ctx, gitopsClient, m)
+			countPreviews(ctx, st, m)
 			serveInBackground(ctx, "server", httpSrv)
 			metricsSrv := startMetricsServer(ctx, cfg.MetricsAddr, m)
-			startSweepLoop(ctx, srv, sweepAPI{Client: gitopsClient, Metrics: m}, m, interval, ttl)
+			startSweepLoop(ctx, srv, sweepAPI(st, f, m), m, interval, ttl)
 
 			<-ctx.Done()
 			slog.InfoContext(ctx, "shutting down server")
@@ -283,14 +284,18 @@ func shutdownServers(ctx context.Context, servers ...*http.Server) error {
 	return errors.Join(errs...)
 }
 
-// newGitopsClient builds the gitops repo client from cfg, authenticated as
-// the GitHub App installation, with opts.
-func newGitopsClient(app *github.App, cfg *config.Config, opts ...gitops.Option) (*gitops.Client, error) {
+// newStoreAndForge builds the gitops repo store and the GitHub forge from
+// cfg, over one client authenticated as the GitHub App installation. The
+// store is configured by opts.
+func newStoreAndForge(
+	app *github.App, cfg *config.Config, opts ...store.Option,
+) (*store.GitHubStore, *forgegithub.Forge, error) {
 	owner, repo, ok := strings.Cut(cfg.GitOpsRepo, "/")
 	if !ok || owner == "" || repo == "" {
-		return nil, fmt.Errorf("GITOPS_REPO must be 'owner/repo', got %q", cfg.GitOpsRepo)
+		return nil, nil, fmt.Errorf("GITOPS_REPO must be 'owner/repo', got %q", cfg.GitOpsRepo)
 	}
-	return gitops.NewClient(app.ClientForInstallation(cfg.InstallationID), owner, repo, opts...), nil
+	client := app.ClientForInstallation(cfg.InstallationID)
+	return store.NewClient(client, owner, repo, opts...), forgegithub.New(client, app, cfg.InstallationID), nil
 }
 
 // newApp builds the GitHub App from the loaded config.
@@ -326,13 +331,13 @@ func cleanupCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			client, err := newGitopsClient(app, cfg)
+			st, f, err := newStoreAndForge(app, cfg)
 			if err != nil {
 				return err
 			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), cleanupTimeout)
 			defer cancel()
-			return lifecycle.Sweep(ctx, sweepAPI{Client: client}, time.Now().UTC(), ttl)
+			return lifecycle.Sweep(ctx, sweepAPI(st, f, nil), time.Now().UTC(), ttl)
 		},
 	}
 }

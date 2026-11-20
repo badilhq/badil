@@ -12,8 +12,9 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 
-	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store"
 )
 
 // actionUnlabeled is the webhook action of a removed label.
@@ -39,21 +40,38 @@ const (
 	outcomeTornDown = "torn_down"
 )
 
-// ReconcileAPI is the subset of gitops.Client used by ReconcilePR.
-type ReconcileAPI interface {
-	DeployAPI
-	TeardownAPI
-	FetchServiceCatalog(ctx context.Context) (*gitops.ServiceCatalog, error)
-	GetPullRequest(ctx context.Context, owner, repo string, number int) (*gitops.PullRequest, error)
+// ReconcileStore is the subset of store.GitHubStore used by ReconcilePR.
+type ReconcileStore interface {
+	DeployStore
+	TeardownStore
+	FetchServiceCatalog(ctx context.Context) (*store.ServiceCatalog, error)
 	GetPreview(ctx context.Context, slug string) (*preview.PreviewValues, string, error)
 	ListPreviews(ctx context.Context) ([]string, error)
-	ListPullRequestFiles(ctx context.Context, owner, repo string, number int) ([]gitops.ChangedFile, error)
 	UnpinServicesWithRetry(
 		ctx context.Context,
 		slug, owner, repo string,
 		prNumber int,
 		services []string,
-	) (*gitops.TeardownResult, error)
+	) (*store.TeardownResult, error)
+}
+
+// ReconcileAPI is what ReconcilePR uses: the store, the forge, the Recorder
+// and the comment fan-out.
+type ReconcileAPI struct {
+	Store    ReconcileStore
+	Forge    forge.Forge
+	Recorder Recorder
+	FanOut   FanOutFunc
+}
+
+// deployAPI narrows a to what DeployPR uses.
+func (a ReconcileAPI) deployAPI() DeployAPI {
+	return DeployAPI{Store: a.Store, Forge: a.Forge, FanOut: a.FanOut}
+}
+
+// teardownAPI narrows a to what TeardownPR uses.
+func (a ReconcileAPI) teardownAPI() TeardownAPI {
+	return TeardownAPI{Store: a.Store, Forge: a.Forge, Recorder: a.Recorder, FanOut: a.FanOut}
 }
 
 // Event is a pull_request webhook delivery to reconcile. Its Target's Slug is
@@ -105,17 +123,17 @@ type Event struct {
 // write succeeded; otherwise torn_down.
 func ReconcilePR(ctx context.Context, api ReconcileAPI, ev Event) {
 	o, r := reconcile(ctx, api, ev)
-	api.Reconcile(o, r)
+	api.Recorder.Reconcile(o, r)
 }
 
 // reconcile is ReconcilePR without the recording. It returns the outcome and,
 // when the outcome is skipped, the reason ("" otherwise).
 func reconcile(ctx context.Context, api ReconcileAPI, ev Event) (string, string) {
 	closed := ev.Action == "closed"
-	catalog, err := api.FetchServiceCatalog(ctx)
+	catalog, err := api.Store.FetchServiceCatalog(ctx)
 	if err != nil {
 		if closed {
-			payloadTeardown(ctx, api, ev, gitops.DefaultLabel, err)
+			payloadTeardown(ctx, api.teardownAPI(), ev, store.DefaultLabel, err)
 			return outcomeTornDown, ""
 		}
 		return reconcileFailed(ctx, ev, err)
@@ -129,10 +147,10 @@ func reconcile(ctx context.Context, api ReconcileAPI, ev Event) (string, string)
 			return reconcileSkipped(ctx, ev, "repo not in catalog")
 		}
 	}
-	pr, err := api.GetPullRequest(ctx, ev.Owner, ev.Repo, ev.Number)
+	pr, err := api.Forge.GetPullRequest(ctx, ev.Owner, ev.Repo, ev.Number)
 	if err != nil {
 		if closed {
-			payloadTeardown(ctx, api, ev, catalog.Label, err)
+			payloadTeardown(ctx, api.teardownAPI(), ev, catalog.Label, err)
 			return outcomeTornDown, ""
 		}
 		return reconcileFailed(ctx, ev, err)
@@ -147,7 +165,7 @@ func reconcile(ctx context.Context, api ReconcileAPI, ev Event) (string, string)
 	if deploy && len(services) == 0 {
 		return reconcileSkipped(ctx, ev, "repo not in catalog")
 	}
-	removed := cleanup(ctx, api, ev, pr, t, catalog.Label)
+	removed := cleanup(ctx, api.teardownAPI(), ev, pr, t, catalog.Label)
 	repoServices := services
 	if deploy {
 		if services, err = touchedServices(ctx, api, catalog, ev, pr, services); err != nil {
@@ -172,10 +190,10 @@ func reconcile(ctx context.Context, api ReconcileAPI, ev Event) (string, string)
 	if deploy {
 		// After a teardown in this reconcile, the deploy always writes and
 		// comments, so its summary stays the last write to the PR's comment.
-		outcome, reason = deployServices(ctx, api, catalog, services, ev, pr, t.Slug, !removed)
+		outcome, reason = deployServices(ctx, api.deployAPI(), catalog, services, ev, pr, t.Slug, !removed)
 	}
 	// A conflict leaves the PR without a target, so nothing was deployed.
-	if o, r := postLabelConflict(ctx, api, ev, pr, catalog.Label, t); o != "" {
+	if o, r := postLabelConflict(ctx, api.teardownAPI(), ev, pr, catalog.Label, t); o != "" {
 		return o, r
 	}
 	return outcome, reason
@@ -199,7 +217,7 @@ func cleanup(
 	ctx context.Context,
 	api TeardownAPI,
 	ev Event,
-	pr *gitops.PullRequest,
+	pr *forge.PullRequest,
 	t preview.Resolution,
 	label string,
 ) bool {
@@ -219,7 +237,7 @@ func cleanup(
 // be pinned in: its branch slug, every named slug of t and, on unlabeled, the
 // slug of the removed label. Empty slugs are dropped, and so is t.Slug when the
 // PR is deployed there.
-func cleanupSlugs(t preview.Resolution, pr *gitops.PullRequest, ev Event, label string) []string {
+func cleanupSlugs(t preview.Resolution, pr *forge.PullRequest, ev Event, label string) []string {
 	branch := preview.Slugify(pr.HeadRef)
 	slugs := append([]string{branch}, t.Named...)
 	if ev.Action == actionUnlabeled {
@@ -238,7 +256,7 @@ func cleanupSlugs(t preview.Resolution, pr *gitops.PullRequest, ev Event, label 
 }
 
 // cleanupReason returns why the PR leaves the previews of cleanupSlugs.
-func cleanupReason(t preview.Resolution, pr *gitops.PullRequest, ev Event, label string) string {
+func cleanupReason(t preview.Resolution, pr *forge.PullRequest, ev Event, label string) string {
 	switch {
 	case !pr.Open:
 		return PRClosedReason
@@ -268,21 +286,21 @@ func movedReason(slug string) string {
 // services, that the PR touches: a service without paths always; a service
 // with paths when a file the PR changes, or the path it was renamed from,
 // matches one of them. The PR's files are listed only when one of services
-// has paths and the PR changes at most gitops.MaxListedPullRequestFiles
+// has paths and the PR changes at most forge.MaxListedFiles
 // files; otherwise every service is touched. A failed listing is returned.
 func touchedServices(
 	ctx context.Context,
 	api ReconcileAPI,
-	catalog *gitops.ServiceCatalog,
+	catalog *store.ServiceCatalog,
 	ev Event,
-	pr *gitops.PullRequest,
+	pr *forge.PullRequest,
 	services []string,
 ) ([]string, error) {
 	filtered := slices.ContainsFunc(services, func(name string) bool { return catalog.Paths[name] != nil })
-	if !filtered || pr.ChangedFiles > gitops.MaxListedPullRequestFiles {
+	if !filtered || pr.ChangedFiles > forge.MaxListedFiles {
 		return services, nil
 	}
-	files, err := api.ListPullRequestFiles(ctx, ev.Owner, ev.Repo, ev.Number)
+	files, err := api.Forge.ListChangedFiles(ctx, ev.Owner, ev.Repo, ev.Number)
 	if err != nil {
 		return nil, err
 	}
@@ -298,13 +316,13 @@ func touchedServices(
 
 // touches reports whether a file of files, or the path it was renamed from,
 // matches one of patterns. The patterns are valid: ParseCatalog checked them.
-func touches(patterns []string, files []gitops.ChangedFile) bool {
+func touches(patterns []string, files []forge.ChangedFile) bool {
 	match := func(name string) bool {
 		return name != "" && slices.ContainsFunc(patterns, func(p string) bool {
 			return doublestar.MatchUnvalidated(p, name)
 		})
 	}
-	return slices.ContainsFunc(files, func(f gitops.ChangedFile) bool {
+	return slices.ContainsFunc(files, func(f forge.ChangedFile) bool {
 		return match(f.Filename) || match(f.PreviousFilename)
 	})
 }
@@ -316,9 +334,9 @@ func touches(patterns []string, files []gitops.ChangedFile) bool {
 func noServiceChanged(ctx context.Context, api ReconcileAPI, ev Event, slug string) (string, string) {
 	tt := ev.Target
 	tt.Slug = slug
-	teardown(ctx, api, tt, noServiceReason, triggerWebhook, false)
+	teardown(ctx, api.teardownAPI(), tt, noServiceReason, triggerWebhook, false)
 	body := preview.BuildNoServiceSummary(slug)
-	if err := api.UpsertPRComment(ctx, ev.Owner, ev.Repo, ev.Number, body); err != nil {
+	if err := api.Forge.UpsertComment(ctx, ev.Owner, ev.Repo, ev.Number, body); err != nil {
 		conflictCommentFailed(ctx, ev, err)
 	}
 	return reconcileSkipped(ctx, ev, noServiceReason)
@@ -360,9 +378,9 @@ func unpinUntouched(
 func refused(
 	ctx context.Context,
 	api ReconcileAPI,
-	catalog *gitops.ServiceCatalog,
+	catalog *store.ServiceCatalog,
 	ev Event,
-	pr *gitops.PullRequest,
+	pr *forge.PullRequest,
 	t preview.Resolution,
 	services []string,
 ) (string, string, *preview.PreviewValues) {
@@ -384,7 +402,7 @@ func refusedByHolder(
 	ctx context.Context,
 	api ReconcileAPI,
 	ev Event,
-	pr *gitops.PullRequest,
+	pr *forge.PullRequest,
 	t preview.Resolution,
 	services []string,
 	label string,
@@ -392,8 +410,8 @@ func refusedByHolder(
 	if !pr.Open || t.Slug == "" {
 		return "", "", nil
 	}
-	vals, _, err := api.GetPreview(ctx, t.Slug)
-	if errors.Is(err, gitops.ErrNotFound) {
+	vals, _, err := api.Store.GetPreview(ctx, t.Slug)
+	if errors.Is(err, store.ErrNotFound) {
 		return "", "", nil
 	}
 	if err != nil {
@@ -405,7 +423,7 @@ func refusedByHolder(
 		return "", "", vals
 	}
 	body := preview.BuildServiceHeldSummary(t.Slug, service, holder, label)
-	if upsertErr := api.UpsertPRComment(ctx, ev.Owner, ev.Repo, ev.Number, body); upsertErr != nil {
+	if upsertErr := api.Forge.UpsertComment(ctx, ev.Owner, ev.Repo, ev.Number, body); upsertErr != nil {
 		conflictCommentFailed(ctx, ev, upsertErr)
 	}
 	o, r := reconcileSkipped(ctx, ev, "service held by another pr", slog.String("holder", holder))
@@ -422,14 +440,14 @@ func refusedByLimit(
 	ctx context.Context,
 	api ReconcileAPI,
 	ev Event,
-	pr *gitops.PullRequest,
+	pr *forge.PullRequest,
 	t preview.Resolution,
 	maxPreviews int,
 ) (string, string) {
 	if !pr.Open || t.Slug == "" || maxPreviews <= 0 {
 		return "", ""
 	}
-	slugs, err := api.ListPreviews(ctx)
+	slugs, err := api.Store.ListPreviews(ctx)
 	if err != nil {
 		return reconcileFailed(ctx, ev, err)
 	}
@@ -437,7 +455,7 @@ func refusedByLimit(
 		return "", ""
 	}
 	body := preview.BuildPreviewLimitSummary(t.Slug, maxPreviews)
-	if upsertErr := api.UpsertPRComment(ctx, ev.Owner, ev.Repo, ev.Number, body); upsertErr != nil {
+	if upsertErr := api.Forge.UpsertComment(ctx, ev.Owner, ev.Repo, ev.Number, body); upsertErr != nil {
 		conflictCommentFailed(ctx, ev, upsertErr)
 	}
 	return reconcileSkipped(ctx, ev, previewLimitReason, slog.Int("max_previews", maxPreviews))
@@ -469,7 +487,7 @@ func postLabelConflict(
 	ctx context.Context,
 	api TeardownAPI,
 	ev Event,
-	pr *gitops.PullRequest,
+	pr *forge.PullRequest,
 	label string,
 	t preview.Resolution,
 ) (string, string) {
@@ -477,7 +495,7 @@ func postLabelConflict(
 		return "", ""
 	}
 	body := preview.BuildLabelConflictSummary(label, t.NamedLabels)
-	if err := api.UpsertPRComment(ctx, ev.Owner, ev.Repo, ev.Number, body); err != nil {
+	if err := api.Forge.UpsertComment(ctx, ev.Owner, ev.Repo, ev.Number, body); err != nil {
 		conflictCommentFailed(ctx, ev, err)
 	}
 	return reconcileSkipped(ctx, ev, "conflicting preview labels")
@@ -543,10 +561,10 @@ func previewLabel(name, label string) bool {
 func deployServices(
 	ctx context.Context,
 	api DeployAPI,
-	catalog *gitops.ServiceCatalog,
+	catalog *store.ServiceCatalog,
 	services []string,
 	ev Event,
-	pr *gitops.PullRequest,
+	pr *forge.PullRequest,
 	slug string,
 	skipUnchanged bool,
 ) (string, string) {
@@ -562,7 +580,7 @@ func deployServices(
 			}, extra...)
 		}
 		err := ctx.Err()
-		var result *gitops.WriteResult
+		var result *store.WriteResult
 		var fanErr error
 		if err == nil {
 			result, fanErr, err = DeployPR(ctx, api, catalog, slug, preview.DeployInputs{

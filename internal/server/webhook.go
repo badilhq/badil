@@ -2,162 +2,87 @@ package server
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 
-	gh "github.com/google/go-github/v71/github"
-
+	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
 )
 
-// installationEvent is implemented by go-github event types that carry the
-// installation the delivery was sent for.
-type installationEvent interface {
-	GetInstallation() *gh.Installation
-}
-
-// webhookEvent maps a verified X-Github-Event value to the closed set of the
-// event label of the webhook deliveries metric.
-func webhookEvent(eventType string) string {
-	switch eventType {
-	case "ping", "installation", "installation_repositories", "pull_request", "push":
-		return eventType
-	}
-	return "other"
-}
-
 // countDelivery records a delivery answered with status. event is the
-// event label: webhookEvent of a verified delivery, or "unverified".
+// event label: the Name of a verified delivery, or "unverified".
 func (s *Server) countDelivery(event string, status int) {
 	s.metrics.WebhookDelivery(event, strconv.Itoa(status))
 }
 
-// handleWebhook validates the signature, parses the payload into a typed
-// event, checks that it comes from the configured installation, and
-// dispatches to a per-event handler. Deliveries from any other installation,
-// or without one, get 403; ping is exempt because it carries no installation.
-// Parse and dispatch failures are logged and answered with 200: the delivery
-// is authentic and there is nothing to re-queue, so a non-2xx would only flag
-// it as failed in Recent Deliveries. GitHub does not automatically redeliver
-// failed deliveries. Every delivery is counted with its status; its event is
-// "unverified" until the signature is checked, since X-Github-Event is not
-// covered by the signature.
+// handleWebhook has the forge verify, parse and check the delivery
+// (forge.Forge.ParseWebhook), then dispatches it to a per-event handler. A
+// rejected signature gets 401, and a delivery from any other installation,
+// or without one, gets 403. Parse and dispatch failures are answered with
+// 200: the delivery is authentic and there is nothing to re-queue, so a
+// non-2xx would only flag it as failed in Recent Deliveries. GitHub does not
+// automatically redeliver failed deliveries. Every delivery is counted with
+// its status; its event is "unverified" until the signature is checked, since
+// the event type is not covered by the signature.
 func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
-	eventType := r.Header.Get("X-Github-Event")
 	ctx := r.Context()
 
-	payload, err := s.webhook.ValidateWebhook(r)
-	if err != nil {
-		// A rejected delivery means a misconfigured secret or someone probing
-		// the public endpoint with forged requests — worth surfacing. Log the
-		// source and event type only; never the (untrusted) payload.
-		slog.WarnContext(ctx, "webhook signature rejected",
-			slog.String("event", eventType),
-			slog.String("remote_addr", r.RemoteAddr),
-		)
+	ev, err := s.forge.ParseWebhook(r)
+	switch {
+	case errors.Is(err, forge.ErrUnverified):
 		s.countDelivery("unverified", http.StatusUnauthorized)
 		http.Error(w, "invalid signature", http.StatusUnauthorized)
 		return
-	}
-	event := webhookEvent(eventType)
-
-	parsed, err := s.webhook.ParseEvent(eventType, payload)
-	if err != nil {
-		slog.ErrorContext(ctx, "webhook parse failed",
-			slog.String("event", eventType), slog.String("err", err.Error()))
-		s.countDelivery(event, http.StatusOK)
+	case errors.Is(err, forge.ErrForbidden):
+		s.countDelivery(ev.Name, http.StatusForbidden)
+		http.Error(w, "installation not allowed", http.StatusForbidden)
+		return
+	case err != nil:
+		s.countDelivery(ev.Name, http.StatusOK)
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 
-	if eventType != "ping" {
-		var inst *gh.Installation
-		if ie, ok := parsed.(installationEvent); ok {
-			inst = ie.GetInstallation()
-		}
-		if inst.GetID() == 0 || inst.GetID() != s.allowedInstallationID {
-			slog.WarnContext(ctx, "webhook installation rejected",
-				slog.String("event", eventType),
-				slog.Int64("installation_id", inst.GetID()),
-				slog.String("account", inst.GetAccount().GetLogin()),
-			)
-			s.countDelivery(event, http.StatusForbidden)
-			http.Error(w, "installation not allowed", http.StatusForbidden)
-			return
-		}
-	}
-
-	// Backstop: go-github event structs are pointer-heavy; a handler that
-	// dereferences a missing optional field would panic and, without recovery,
-	// surface as a 500 that marks the delivery failed. Recover, log, 200.
+	// Backstop: a handler that panics would, without recovery, surface as a
+	// 500 that marks the delivery failed. Recover, log, 200.
 	defer func() {
 		if rec := recover(); rec != nil {
 			slog.ErrorContext(ctx, "webhook handler panicked",
-				slog.String("event", eventType), slog.Any("panic", rec))
+				slog.String("event", ev.Name), slog.Any("panic", rec))
 		}
-		s.countDelivery(event, http.StatusOK)
+		s.countDelivery(ev.Name, http.StatusOK)
 		w.WriteHeader(http.StatusOK)
 	}()
 
-	s.dispatchEvent(ctx, eventType, parsed)
+	s.dispatchEvent(ctx, ev)
 }
 
-// dispatchEvent routes a parsed event to its handler. Unknown event types are
-// logged at WARN (GitHub adds event types over time; that's not an error).
-func (s *Server) dispatchEvent(ctx context.Context, eventType string, event any) {
-	switch e := event.(type) {
-	case *gh.PingEvent:
-		s.handlePing(ctx, e)
-	case *gh.InstallationEvent:
-		s.handleInstallation(ctx, e)
-	case *gh.InstallationRepositoriesEvent:
-		s.handleInstallationRepositories(ctx, e)
-	case *gh.PullRequestEvent:
-		s.handlePullRequest(ctx, e)
-	case *gh.PushEvent:
-		s.handlePush(ctx, e)
-	default:
-		slog.WarnContext(ctx, "unhandled webhook event", slog.String("event", eventType))
+// dispatchEvent routes a pull request or push event to its handler. The
+// forge already logged the other events.
+func (s *Server) dispatchEvent(ctx context.Context, ev forge.Event) {
+	switch ev.Kind {
+	case forge.KindPullRequest:
+		s.handlePullRequest(ctx, ev)
+	case forge.KindPush:
+		s.handlePush(ctx, ev.Push)
+	case forge.KindOther:
 	}
 }
 
-func (s *Server) handlePing(ctx context.Context, e *gh.PingEvent) {
-	slog.InfoContext(ctx, "webhook ping",
-		slog.String("zen", e.GetZen()),
-		slog.Int64("hook_id", e.GetHookID()),
-	)
-}
-
-func (s *Server) handleInstallation(ctx context.Context, e *gh.InstallationEvent) {
-	slog.InfoContext(ctx, "webhook installation",
-		slog.String("action", e.GetAction()),
-		slog.Int64("installation_id", e.GetInstallation().GetID()),
-		slog.String("account", e.GetInstallation().GetAccount().GetLogin()),
-		slog.Int("repositories", len(e.Repositories)),
-	)
-}
-
-func (s *Server) handleInstallationRepositories(ctx context.Context, e *gh.InstallationRepositoriesEvent) {
-	slog.InfoContext(ctx, "webhook installation_repositories",
-		slog.String("action", e.GetAction()),
-		slog.Int64("installation_id", e.GetInstallation().GetID()),
-		slog.Int("repositories_added", len(e.RepositoriesAdded)),
-		slog.Int("repositories_removed", len(e.RepositoriesRemoved)),
-	)
-}
-
-func (s *Server) handlePullRequest(ctx context.Context, e *gh.PullRequestEvent) {
+func (s *Server) handlePullRequest(ctx context.Context, ev forge.Event) {
+	e := ev.PullRequest
 	slog.InfoContext(ctx, "webhook pull_request",
-		slog.String("action", e.GetAction()),
-		slog.String("repo", e.GetRepo().GetFullName()),
-		slog.Int("pr_number", e.GetNumber()),
-		slog.String("head_ref", e.GetPullRequest().GetHead().GetRef()),
-		slog.String("head_sha", e.GetPullRequest().GetHead().GetSHA()),
-		slog.String("pr_author", e.GetPullRequest().GetUser().GetLogin()),
+		slog.String("action", e.Action),
+		slog.String("repo", e.FullName),
+		slog.Int("pr_number", e.Number),
+		slog.String("head_ref", e.HeadRef),
+		slog.String("head_sha", e.HeadSHA),
+		slog.String("pr_author", e.Author),
 	)
-	switch e.GetAction() {
+	switch e.Action {
 	case "opened", "reopened", "synchronize", "labeled", "unlabeled", "closed":
 		s.startReconcile(ctx, e)
 	}
@@ -165,22 +90,22 @@ func (s *Server) handlePullRequest(ctx context.Context, e *gh.PullRequestEvent) 
 
 // handlePush starts a config sync in the background for a push to the gitops
 // repo's default branch that did not delete it. Any other push is ignored.
-func (s *Server) handlePush(ctx context.Context, e *gh.PushEvent) {
-	repo := e.GetRepo().GetFullName()
+func (s *Server) handlePush(ctx context.Context, e forge.PushEvent) {
+	repo := e.FullName
 	reason := ""
 	switch {
-	case !strings.EqualFold(repo, s.gitops.FullName()):
+	case !strings.EqualFold(repo, s.store.FullName()):
 		reason = "not the gitops repo"
-	case e.GetRef() != "refs/heads/"+e.GetRepo().GetDefaultBranch():
+	case e.Ref != "refs/heads/"+e.DefaultBranch:
 		reason = "not the default branch"
-	case e.GetDeleted():
+	case e.Deleted:
 		reason = "branch deleted"
 	}
 	attrs := []any{
 		slog.String("repo", repo),
-		slog.String("ref", e.GetRef()),
-		slog.String("after", e.GetAfter()),
-		slog.Bool("deleted", e.GetDeleted()),
+		slog.String("ref", e.Ref),
+		slog.String("after", e.After),
+		slog.Bool("deleted", e.Deleted),
 	}
 	if reason != "" {
 		attrs = append(attrs, slog.String("reason", reason))

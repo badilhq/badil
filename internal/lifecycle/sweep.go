@@ -8,8 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store"
 )
 
 // Sweep rules that delete a preview, the rule label of Recorder.SweepDeleted.
@@ -18,19 +19,37 @@ const (
 	ruleTTL   = "ttl"
 )
 
-// SweepAPI is the subset of gitops.Client used by Sweep, plus the Recorder.
-type SweepAPI interface {
-	TeardownAPI
-	FetchServiceCatalog(ctx context.Context) (*gitops.ServiceCatalog, error)
+// SweepStore is the subset of store.GitHubStore used by Sweep.
+type SweepStore interface {
+	TeardownStore
+	PreviewSyncStore
+	FetchServiceCatalog(ctx context.Context) (*store.ServiceCatalog, error)
 	ListPreviews(ctx context.Context) ([]string, error)
 	GetPreview(ctx context.Context, slug string) (*preview.PreviewValues, string, error)
-	GetPullRequest(ctx context.Context, owner, repo string, number int) (*gitops.PullRequest, error)
 	DeletePreviewWithRetry(
 		ctx context.Context,
 		slug, message string,
 		stillDelete func(preview.PreviewValues) bool,
-	) (*gitops.DeleteResult, error)
-	PreviewSyncAPI
+	) (*store.DeleteResult, error)
+}
+
+// SweepAPI is what Sweep uses: the store, the forge, the Recorder and the
+// comment fan-out.
+type SweepAPI struct {
+	Store    SweepStore
+	Forge    forge.Forge
+	Recorder Recorder
+	FanOut   FanOutFunc
+}
+
+// teardownAPI narrows a to what TeardownPR uses.
+func (a SweepAPI) teardownAPI() TeardownAPI {
+	return TeardownAPI{Store: a.Store, Forge: a.Forge, Recorder: a.Recorder, FanOut: a.FanOut}
+}
+
+// previewSyncAPI narrows a to what syncPreview uses.
+func (a SweepAPI) previewSyncAPI() PreviewSyncAPI {
+	return PreviewSyncAPI{Store: a.Store, Forge: a.Forge, Recorder: a.Recorder, FanOut: a.FanOut}
 }
 
 // Sweep visits every preview of the gitops repo once, applies the first
@@ -64,11 +83,11 @@ type SweepAPI interface {
 // The number of listed previews and each rule 1-2 deletion are recorded
 // through the Recorder; teardowns are recorded with the sweep trigger.
 func Sweep(ctx context.Context, api SweepAPI, now time.Time, ttl time.Duration) error {
-	slugs, err := api.ListPreviews(ctx)
+	slugs, err := api.Store.ListPreviews(ctx)
 	if err != nil {
 		return err
 	}
-	api.SweepListed(len(slugs))
+	api.Recorder.SweepListed(len(slugs))
 	slog.InfoContext(ctx, "cleanup started",
 		slog.Int("previews", len(slugs)),
 		slog.String("ttl", ttl.String()),
@@ -96,11 +115,11 @@ func Sweep(ctx context.Context, api SweepAPI, now time.Time, ttl time.Duration) 
 
 // sweepCatalog returns the catalog, or nil when there is no preview or the
 // catalog can't be read.
-func sweepCatalog(ctx context.Context, api SweepAPI, slugs []string) *gitops.ServiceCatalog {
+func sweepCatalog(ctx context.Context, api SweepAPI, slugs []string) *store.ServiceCatalog {
 	if len(slugs) == 0 {
 		return nil
 	}
-	catalog, err := api.FetchServiceCatalog(ctx)
+	catalog, err := api.Store.FetchServiceCatalog(ctx)
 	if err != nil {
 		slog.WarnContext(ctx, "cleanup catalog unavailable", slog.String("err", err.Error()))
 		return nil
@@ -115,12 +134,12 @@ func sweepPreview(
 	ctx context.Context,
 	api SweepAPI,
 	slug string,
-	catalog *gitops.ServiceCatalog,
+	catalog *store.ServiceCatalog,
 	now time.Time,
 	ttl time.Duration,
 ) error {
-	vals, _, err := api.GetPreview(ctx, slug)
-	if errors.Is(err, gitops.ErrNotFound) {
+	vals, _, err := api.Store.GetPreview(ctx, slug)
+	if errors.Is(err, store.ErrNotFound) {
 		return nil
 	}
 	if err != nil {
@@ -144,7 +163,7 @@ func sweepPreview(
 	if catalog == nil {
 		return nil
 	}
-	_, err = syncPreview(ctx, api, slug, catalog)
+	_, err = syncPreview(ctx, api.previewSyncAPI(), slug, catalog)
 	return err
 }
 
@@ -153,16 +172,16 @@ func sweepPreview(
 // the open PRs' comments. It returns the sync result; only the sync error is
 // returned.
 func syncPreview(
-	ctx context.Context, api PreviewSyncAPI, slug string, catalog *gitops.ServiceCatalog,
-) (*gitops.SyncResult, error) {
-	res, err := api.SyncPreviewWithRetry(ctx, slug, catalog)
+	ctx context.Context, api PreviewSyncAPI, slug string, catalog *store.ServiceCatalog,
+) (*store.SyncResult, error) {
+	res, err := api.Store.SyncPreviewWithRetry(ctx, slug, catalog)
 	if err != nil {
 		return nil, err
 	}
 	if !res.Changed {
 		return res, nil
 	}
-	api.PreviewSynced()
+	api.Recorder.PreviewSynced()
 	slog.InfoContext(ctx, "preview synced",
 		slog.String("slug", slug),
 		slog.String("gitops_commit_url", res.CommitURL),
@@ -173,7 +192,7 @@ func syncPreview(
 	body := preview.BuildSummary(
 		slug, res.Values, catalog.URLs, catalog.ArgoCDURL, res.Excluded, res.CommitMessage, res.CommitURL,
 	)
-	if fanErr := api.FanOutPRComments(ctx, res.Values, body); fanErr != nil {
+	if fanErr := api.FanOut(ctx, api.Forge, res.Values, body); fanErr != nil {
 		slog.WarnContext(ctx, "preview sync comment failed",
 			slog.String("slug", slug),
 			slog.String("err", fanErr.Error()),
@@ -203,7 +222,7 @@ func expired(vals preview.PreviewValues, cutoff time.Time) bool {
 // deploy pinned one in the meantime.
 func deleteUnpinned(ctx context.Context, api SweepAPI, slug string) error {
 	message := fmt.Sprintf("chore(preview): delete %s preview", slug)
-	res, err := api.DeletePreviewWithRetry(ctx, slug, message, func(v preview.PreviewValues) bool {
+	res, err := api.Store.DeletePreviewWithRetry(ctx, slug, message, func(v preview.PreviewValues) bool {
 		return !hasPin(v)
 	})
 	if err != nil {
@@ -212,7 +231,7 @@ func deleteUnpinned(ctx context.Context, api SweepAPI, slug string) error {
 	if !res.Deleted {
 		return nil
 	}
-	api.SweepDeleted(ruleNoPin)
+	api.Recorder.SweepDeleted(ruleNoPin)
 	slog.InfoContext(ctx, "preview deleted",
 		slog.String("slug", slug),
 		slog.String("reason", "no pins"),
@@ -225,7 +244,7 @@ func deleteUnpinned(ctx context.Context, api SweepAPI, slug string) error {
 // a deploy refreshed it in the meantime, then tells its open PRs.
 func deleteExpired(ctx context.Context, api SweepAPI, slug string, ttl time.Duration, cutoff time.Time) error {
 	message := fmt.Sprintf("chore(preview): expire %s preview", slug)
-	res, err := api.DeletePreviewWithRetry(ctx, slug, message, func(v preview.PreviewValues) bool {
+	res, err := api.Store.DeletePreviewWithRetry(ctx, slug, message, func(v preview.PreviewValues) bool {
 		return expired(v, cutoff)
 	})
 	if err != nil {
@@ -234,7 +253,7 @@ func deleteExpired(ctx context.Context, api SweepAPI, slug string, ttl time.Dura
 	if !res.Deleted {
 		return nil
 	}
-	api.SweepDeleted(ruleTTL)
+	api.Recorder.SweepDeleted(ruleTTL)
 	last, _ := preview.LastDeploy(res.Values)
 	slog.InfoContext(ctx, "preview deleted",
 		slog.String("slug", slug),
@@ -243,7 +262,7 @@ func deleteExpired(ctx context.Context, api SweepAPI, slug string, ttl time.Dura
 		slog.String("last_deploy", last.Format(time.RFC3339)),
 	)
 	body := preview.BuildExpirySummary(slug, ttl, message, res.CommitURL)
-	if fanErr := api.FanOutPRComments(ctx, res.Values, body); fanErr != nil {
+	if fanErr := api.FanOut(ctx, api.Forge, res.Values, body); fanErr != nil {
 		slog.WarnContext(ctx, "preview expiry comment failed",
 			slog.String("slug", slug),
 			slog.String("err", fanErr.Error()),
@@ -258,7 +277,7 @@ func deleteExpired(ctx context.Context, api SweepAPI, slug string, ttl time.Dura
 // cannot be read keeps its pins.
 func teardownClosedPRs(ctx context.Context, api SweepAPI, slug, label string, vals preview.PreviewValues) {
 	for _, t := range pinnedPRs(slug, vals) {
-		pr, err := api.GetPullRequest(ctx, t.Owner, t.Repo, t.Number)
+		pr, err := api.Forge.GetPullRequest(ctx, t.Owner, t.Repo, t.Number)
 		if err != nil {
 			slog.WarnContext(ctx, "cleanup pr state unknown",
 				slog.String("slug", slug),
@@ -269,10 +288,10 @@ func teardownClosedPRs(ctx context.Context, api SweepAPI, slug, label string, va
 			continue
 		}
 		if !pr.Open {
-			TeardownPR(ctx, api, t, PRClosedReason, triggerSweep)
+			TeardownPR(ctx, api.teardownAPI(), t, PRClosedReason, triggerSweep)
 			continue
 		}
-		unpinMoved(ctx, api, t, pr, label)
+		unpinMoved(ctx, api.teardownAPI(), t, pr, label)
 	}
 }
 
@@ -280,7 +299,7 @@ func teardownClosedPRs(ctx context.Context, api SweepAPI, slug, label string, va
 // another preview, or target none while t.Slug is not its branch slug. A
 // conflict or a move leaves the PR's comment alone. It does nothing when label
 // is "".
-func unpinMoved(ctx context.Context, api TeardownAPI, t Target, pr *gitops.PullRequest, label string) {
+func unpinMoved(ctx context.Context, api TeardownAPI, t Target, pr *forge.PullRequest, label string) {
 	if label == "" {
 		return
 	}

@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	forgegithub "github.com/badilhq/badil/internal/forge/github"
 	"github.com/badilhq/badil/internal/github"
 	"github.com/badilhq/badil/internal/server"
 )
@@ -68,7 +69,7 @@ func newWebhookServerForInstallation(t *testing.T, allowedInstallationID int64) 
 	slog.SetDefault(slog.New(capture))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
-	return server.NewServer(app, nil, "test-deploy-token", allowedInstallationID), capture.Records
+	return server.NewServer(forgegithub.New(nil, app, allowedInstallationID), nil, "test-deploy-token"), capture.Records
 }
 
 // signedRequest builds a POST to /webhooks/github with a valid HMAC-SHA256

@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	gh "github.com/google/go-github/v71/github"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/metrics"
+	"github.com/badilhq/badil/internal/store"
 )
 
 const (
@@ -25,21 +25,17 @@ const quiet = 100 * time.Millisecond
 
 // labelEvent is prEvent with the given added or removed label, payload labels
 // and a payload head SHA that differs from the fetched one.
-func labelEvent(action, label string, labels ...string) *gh.PullRequestEvent {
+func labelEvent(action, label string, labels ...string) forge.Event {
 	e := prEvent(action, false)
-	if label != "" {
-		e.Label = &gh.Label{Name: gh.Ptr(label)}
-	}
-	for _, l := range labels {
-		e.PullRequest.Labels = append(e.PullRequest.Labels, &gh.Label{Name: gh.Ptr(l)})
-	}
-	e.PullRequest.Head.SHA = gh.Ptr(payloadSHA)
+	e.PullRequest.Label = label
+	e.PullRequest.Labels = append(e.PullRequest.Labels, labels...)
+	e.PullRequest.HeadSHA = payloadSHA
 	return e
 }
 
 // fetchedPR is acme/backend-1#42 as read from GitHub.
-func fetchedPR(open bool, labels ...string) *gitops.PullRequest {
-	return &gitops.PullRequest{
+func fetchedPR(open bool, labels ...string) *forge.PullRequest {
+	return &forge.PullRequest{
 		Open:         open,
 		HeadRef:      "feature/pricing",
 		HeadSHA:      fetchedSHA,
@@ -63,7 +59,7 @@ func reconcileFake() *fakeGitops {
 }
 
 // deliver hands e to the webhook handler and waits for the background jobs.
-func deliver(t *testing.T, s *Server, e *gh.PullRequestEvent) {
+func deliver(t *testing.T, s *Server, e forge.Event) {
 	t.Helper()
 	s.handlePullRequest(context.Background(), e)
 	if err := s.WaitBackground(context.Background()); err != nil {
@@ -115,7 +111,7 @@ func TestReconcile_ClosedFallsBackToPayloadTeardown(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fg := reconcileFake()
 			tc.set(fg)
-			fg.teardownResult = &gitops.TeardownResult{
+			fg.teardownResult = &store.TeardownResult{
 				Removed: []string{"backend-1"}, Deleted: true, CommitURL: teardownCommitURL, CommitMessage: msg,
 			}
 			s, capture := newTeardownServer(t, fg)
@@ -213,7 +209,7 @@ func TestReconcile_UnlabeledTearsDownWithReason(t *testing.T) {
 	const msg = "chore(preview): delete feature-pricing preview"
 	fg := reconcileFake()
 	fg.pr = fetchedPR(true, "bug")
-	fg.teardownResult = &gitops.TeardownResult{
+	fg.teardownResult = &store.TeardownResult{
 		Removed: []string{"backend-1"}, Deleted: true, CommitURL: teardownCommitURL, CommitMessage: msg,
 	}
 	s, _ := newTeardownServer(t, fg)
@@ -239,7 +235,7 @@ func TestReconcile_UnlabeledTearsDownWithReason(t *testing.T) {
 func TestReconcile_GuardSkipsPRRead(t *testing.T) {
 	cases := []struct {
 		name string
-		e    *gh.PullRequestEvent
+		e    forge.Event
 	}{
 		{name: "opened without the label", e: labelEvent("opened", "", "bug")},
 		{name: "synchronize without the label", e: labelEvent("synchronize", "")},
@@ -263,7 +259,7 @@ func TestReconcile_MissingFields(t *testing.T) {
 	fg := reconcileFake()
 	s, capture := newTeardownServer(t, fg)
 	e := labelEvent("labeled", "preview", "preview")
-	e.Repo = nil
+	e.PullRequest.Owner, e.PullRequest.Repo, e.PullRequest.FullName = "", "", ""
 	deliver(t, s, e)
 
 	if got := drain(fg.started); len(got) != 0 {

@@ -5,15 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"slices"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store"
 )
 
 const (
@@ -130,7 +132,7 @@ type fakeAPI struct {
 	prOpen    map[string]bool
 	prErr     map[string]error
 	fanErr    error
-	sync      map[string]*gitops.SyncResult
+	sync      map[string]*store.SyncResult
 	syncErr   map[string]error
 
 	deletes   []deleteCall
@@ -152,25 +154,25 @@ func (f *fakeAPI) GetPreview(_ context.Context, slug string) (*preview.PreviewVa
 	}
 	vals, ok := f.files[slug]
 	if !ok {
-		return nil, "", gitops.ErrNotFound
+		return nil, "", store.ErrNotFound
 	}
 	return vals, "blob-" + slug, nil
 }
 
-func (f *fakeAPI) GetPullRequest(_ context.Context, owner, repo string, number int) (*gitops.PullRequest, error) {
+func (f *fakeAPI) GetPullRequest(_ context.Context, owner, repo string, number int) (*forge.PullRequest, error) {
 	key := fmt.Sprintf("%s/%s#%d", owner, repo, number)
 	f.prReads = append(f.prReads, key)
 	if err := f.prErr[key]; err != nil {
 		return nil, err
 	}
-	return &gitops.PullRequest{Open: f.prOpen[key], Labels: f.prLabels[key], HeadRef: f.prHeadRef[key]}, nil
+	return &forge.PullRequest{Open: f.prOpen[key], Labels: f.prLabels[key], HeadRef: f.prHeadRef[key]}, nil
 }
 
 func (f *fakeAPI) DeletePreviewWithRetry(
 	_ context.Context,
 	slug, message string,
 	stillDelete func(preview.PreviewValues) bool,
-) (*gitops.DeleteResult, error) {
+) (*store.DeleteResult, error) {
 	if err := f.deleteErr[slug]; err != nil {
 		return nil, err
 	}
@@ -179,19 +181,19 @@ func (f *fakeAPI) DeletePreviewWithRetry(
 		vals = fresh
 	}
 	if !stillDelete(vals) {
-		return &gitops.DeleteResult{}, nil
+		return &store.DeleteResult{}, nil
 	}
 	f.deletes = append(f.deletes, deleteCall{slug: slug, message: message})
-	return &gitops.DeleteResult{Deleted: true, Values: vals, CommitURL: sweepCommitURL}, nil
+	return &store.DeleteResult{Deleted: true, Values: vals, CommitURL: sweepCommitURL}, nil
 }
 
 func (f *fakeAPI) TeardownPreviewWithRetry(
 	_ context.Context,
 	slug, owner, repo string,
 	prNumber int,
-) (*gitops.TeardownResult, error) {
+) (*store.TeardownResult, error) {
 	f.teardowns = append(f.teardowns, teardownCall{slug: slug, owner: owner, repo: repo, number: prNumber})
-	return &gitops.TeardownResult{
+	return &store.TeardownResult{
 		Removed:       []string{repo},
 		Deleted:       true,
 		CommitURL:     sweepCommitURL,
@@ -202,8 +204,8 @@ func (f *fakeAPI) TeardownPreviewWithRetry(
 func (f *fakeAPI) SyncPreviewWithRetry(
 	_ context.Context,
 	slug string,
-	_ *gitops.ServiceCatalog,
-) (*gitops.SyncResult, error) {
+	_ *store.ServiceCatalog,
+) (*store.SyncResult, error) {
 	f.syncs = append(f.syncs, syncCall{slug: slug, teardownsBefore: len(f.teardowns)})
 	if err := f.syncErr[slug]; err != nil {
 		return nil, err
@@ -211,25 +213,46 @@ func (f *fakeAPI) SyncPreviewWithRetry(
 	if res, ok := f.sync[slug]; ok {
 		return res, nil
 	}
-	return &gitops.SyncResult{}, nil
+	return &store.SyncResult{}, nil
 }
 
-func (f *fakeAPI) UpsertPRComment(_ context.Context, owner, repo string, prNumber int, body string) error {
+func (f *fakeAPI) UpsertComment(_ context.Context, owner, repo string, prNumber int, body string) error {
 	f.upserts = append(f.upserts, fmt.Sprintf("%s/%s#%d", owner, repo, prNumber))
 	f.bodies = append(f.bodies, body)
 	return nil
 }
 
-func (f *fakeAPI) FetchServiceCatalog(context.Context) (*gitops.ServiceCatalog, error) {
+func (f *fakeAPI) FetchServiceCatalog(context.Context) (*store.ServiceCatalog, error) {
 	if f.catalogErr != nil {
 		return nil, f.catalogErr
 	}
-	return &gitops.ServiceCatalog{Label: f.label, ArgoCDURL: f.argocdURL}, nil
+	return &store.ServiceCatalog{Label: f.label, ArgoCDURL: f.argocdURL}, nil
 }
 
 func (f *fakeAPI) FanOutPRComments(_ context.Context, vals preview.PreviewValues, body string) error {
 	f.fanOuts = append(f.fanOuts, fanOut{vals: vals, body: body})
 	return f.fanErr
+}
+
+func (f *fakeAPI) ListChangedFiles(context.Context, string, string, int) ([]forge.ChangedFile, error) {
+	return nil, errors.New("unexpected ListChangedFiles")
+}
+
+func (f *fakeAPI) ParseWebhook(*http.Request) (forge.Event, error) {
+	return forge.Event{}, errors.New("unexpected ParseWebhook")
+}
+
+// api is the lifecycle.SweepAPI over f: its store, forge and recorder, with
+// its FanOutPRComments as the fan-out.
+func (f *fakeAPI) api() lifecycle.SweepAPI {
+	return lifecycle.SweepAPI{
+		Store:    f,
+		Forge:    f,
+		Recorder: f,
+		FanOut: func(ctx context.Context, _ forge.Forge, vals preview.PreviewValues, body string) error {
+			return f.FanOutPRComments(ctx, vals, body)
+		},
+	}
 }
 
 // pin is an entry pinned by prURL and last deployed at updatedAt.
@@ -258,7 +281,7 @@ func TestSweep_NoPinsDeletes(t *testing.T) {
 		previews: []string{"feature-x"},
 		files:    map[string]*preview.PreviewValues{"feature-x": values(preview.ServiceEntry{Name: "backend-1"})},
 	}
-	if err := lifecycle.Sweep(context.Background(), f, now, ttl); err != nil {
+	if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
 	want := []deleteCall{{slug: "feature-x", message: "chore(preview): delete feature-x preview"}}
@@ -290,7 +313,7 @@ func TestSweep_ExpiredDeletesAndComments(t *testing.T) {
 		// The PR is closed: rule 2 still wins over rule 3.
 		prOpen: map[string]bool{},
 	}
-	if err := lifecycle.Sweep(context.Background(), f, now, ttl); err != nil {
+	if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
 	want := []deleteCall{{slug: "feature-x", message: "chore(preview): expire feature-x preview"}}
@@ -321,7 +344,7 @@ func TestSweep_ExpiryCommentFailure(t *testing.T) {
 		files:    map[string]*preview.PreviewValues{"feature-x": values(pin("backend-1", pr42, stale))},
 		fanErr:   errors.New("comment boom"),
 	}
-	if err := lifecycle.Sweep(context.Background(), f, now, ttl); err != nil {
+	if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
 		t.Fatalf("Sweep: %v (a comment failure is not a preview failure)", err)
 	}
 	logs := capture.find(slog.LevelWarn, "preview expiry comment failed")
@@ -348,7 +371,7 @@ func TestSweep_NeverExpires(t *testing.T) {
 				files:    map[string]*preview.PreviewValues{"feature-x": tc.vals},
 				prOpen:   map[string]bool{"acme/backend-1#42": true, "acme/backend-2#7": true},
 			}
-			if err := lifecycle.Sweep(context.Background(), f, now, tc.ttl); err != nil {
+			if err := lifecycle.Sweep(context.Background(), f.api(), now, tc.ttl); err != nil {
 				t.Fatalf("Sweep: %v", err)
 			}
 			if len(f.deletes) != 0 || len(f.fanOuts) != 0 || len(f.teardowns) != 0 {
@@ -368,7 +391,7 @@ func TestSweep_ClosedPRTearsDown(t *testing.T) {
 		)},
 		prOpen: map[string]bool{"acme/backend-2#7": true},
 	}
-	if err := lifecycle.Sweep(context.Background(), f, now, ttl); err != nil {
+	if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
 	if want := []string{"acme/backend-1#42", "acme/backend-2#7"}; !slices.Equal(f.prReads, want) {
@@ -392,7 +415,7 @@ func TestSweep_PRStateUnknownKeepsPin(t *testing.T) {
 		name string
 		err  error
 	}{
-		{name: "404", err: gitops.ErrNotFound},
+		{name: "404", err: forge.ErrNotFound},
 		{name: "500", err: errors.New("GET pulls/42: 500 boom")},
 	}
 	for _, tc := range cases {
@@ -403,7 +426,7 @@ func TestSweep_PRStateUnknownKeepsPin(t *testing.T) {
 				files:    map[string]*preview.PreviewValues{"feature-x": values(pin("backend-1", pr42, recent))},
 				prErr:    map[string]error{"acme/backend-1#42": tc.err},
 			}
-			if err := lifecycle.Sweep(context.Background(), f, now, ttl); err != nil {
+			if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
 				t.Fatalf("Sweep: %v", err)
 			}
 			if len(f.teardowns) != 0 || len(f.deletes) != 0 || len(f.fanOuts) != 0 || len(f.upserts) != 0 {
@@ -431,7 +454,7 @@ func TestSweep_OnePRPinningTwoServicesCheckedOnce(t *testing.T) {
 			preview.ServiceEntry{Name: "backend-2", CommitSha: "abc123"},
 		)},
 	}
-	if err := lifecycle.Sweep(context.Background(), f, now, ttl); err != nil {
+	if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
 	if want := []string{"acme/backend-1#42"}; !slices.Equal(f.prReads, want) {
@@ -467,7 +490,7 @@ func TestSweep_ConcurrentDeployCancelsDelete(t *testing.T) {
 				files:    map[string]*preview.PreviewValues{"feature-x": tc.file},
 				fresh:    map[string]preview.PreviewValues{"feature-x": tc.fresh},
 			}
-			if err := lifecycle.Sweep(context.Background(), f, now, ttl); err != nil {
+			if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
 				t.Fatalf("Sweep: %v", err)
 			}
 			if len(f.deletes) != 0 || len(f.fanOuts) != 0 {
@@ -491,7 +514,7 @@ func TestSweep_FailuresCountedAndSweepContinues(t *testing.T) {
 		getErr:    map[string]error{"b": errors.New("read boom")},
 		deleteErr: map[string]error{"c": errors.New("delete boom")},
 	}
-	err := lifecycle.Sweep(context.Background(), f, now, 0)
+	err := lifecycle.Sweep(context.Background(), f.api(), now, 0)
 	if err == nil || err.Error() != "cleanup: 2 preview(s) failed" {
 		t.Fatalf("err = %v, want cleanup: 2 preview(s) failed", err)
 	}
@@ -521,7 +544,7 @@ func TestSweep_ListError(t *testing.T) {
 	captureLogs(t)
 	listErr := errors.New("list boom")
 	f := &fakeAPI{listErr: listErr}
-	if err := lifecycle.Sweep(context.Background(), f, now, ttl); !errors.Is(err, listErr) {
+	if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); !errors.Is(err, listErr) {
 		t.Fatalf("err = %v, want %v", err, listErr)
 	}
 }

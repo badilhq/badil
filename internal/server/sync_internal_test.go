@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/store"
 )
 
 // postSync posts body to /v1/sync with bearer, none when "".
@@ -56,7 +56,7 @@ func TestSync_All(t *testing.T) {
 			fg := syncFake()
 			fg.listed = []string{"a", "b", "c"}
 			fg.previews = previewFiles("a", "b", "c")
-			fg.syncResult = map[string]*gitops.SyncResult{"a": {Changed: true}}
+			fg.syncResult = map[string]*store.SyncResult{"a": {Changed: true}}
 			fg.syncErr = map[string]error{"c": errors.New("sync boom")}
 			s, m, _ := newPushServer(t, fg)
 			resp := decodeSync(t, postSync(t, s, body, "t"))
@@ -79,7 +79,7 @@ func TestSync_EmptyListsAreArrays(t *testing.T) {
 
 func TestSync_OneSlug(t *testing.T) {
 	fg := syncFake()
-	fg.syncResult = map[string]*gitops.SyncResult{"b": {Changed: true}}
+	fg.syncResult = map[string]*store.SyncResult{"b": {Changed: true}}
 	s, m, _ := newPushServer(t, fg)
 	resp := decodeSync(t, postSync(t, s, `{"slug":"b"}`, "t"))
 	if !slices.Equal(resp.Synced, []string{"b"}) || resp.Unchanged != 0 || len(resp.Failed) != 0 {
@@ -114,7 +114,7 @@ func TestSync_Refused(t *testing.T) {
 		},
 		{
 			name: "gitops unauthorized", body: `{}`, status: http.StatusBadGateway,
-			wantErr: "gitops: unauthorized", listErr: gitops.ErrUnauthorized,
+			wantErr: "gitops: unauthorized", listErr: store.ErrUnauthorized,
 		},
 	}
 	for _, tc := range cases {

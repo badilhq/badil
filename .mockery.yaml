@@ -1,8 +1,8 @@
 packages:
-  github.com/badilhq/badil/internal/server:
+  github.com/badilhq/badil/internal/forge:
     config:
       dir: "internal/server/mocks"
       pkgname: "mocks"
-      filename: "mock_webhook_validator.go"
+      filename: "mock_forge.go"
     interfaces:
-      WebhookValidator:
+      Forge:

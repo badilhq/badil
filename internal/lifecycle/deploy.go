@@ -4,22 +4,30 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store"
 )
 
-// DeployAPI is the subset of gitops.Client used by DeployPR.
-type DeployAPI interface {
+// DeployStore is the subset of store.GitHubStore used by DeployPR.
+type DeployStore interface {
 	WritePreviewWithRetry(
 		ctx context.Context,
 		slug string,
-		catalog *gitops.ServiceCatalog,
+		catalog *store.ServiceCatalog,
 		serviceName, commitSha string,
 		inputs preview.DeployInputs,
 		createMessage, updateMessage string,
 		skipUnchanged bool,
-	) (*gitops.WriteResult, error)
-	FanOutPRComments(ctx context.Context, vals preview.PreviewValues, body string) error
+	) (*store.WriteResult, error)
+}
+
+// DeployAPI is what DeployPR uses: the store, the forge and the comment
+// fan-out.
+type DeployAPI struct {
+	Store  DeployStore
+	Forge  forge.Forge
+	FanOut FanOutFunc
 }
 
 // DeployPR pins inputs.ServiceName at inputs.CommitSha in the preview slug,
@@ -27,20 +35,20 @@ type DeployAPI interface {
 // preview. It returns the write result, the fan-out error (possibly joined,
 // nil when every comment landed) and the write error; on a write error
 // nothing is commented. With skipUnchanged, a write that would change nothing
-// but the service's updated-at is skipped (gitops.Client.WritePreviewWithRetry):
+// but the service's updated-at is skipped (store.GitHubStore.WritePreviewWithRetry):
 // the result is then Unchanged and nothing is commented. It does not log.
 func DeployPR(
 	ctx context.Context,
 	api DeployAPI,
-	catalog *gitops.ServiceCatalog,
+	catalog *store.ServiceCatalog,
 	slug string,
 	inputs preview.DeployInputs,
 	skipUnchanged bool,
-) (*gitops.WriteResult, error, error) {
+) (*store.WriteResult, error, error) {
 	createMsg := fmt.Sprintf("chore(preview): create %s preview", slug)
 	updateMsg := fmt.Sprintf("chore(preview): update %s in %s", inputs.ServiceName, slug)
 
-	result, err := api.WritePreviewWithRetry(
+	result, err := api.Store.WritePreviewWithRetry(
 		ctx, slug, catalog, inputs.ServiceName, inputs.CommitSha, inputs, createMsg, updateMsg,
 		skipUnchanged,
 	)
@@ -54,5 +62,5 @@ func DeployPR(
 	summary := preview.BuildSummary(
 		slug, result.Values, catalog.URLs, catalog.ArgoCDURL, result.Excluded, result.CommitMessage, result.CommitURL,
 	)
-	return result, api.FanOutPRComments(ctx, result.Values, summary), nil
+	return result, api.FanOut(ctx, api.Forge, result.Values, summary), nil
 }

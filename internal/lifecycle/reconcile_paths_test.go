@@ -7,10 +7,11 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store"
 )
 
 // pathsBadil is a monorepo, acme/platform, whose services declare paths, and
@@ -39,17 +40,17 @@ const noServiceBody = "## ⏭️ Preview: `feature-pricing`\n\n" +
 	"This PR changes no service of the preview (`paths` in badil.yaml), so nothing is deployed."
 
 // changed returns files changing each of names.
-func changed(names ...string) []gitops.ChangedFile {
-	files := make([]gitops.ChangedFile, 0, len(names))
+func changed(names ...string) []forge.ChangedFile {
+	files := make([]forge.ChangedFile, 0, len(names))
 	for _, name := range names {
-		files = append(files, gitops.ChangedFile{Filename: name})
+		files = append(files, forge.ChangedFile{Filename: name})
 	}
 	return files
 }
 
 // platformFake is a reconcileFake of pathsBadil, for acme/platform#42 open
 // with the preview label, whose PR changes files.
-func platformFake(files ...gitops.ChangedFile) *reconcileFake {
+func platformFake(files ...forge.ChangedFile) *reconcileFake {
 	return &reconcileFake{
 		Metrics: metrics.New(),
 		badil:   pathsBadil,
@@ -65,7 +66,7 @@ func labeledPlatform() lifecycle.Event {
 func TestReconcile_PathsSelectTouchedServices(t *testing.T) {
 	cases := []struct {
 		name  string
-		files []gitops.ChangedFile
+		files []forge.ChangedFile
 		want  []string
 	}{
 		{name: "one service", files: changed("web/src/app.tsx"), want: []string{"web"}},
@@ -77,12 +78,12 @@ func TestReconcile_PathsSelectTouchedServices(t *testing.T) {
 		{name: "root file", files: changed("go.mod"), want: []string{"api"}},
 		{
 			name:  "renamed out of a service",
-			files: []gitops.ChangedFile{{Filename: "tools/x.go", PreviousFilename: "api/x.go"}},
+			files: []forge.ChangedFile{{Filename: "tools/x.go", PreviousFilename: "api/x.go"}},
 			want:  []string{"api"},
 		},
 		{
 			name:  "renamed into a service",
-			files: []gitops.ChangedFile{{Filename: "worker/x.go", PreviousFilename: "tools/x.go"}},
+			files: []forge.ChangedFile{{Filename: "worker/x.go", PreviousFilename: "tools/x.go"}},
 			want:  []string{"worker"},
 		},
 	}
@@ -90,7 +91,7 @@ func TestReconcile_PathsSelectTouchedServices(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			captureLogs(t)
 			f := platformFake(tc.files...)
-			lifecycle.ReconcilePR(context.Background(), f, labeledPlatform())
+			lifecycle.ReconcilePR(context.Background(), f.api(), labeledPlatform())
 
 			if got := services(f.writes); !slices.Equal(got, tc.want) {
 				t.Errorf("deployed = %v, want %v", got, tc.want)
@@ -107,8 +108,8 @@ func TestReconcile_PathsSelectTouchedServices(t *testing.T) {
 func TestReconcile_PathsOverListingLimitTouchesEveryService(t *testing.T) {
 	captureLogs(t)
 	f := platformFake(changed("docs/README.md")...)
-	f.pr.ChangedFiles = gitops.MaxListedPullRequestFiles + 1
-	lifecycle.ReconcilePR(context.Background(), f, labeledPlatform())
+	f.pr.ChangedFiles = forge.MaxListedFiles + 1
+	lifecycle.ReconcilePR(context.Background(), f.api(), labeledPlatform())
 
 	if got, want := services(f.writes), []string{"api", "web", "worker"}; !slices.Equal(got, want) {
 		t.Errorf("deployed = %v, want %v", got, want)
@@ -121,7 +122,7 @@ func TestReconcile_PathsOverListingLimitTouchesEveryService(t *testing.T) {
 func TestReconcile_NoPathsListsNoFiles(t *testing.T) {
 	captureLogs(t)
 	f := &reconcileFake{pr: fetchedPR("monorepo", true, "preview"), files: changed("docs/README.md")}
-	lifecycle.ReconcilePR(context.Background(), f, event("labeled", "monorepo", "preview", "preview"))
+	lifecycle.ReconcilePR(context.Background(), f.api(), event("labeled", "monorepo", "preview", "preview"))
 
 	if got, want := services(f.writes), []string{"api", "worker"}; !slices.Equal(got, want) {
 		t.Errorf("deployed = %v, want %v", got, want)
@@ -138,7 +139,7 @@ func TestReconcile_PathsMixedRepo(t *testing.T) {
 `
 	cases := []struct {
 		name  string
-		files []gitops.ChangedFile
+		files []forge.ChangedFile
 		want  []string
 	}{
 		{name: "no service with paths", files: changed("docs/README.md"), want: []string{"tools"}},
@@ -149,7 +150,7 @@ func TestReconcile_PathsMixedRepo(t *testing.T) {
 			captureLogs(t)
 			f := platformFake(tc.files...)
 			f.badil = badil
-			lifecycle.ReconcilePR(context.Background(), f, labeledPlatform())
+			lifecycle.ReconcilePR(context.Background(), f.api(), labeledPlatform())
 
 			if got := services(f.writes); !slices.Equal(got, tc.want) {
 				t.Errorf("deployed = %v, want %v", got, tc.want)
@@ -161,7 +162,7 @@ func TestReconcile_PathsMixedRepo(t *testing.T) {
 func TestReconcile_PathsUnlabeledRedeploy(t *testing.T) {
 	captureLogs(t)
 	f := platformFake(changed("web/src/app.tsx")...)
-	lifecycle.ReconcilePR(context.Background(), f, event("unlabeled", "platform", "preview:old", "preview"))
+	lifecycle.ReconcilePR(context.Background(), f.api(), event("unlabeled", "platform", "preview:old", "preview"))
 
 	if got := services(f.writes); !slices.Equal(got, []string{"web"}) {
 		t.Errorf("deployed = %v, want [web]", got)
@@ -186,7 +187,7 @@ func TestReconcile_PathsListingFails(t *testing.T) {
 			capture := captureLogs(t)
 			f := platformFake()
 			f.filesErr = errors.New("files boom")
-			lifecycle.ReconcilePR(context.Background(), f, event(tc.action, "platform", tc.label, "preview"))
+			lifecycle.ReconcilePR(context.Background(), f.api(), event(tc.action, "platform", tc.label, "preview"))
 
 			if len(f.writes) != 0 || len(f.teardowns) != 0 || len(f.upserts) != 0 || len(f.unpins) != 0 {
 				t.Errorf("writes = %v, teardowns = %v, upserts = %v, unpins = %v; want nothing",
@@ -209,7 +210,7 @@ func TestReconcile_PathsListingFails(t *testing.T) {
 func TestReconcile_PathsHolderCheckOnTouchedServices(t *testing.T) {
 	cases := []struct {
 		name     string
-		files    []gitops.ChangedFile
+		files    []forge.ChangedFile
 		deployed []string
 		held     bool
 	}{
@@ -223,7 +224,7 @@ func TestReconcile_PathsHolderCheckOnTouchedServices(t *testing.T) {
 			f.previews = map[string]*preview.PreviewValues{
 				"feature-pricing": values(pin("api", platformPR7, recent), preview.ServiceEntry{Name: "web"}),
 			}
-			lifecycle.ReconcilePR(context.Background(), f, labeledPlatform())
+			lifecycle.ReconcilePR(context.Background(), f.api(), labeledPlatform())
 
 			if got := services(f.writes); !slices.Equal(got, tc.deployed) {
 				t.Errorf("deployed = %v, want %v", got, tc.deployed)
@@ -251,7 +252,7 @@ func TestReconcile_PathsUnpinUntouchedBeforeDeploy(t *testing.T) {
 			pin("billing", platformPR42, recent),
 		),
 	}
-	lifecycle.ReconcilePR(context.Background(), f, labeledPlatform())
+	lifecycle.ReconcilePR(context.Background(), f.api(), labeledPlatform())
 
 	wantUnpins := []unpinCall{{
 		slug: "feature-pricing", owner: "acme", repo: "platform", number: 42, services: []string{"api", "worker"},
@@ -292,7 +293,7 @@ func TestReconcile_PathsUnpinKeepsLastPinFile(t *testing.T) {
 	f.previews = map[string]*preview.PreviewValues{
 		"feature-pricing": values(pin("api", platformPR42, recent), preview.ServiceEntry{Name: "web"}),
 	}
-	lifecycle.ReconcilePR(context.Background(), f, labeledPlatform())
+	lifecycle.ReconcilePR(context.Background(), f.api(), labeledPlatform())
 
 	// The PR's last pin is unpinned by UnpinServicesWithRetry, which never
 	// deletes the file, not by a teardown.
@@ -325,7 +326,7 @@ func TestReconcile_PathsNoUnpin(t *testing.T) {
 			captureLogs(t)
 			f := platformFake(changed("web/src/app.tsx")...)
 			f.previews = tc.previews
-			lifecycle.ReconcilePR(context.Background(), f, labeledPlatform())
+			lifecycle.ReconcilePR(context.Background(), f.api(), labeledPlatform())
 
 			if len(f.unpins) != 0 {
 				t.Errorf("unpins = %+v, want none", f.unpins)
@@ -346,7 +347,7 @@ func TestReconcile_PathsUnpinFails(t *testing.T) {
 		"feature-pricing": values(pin("api", platformPR42, recent), preview.ServiceEntry{Name: "web"}),
 	}
 	f.unpinErr = errors.New("unpin boom")
-	lifecycle.ReconcilePR(context.Background(), f, labeledPlatform())
+	lifecycle.ReconcilePR(context.Background(), f.api(), labeledPlatform())
 
 	if len(f.writes) != 0 || len(f.fanOuts) != 0 {
 		t.Errorf("writes = %+v, fanOuts = %v; want none", f.writes, f.fanOuts)
@@ -368,7 +369,7 @@ func TestReconcile_PathsNoServiceChanged(t *testing.T) {
 	cases := []struct {
 		name        string
 		previews    map[string]*preview.PreviewValues
-		teardown    *gitops.TeardownResult
+		teardown    *store.TeardownResult
 		teardownErr error
 		result      string
 		calls       []string
@@ -380,7 +381,7 @@ func TestReconcile_PathsNoServiceChanged(t *testing.T) {
 		},
 		{
 			name: "PR pinned in the preview",
-			teardown: &gitops.TeardownResult{
+			teardown: &store.TeardownResult{
 				Removed:       []string{"web"},
 				Values:        *values(pin("api", platformPR7, recent), preview.ServiceEntry{Name: "web"}),
 				CommitURL:     sweepCommitURL,
@@ -407,7 +408,7 @@ func TestReconcile_PathsNoServiceChanged(t *testing.T) {
 				"feature-pricing": values(pin("api", platformPR7, recent)),
 			}
 			f.maxPreviews, f.listed = 1, []string{"checkout"}
-			lifecycle.ReconcilePR(context.Background(), f, labeledPlatform())
+			lifecycle.ReconcilePR(context.Background(), f.api(), labeledPlatform())
 
 			if !slices.Equal(f.calls, tc.calls) {
 				t.Errorf("calls = %v, want %v", f.calls, tc.calls)
@@ -435,7 +436,7 @@ func TestReconcile_PathsNoServiceCommentFails(t *testing.T) {
 	capture := captureLogs(t)
 	f := platformFake(changed("docs/README.md")...)
 	f.upsertErr = errors.New("upsert boom")
-	lifecycle.ReconcilePR(context.Background(), f, labeledPlatform())
+	lifecycle.ReconcilePR(context.Background(), f.api(), labeledPlatform())
 
 	logs := capture.find(slog.LevelWarn, "preview conflict comment failed")
 	if len(logs) != 1 || logs[0]["err"].String() != "upsert boom" {

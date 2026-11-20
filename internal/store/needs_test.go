@@ -1,12 +1,12 @@
-package gitops_test
+package store_test
 
 import (
 	"context"
 	"slices"
 	"testing"
 
-	"github.com/badilhq/badil/internal/gitops"
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store"
 )
 
 // partNames returns the service names then the dependency names of vals.
@@ -25,11 +25,11 @@ func partNames(vals preview.PreviewValues) []string {
 // writes front and what it needs, and that a deploy of payments to the same
 // preview adds payments and kafka.
 func TestWritePreviewWithRetry_Needs(t *testing.T) {
-	catalog, err := gitops.ParseCatalog([]byte(needsBadil))
+	catalog, err := store.ParseCatalog([]byte(needsBadil))
 	if err != nil {
 		t.Fatalf("ParseCatalog: %v", err)
 	}
-	deploy := func(files []string, service string) (*gitops.WriteResult, string) {
+	deploy := func(files []string, service string) (*store.WriteResult, string) {
 		t.Helper()
 		s := &writeServer{files: files}
 		in := sampleInputs()

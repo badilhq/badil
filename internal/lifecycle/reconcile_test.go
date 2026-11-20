@@ -4,14 +4,16 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
 
-	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store"
 )
 
 const reconcileServices = `services:
@@ -40,7 +42,7 @@ type deployCall struct {
 // catalog's MaxPreviews. listed is what ListPreviews returns, unless listErr
 // is set. A write of a service in unchanged with skipUnchanged set returns an
 // Unchanged result and is logged in skipped, not in writes.
-// ListPullRequestFiles returns files, unless filesErr is set.
+// ListChangedFiles returns files, unless filesErr is set.
 // UnpinServicesWithRetry unpins the services from previews[slug]
 // (preview.UnpinPRServices) and returns that file, never deleted, unless
 // unpinErr is set; it is logged in unpins. calls logs, in order,
@@ -52,13 +54,13 @@ type reconcileFake struct {
 
 	badil          string
 	catalogErr     error
-	pr             *gitops.PullRequest
+	pr             *forge.PullRequest
 	prErr          error
 	writeErr       map[string]error
 	fanErr         error
 	upsertErr      error
-	teardown       *gitops.TeardownResult
-	teardownBySlug map[string]*gitops.TeardownResult
+	teardown       *store.TeardownResult
+	teardownBySlug map[string]*store.TeardownResult
 	previews       map[string]*preview.PreviewValues
 	previewErr     error
 	teardownErr    error
@@ -66,7 +68,7 @@ type reconcileFake struct {
 	maxPreviews    int
 	listed         []string
 	listErr        error
-	files          []gitops.ChangedFile
+	files          []forge.ChangedFile
 	filesErr       error
 	unpinErr       error
 
@@ -87,7 +89,7 @@ func (f *reconcileFake) GetPreview(_ context.Context, slug string) (*preview.Pre
 	}
 	vals, ok := f.previews[slug]
 	if !ok {
-		return nil, "", gitops.ErrNotFound
+		return nil, "", store.ErrNotFound
 	}
 	return vals, "blob-" + slug, nil
 }
@@ -100,11 +102,11 @@ func (f *reconcileFake) ListPreviews(context.Context) ([]string, error) {
 	return f.listed, nil
 }
 
-func (f *reconcileFake) FetchServiceCatalog(context.Context) (*gitops.ServiceCatalog, error) {
+func (f *reconcileFake) FetchServiceCatalog(context.Context) (*store.ServiceCatalog, error) {
 	if f.catalogErr != nil {
 		return nil, f.catalogErr
 	}
-	catalog, err := gitops.ParseCatalog([]byte(f.badilYAML()))
+	catalog, err := store.ParseCatalog([]byte(f.badilYAML()))
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +122,7 @@ func (f *reconcileFake) badilYAML() string {
 	return reconcileServices
 }
 
-func (f *reconcileFake) ListPullRequestFiles(context.Context, string, string, int) ([]gitops.ChangedFile, error) {
+func (f *reconcileFake) ListChangedFiles(context.Context, string, string, int) ([]forge.ChangedFile, error) {
 	f.calls = append(f.calls, "files")
 	if f.filesErr != nil {
 		return nil, f.filesErr
@@ -140,7 +142,7 @@ func (f *reconcileFake) UnpinServicesWithRetry(
 	slug, owner, repo string,
 	prNumber int,
 	services []string,
-) (*gitops.TeardownResult, error) {
+) (*store.TeardownResult, error) {
 	f.calls = append(f.calls, "unpin:"+slug)
 	f.unpins = append(f.unpins, unpinCall{slug: slug, owner: owner, repo: repo, number: prNumber, services: services})
 	if f.unpinErr != nil {
@@ -148,14 +150,14 @@ func (f *reconcileFake) UnpinServicesWithRetry(
 	}
 	vals, ok := f.previews[slug]
 	if !ok {
-		return &gitops.TeardownResult{}, nil
+		return &store.TeardownResult{}, nil
 	}
 	unpinned, removed, _ := preview.UnpinPRServices(*vals, owner, repo, prNumber, services)
 	if len(removed) == 0 {
-		return &gitops.TeardownResult{}, nil
+		return &store.TeardownResult{}, nil
 	}
-	catalog, _ := gitops.ParseCatalog([]byte(f.badilYAML()))
-	return &gitops.TeardownResult{
+	catalog, _ := store.ParseCatalog([]byte(f.badilYAML()))
+	return &store.TeardownResult{
 		Values:        unpinned,
 		Catalog:       catalog,
 		Removed:       removed,
@@ -164,7 +166,7 @@ func (f *reconcileFake) UnpinServicesWithRetry(
 	}, nil
 }
 
-func (f *reconcileFake) GetPullRequest(context.Context, string, string, int) (*gitops.PullRequest, error) {
+func (f *reconcileFake) GetPullRequest(context.Context, string, string, int) (*forge.PullRequest, error) {
 	f.prReads++
 	if f.prErr != nil {
 		return nil, f.prErr
@@ -175,12 +177,12 @@ func (f *reconcileFake) GetPullRequest(context.Context, string, string, int) (*g
 func (f *reconcileFake) WritePreviewWithRetry(
 	_ context.Context,
 	slug string,
-	catalog *gitops.ServiceCatalog,
+	catalog *store.ServiceCatalog,
 	serviceName, commitSha string,
 	inputs preview.DeployInputs,
 	_, _ string,
 	skipUnchanged bool,
-) (*gitops.WriteResult, error) {
+) (*store.WriteResult, error) {
 	if err := f.writeErr[serviceName]; err != nil {
 		return nil, err
 	}
@@ -191,7 +193,7 @@ func (f *reconcileFake) WritePreviewWithRetry(
 	if skipUnchanged && f.unchanged[serviceName] {
 		f.calls = append(f.calls, "unchanged:"+slug)
 		f.skipped = append(f.skipped, call)
-		return &gitops.WriteResult{
+		return &store.WriteResult{
 			Values: preview.PreviewValues{
 				Services: []preview.ServiceEntry{{Name: serviceName, CommitSha: commitSha}},
 			},
@@ -200,7 +202,7 @@ func (f *reconcileFake) WritePreviewWithRetry(
 	}
 	f.calls = append(f.calls, "write:"+slug)
 	f.writes = append(f.writes, call)
-	return &gitops.WriteResult{
+	return &store.WriteResult{
 		Values: preview.PreviewValues{
 			Services: []preview.ServiceEntry{{Name: serviceName, CommitSha: commitSha}},
 		},
@@ -219,7 +221,7 @@ func (f *reconcileFake) TeardownPreviewWithRetry(
 	_ context.Context,
 	slug, owner, repo string,
 	prNumber int,
-) (*gitops.TeardownResult, error) {
+) (*store.TeardownResult, error) {
 	f.calls = append(f.calls, "teardown:"+slug)
 	f.teardowns = append(f.teardowns, teardownCall{slug: slug, owner: owner, repo: repo, number: prNumber})
 	if f.teardownErr != nil {
@@ -230,21 +232,41 @@ func (f *reconcileFake) TeardownPreviewWithRetry(
 		res = f.teardown
 	}
 	if res == nil {
-		return &gitops.TeardownResult{}, nil
+		return &store.TeardownResult{}, nil
 	}
 	if len(res.Removed) == 0 || res.Deleted {
 		return res, nil
 	}
 	// Like the client, an update carries the catalog it was projected on.
 	withCatalog := *res
-	withCatalog.Catalog, _ = gitops.ParseCatalog([]byte(f.badilYAML()))
+	withCatalog.Catalog, _ = store.ParseCatalog([]byte(f.badilYAML()))
 	return &withCatalog, nil
 }
 
-func (f *reconcileFake) UpsertPRComment(_ context.Context, _, _ string, _ int, body string) error {
+func (f *reconcileFake) UpsertComment(_ context.Context, _, _ string, _ int, body string) error {
 	f.calls = append(f.calls, "upsert")
 	f.upserts = append(f.upserts, body)
 	return f.upsertErr
+}
+
+func (f *reconcileFake) ParseWebhook(*http.Request) (forge.Event, error) {
+	return forge.Event{}, errors.New("unexpected ParseWebhook")
+}
+
+// fanOut is f's FanOutPRComments as a lifecycle.FanOutFunc.
+func (f *reconcileFake) fanOut(ctx context.Context, _ forge.Forge, vals preview.PreviewValues, body string) error {
+	return f.FanOutPRComments(ctx, vals, body)
+}
+
+// api is the lifecycle.ReconcileAPI over f: its store, forge and recorder,
+// with its FanOutPRComments as the fan-out.
+func (f *reconcileFake) api() lifecycle.ReconcileAPI {
+	return lifecycle.ReconcileAPI{Store: f, Forge: f, Recorder: f, FanOut: f.fanOut}
+}
+
+// teardownAPI is api narrowed to a lifecycle.TeardownAPI.
+func (f *reconcileFake) teardownAPI() lifecycle.TeardownAPI {
+	return lifecycle.TeardownAPI{Store: f, Forge: f, Recorder: f, FanOut: f.fanOut}
 }
 
 // event builds a reconcile event for acme/<repo>#42 whose payload carries
@@ -259,8 +281,8 @@ func event(action, repo, label string, labels ...string) lifecycle.Event {
 }
 
 // fetchedPR is the PR acme/<repo>#42 as read from GitHub.
-func fetchedPR(repo string, open bool, labels ...string) *gitops.PullRequest {
-	return &gitops.PullRequest{
+func fetchedPR(repo string, open bool, labels ...string) *forge.PullRequest {
+	return &forge.PullRequest{
 		Open:         open,
 		HeadRef:      "feature/pricing",
 		HeadSHA:      fetchedSHA,
@@ -284,7 +306,7 @@ func TestReconcile_LabeledDeploysFetchedHead(t *testing.T) {
 	capture := captureLogs(t)
 	f := &reconcileFake{pr: fetchedPR("front", true, "bug", "Preview")}
 	ev := event("labeled", "front", "preview", "preview")
-	lifecycle.ReconcilePR(context.Background(), f, ev)
+	lifecycle.ReconcilePR(context.Background(), f.api(), ev)
 
 	if len(f.writes) != 1 {
 		t.Fatalf("writes = %+v, want one", f.writes)
@@ -317,14 +339,14 @@ func TestReconcile_LabeledButFetchedUnlabeledTearsDown(t *testing.T) {
 	captureLogs(t)
 	f := &reconcileFake{
 		pr: fetchedPR("front", true, "bug"),
-		teardown: &gitops.TeardownResult{
+		teardown: &store.TeardownResult{
 			Removed:       []string{"front"},
 			Deleted:       true,
 			CommitURL:     sweepCommitURL,
 			CommitMessage: "chore(preview): delete feature-pricing preview",
 		},
 	}
-	lifecycle.ReconcilePR(context.Background(), f, event("labeled", "front", "preview", "preview"))
+	lifecycle.ReconcilePR(context.Background(), f.api(), event("labeled", "front", "preview", "preview"))
 
 	if len(f.writes) != 0 {
 		t.Errorf("writes = %+v, want none", f.writes)
@@ -346,14 +368,14 @@ func TestReconcile_UnlabeledClosedTearsDownAsClosed(t *testing.T) {
 	captureLogs(t)
 	f := &reconcileFake{
 		pr: fetchedPR("front", false),
-		teardown: &gitops.TeardownResult{
+		teardown: &store.TeardownResult{
 			Removed:       []string{"front"},
 			Values:        preview.PreviewValues{Services: []preview.ServiceEntry{{Name: "front"}}},
 			CommitURL:     sweepCommitURL,
 			CommitMessage: "chore(preview): remove front from feature-pricing",
 		},
 	}
-	lifecycle.ReconcilePR(context.Background(), f, event("unlabeled", "front", "preview"))
+	lifecycle.ReconcilePR(context.Background(), f.api(), event("unlabeled", "front", "preview"))
 
 	if len(f.teardowns) != 1 {
 		t.Fatalf("teardowns = %+v, want one", f.teardowns)
@@ -383,7 +405,7 @@ func TestReconcile_ClosedTearsDownOutsideCatalogAndForks(t *testing.T) {
 			if tc.fork {
 				f.pr.HeadFullName = "octocat/" + tc.repo
 			}
-			lifecycle.ReconcilePR(context.Background(), f, event("closed", tc.repo, ""))
+			lifecycle.ReconcilePR(context.Background(), f.api(), event("closed", tc.repo, ""))
 
 			want := teardownCall{slug: "feature-pricing", owner: "acme", repo: tc.repo, number: 42}
 			if len(f.teardowns) != 1 || f.teardowns[0] != want {
@@ -396,7 +418,7 @@ func TestReconcile_ClosedTearsDownOutsideCatalogAndForks(t *testing.T) {
 func TestReconcile_TwoServicesInCatalogOrder(t *testing.T) {
 	captureLogs(t)
 	f := &reconcileFake{pr: fetchedPR("monorepo", true, "preview")}
-	lifecycle.ReconcilePR(context.Background(), f, event("labeled", "monorepo", "preview", "preview"))
+	lifecycle.ReconcilePR(context.Background(), f.api(), event("labeled", "monorepo", "preview", "preview"))
 
 	if got, want := services(f.writes), []string{"api", "worker"}; !slices.Equal(got, want) {
 		t.Errorf("deployed = %v, want %v", got, want)
@@ -409,7 +431,7 @@ func TestReconcile_TwoServicesInCatalogOrder(t *testing.T) {
 func TestReconcile_SynchronizeOnLabeledPRDeploys(t *testing.T) {
 	captureLogs(t)
 	f := &reconcileFake{pr: fetchedPR("front", true, "preview")}
-	lifecycle.ReconcilePR(context.Background(), f, event("synchronize", "front", "", "preview"))
+	lifecycle.ReconcilePR(context.Background(), f.api(), event("synchronize", "front", "", "preview"))
 
 	if got := services(f.writes); !slices.Equal(got, []string{"front"}) {
 		t.Errorf("deployed = %v, want [front]", got)
@@ -435,7 +457,7 @@ func TestReconcile_PayloadGuards(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			capture := captureLogs(t)
 			f := &reconcileFake{pr: fetchedPR(tc.ev.Repo, true, "preview")}
-			lifecycle.ReconcilePR(context.Background(), f, tc.ev)
+			lifecycle.ReconcilePR(context.Background(), f.api(), tc.ev)
 
 			if f.prReads != 0 || len(f.writes) != 0 || len(f.teardowns) != 0 {
 				t.Errorf("prReads = %d, writes = %v, teardowns = %v; want nothing", f.prReads, f.writes, f.teardowns)
@@ -453,7 +475,7 @@ func TestReconcile_PayloadGuards(t *testing.T) {
 func TestReconcile_LabelMatchIsCaseInsensitive(t *testing.T) {
 	captureLogs(t)
 	f := &reconcileFake{pr: fetchedPR("front", true, "PREVIEW")}
-	lifecycle.ReconcilePR(context.Background(), f, event("labeled", "front", "Preview", "Preview"))
+	lifecycle.ReconcilePR(context.Background(), f.api(), event("labeled", "front", "Preview", "Preview"))
 
 	if len(f.writes) != 1 {
 		t.Errorf("writes = %+v, want one", f.writes)
@@ -464,7 +486,7 @@ func TestReconcile_ForkPRSkipped(t *testing.T) {
 	capture := captureLogs(t)
 	f := &reconcileFake{pr: fetchedPR("front", true, "preview")}
 	f.pr.HeadFullName = "octocat/front"
-	lifecycle.ReconcilePR(context.Background(), f, event("labeled", "front", "preview", "preview"))
+	lifecycle.ReconcilePR(context.Background(), f.api(), event("labeled", "front", "preview", "preview"))
 
 	if len(f.writes) != 0 || len(f.teardowns) != 0 {
 		t.Errorf("writes = %v, teardowns = %v; want nothing", f.writes, f.teardowns)
@@ -482,7 +504,7 @@ func TestReconcile_FailedServiceDoesNotStopTheNext(t *testing.T) {
 		writeErr: map[string]error{"api": errors.New("write boom")},
 		fanErr:   errors.New("comment boom"),
 	}
-	lifecycle.ReconcilePR(context.Background(), f, event("labeled", "monorepo", "preview", "preview"))
+	lifecycle.ReconcilePR(context.Background(), f.api(), event("labeled", "monorepo", "preview", "preview"))
 
 	if got := services(f.writes); !slices.Equal(got, []string{"worker"}) {
 		t.Errorf("deployed = %v, want [worker]", got)
@@ -504,7 +526,7 @@ func TestReconcile_ExpiredContextFailsEveryService(t *testing.T) {
 	f := &reconcileFake{pr: fetchedPR("monorepo", true, "preview")}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	lifecycle.ReconcilePR(ctx, f, event("labeled", "monorepo", "preview", "preview"))
+	lifecycle.ReconcilePR(ctx, f.api(), event("labeled", "monorepo", "preview", "preview"))
 
 	if len(f.writes) != 0 {
 		t.Errorf("writes = %+v, want none", f.writes)
@@ -526,7 +548,7 @@ func TestReconcile_Errors(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			capture := captureLogs(t)
-			lifecycle.ReconcilePR(context.Background(), tc.f, event("labeled", "front", "preview", "preview"))
+			lifecycle.ReconcilePR(context.Background(), tc.f.api(), event("labeled", "front", "preview", "preview"))
 
 			if len(tc.f.writes) != 0 || len(tc.f.teardowns) != 0 || len(tc.f.upserts) != 0 {
 				t.Errorf("writes = %v, teardowns = %v, upserts = %v; want nothing",

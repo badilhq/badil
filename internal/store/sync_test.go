@@ -1,12 +1,12 @@
-package gitops_test
+package store_test
 
 import (
 	"context"
 	"slices"
 	"testing"
 
-	"github.com/badilhq/badil/internal/gitops"
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store"
 )
 
 // staleBranchFile is pinnedFile with backend-2 tracking the branch old.
@@ -22,7 +22,7 @@ func TestSyncPreviewWithRetry(t *testing.T) {
 		name         string
 		files        []string
 		conflicts    int32
-		catalog      func(*gitops.ServiceCatalog)
+		catalog      func(*store.ServiceCatalog)
 		wantChanged  bool
 		wantNotify   bool
 		wantNotFound bool
@@ -34,7 +34,7 @@ func TestSyncPreviewWithRetry(t *testing.T) {
 		{name: "matches", files: []string{pinnedFile()}, wantGets: 1},
 		{
 			name: "added service", files: []string{pinnedFile()},
-			catalog: func(c *gitops.ServiceCatalog) {
+			catalog: func(c *store.ServiceCatalog) {
 				c.Services = []string{"backend-1", "front", "backend-2"}
 				c.Repos["front"] = "https://github.com/acme/front.git"
 			},
@@ -51,7 +51,7 @@ func TestSyncPreviewWithRetry(t *testing.T) {
 		},
 		{
 			name: "chart settings change", files: []string{pinnedFile()},
-			catalog: func(c *gitops.ServiceCatalog) {
+			catalog: func(c *store.ServiceCatalog) {
 				c.Charts = map[string]preview.ChartSettings{
 					"backend-2": {Path: "deploy/helm", ValueFiles: []string{"values-preview.yaml"}},
 				}
@@ -76,7 +76,7 @@ func TestSyncPreviewWithRetry(t *testing.T) {
 		},
 		{
 			name: "removed dependency", files: []string{withDependenciesFile()},
-			catalog: func(c *gitops.ServiceCatalog) {
+			catalog: func(c *store.ServiceCatalog) {
 				withDependencies(c)
 				c.Dependencies = c.Dependencies[1:]
 			},
@@ -85,7 +85,7 @@ func TestSyncPreviewWithRetry(t *testing.T) {
 		},
 		{
 			name: "dependency no longer exposed", files: []string{withDependenciesFile()},
-			catalog: func(c *gitops.ServiceCatalog) {
+			catalog: func(c *store.ServiceCatalog) {
 				withDependencies(c)
 				delete(c.URLs.Expose, "mailpit")
 			},
@@ -173,7 +173,7 @@ func TestSyncPreviewWithRetry(t *testing.T) {
 // changed one describes the write s received, whose content parses to the
 // last of files turned by edit.
 func assertSyncWrite(
-	t *testing.T, s *writeServer, result *gitops.SyncResult, files []string, edit func(*preview.PreviewValues),
+	t *testing.T, s *writeServer, result *store.SyncResult, files []string, edit func(*preview.PreviewValues),
 ) {
 	t.Helper()
 	if !result.Changed {

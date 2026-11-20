@@ -3,7 +3,7 @@ package lifecycle
 import (
 	"context"
 
-	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/preview"
 )
 
@@ -12,7 +12,7 @@ func RefusedByHolder(
 	ctx context.Context,
 	api ReconcileAPI,
 	ev Event,
-	pr *gitops.PullRequest,
+	pr *forge.PullRequest,
 	t preview.Resolution,
 	services []string,
 	label string,

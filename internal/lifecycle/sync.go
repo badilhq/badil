@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/badilhq/badil/internal/gitops"
-	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/forge"
+	"github.com/badilhq/badil/internal/store"
 )
 
 // Config sync triggers, the trigger attribute of the config sync logs.
@@ -25,20 +25,39 @@ var (
 	ErrPreviewNotFound = errors.New("preview not found")
 )
 
-// PreviewSyncAPI is what syncPreview uses: the gitops sync and comment fan-out,
-// and the rewrite counter.
-type PreviewSyncAPI interface {
-	SyncPreviewWithRetry(ctx context.Context, slug string, catalog *gitops.ServiceCatalog) (*gitops.SyncResult, error)
-	FanOutPRComments(ctx context.Context, vals preview.PreviewValues, body string) error
-	// PreviewSynced records one preview rewritten to match badil.yaml.
-	PreviewSynced()
+// PreviewSyncStore is the subset of store.GitHubStore used by syncPreview.
+type PreviewSyncStore interface {
+	SyncPreviewWithRetry(ctx context.Context, slug string, catalog *store.ServiceCatalog) (*store.SyncResult, error)
 }
 
-// SyncAPI is the subset of gitops.Client used by Syncer, plus its recorder.
-type SyncAPI interface {
-	PreviewSyncAPI
+// PreviewSyncAPI is what syncPreview uses: the store sync, the forge and the
+// comment fan-out, and the Recorder of the rewrites.
+type PreviewSyncAPI struct {
+	Store    PreviewSyncStore
+	Forge    forge.Forge
+	Recorder Recorder
+	FanOut   FanOutFunc
+}
+
+// SyncStore is the subset of store.GitHubStore used by Syncer.
+type SyncStore interface {
+	PreviewSyncStore
 	ListPreviews(ctx context.Context) ([]string, error)
-	FetchServiceCatalogSHA(ctx context.Context) (*gitops.ServiceCatalog, string, error)
+	FetchServiceCatalogSHA(ctx context.Context) (*store.ServiceCatalog, string, error)
+}
+
+// SyncAPI is what Syncer uses: the store, the forge, the Recorder and the
+// comment fan-out.
+type SyncAPI struct {
+	Store    SyncStore
+	Forge    forge.Forge
+	Recorder Recorder
+	FanOut   FanOutFunc
+}
+
+// previewSyncAPI narrows a to what syncPreview uses.
+func (a SyncAPI) previewSyncAPI() PreviewSyncAPI {
+	return PreviewSyncAPI{Store: a.Store, Forge: a.Forge, Recorder: a.Recorder, FanOut: a.FanOut}
 }
 
 // SyncReport is the outcome of a run: the slugs rewritten, the number of
@@ -100,7 +119,7 @@ func (s *Syncer) Push(ctx context.Context) {
 
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
-	catalog, sha, err := s.api.FetchServiceCatalogSHA(ctx)
+	catalog, sha, err := s.api.Store.FetchServiceCatalogSHA(ctx)
 	if sha != "" && sha == s.lastSHA {
 		slog.InfoContext(ctx, "config sync skipped",
 			slog.String("trigger", TriggerPush),
@@ -138,7 +157,7 @@ func (s *Syncer) Sync(ctx context.Context, slug string) (SyncReport, error) {
 
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
-	catalog, _, err := s.api.FetchServiceCatalogSHA(ctx)
+	catalog, _, err := s.api.Store.FetchServiceCatalogSHA(ctx)
 	if err != nil {
 		configFailed(ctx, TriggerAPI, err)
 		return SyncReport{}, fmt.Errorf("%w: %w", ErrConfigUnavailable, err)
@@ -186,14 +205,14 @@ func finish(ctx context.Context, trigger string, report SyncReport, err error) {
 
 // syncAll lists the previews and syncs each with catalog. A ListPreviews
 // error is returned at once.
-func (s *Syncer) syncAll(ctx context.Context, catalog *gitops.ServiceCatalog) (SyncReport, error) {
-	slugs, err := s.api.ListPreviews(ctx)
+func (s *Syncer) syncAll(ctx context.Context, catalog *store.ServiceCatalog) (SyncReport, error) {
+	slugs, err := s.api.Store.ListPreviews(ctx)
 	if err != nil {
 		return SyncReport{}, err
 	}
 	var report SyncReport
 	for _, slug := range slugs {
-		res, syncErr := syncPreview(ctx, s.api, slug, catalog)
+		res, syncErr := syncPreview(ctx, s.api.previewSyncAPI(), slug, catalog)
 		report.add(ctx, slug, res, syncErr)
 	}
 	return report, nil
@@ -201,9 +220,9 @@ func (s *Syncer) syncAll(ctx context.Context, catalog *gitops.ServiceCatalog) (S
 
 // syncOne syncs the preview slug with catalog. It reports false, syncing
 // nothing, when the file of slug does not exist.
-func (s *Syncer) syncOne(ctx context.Context, catalog *gitops.ServiceCatalog, slug string) (SyncReport, bool) {
+func (s *Syncer) syncOne(ctx context.Context, catalog *store.ServiceCatalog, slug string) (SyncReport, bool) {
 	var report SyncReport
-	res, err := syncPreview(ctx, s.api, slug, catalog)
+	res, err := syncPreview(ctx, s.api.previewSyncAPI(), slug, catalog)
 	if err == nil && res.NotFound {
 		return report, false
 	}
@@ -213,7 +232,7 @@ func (s *Syncer) syncOne(ctx context.Context, catalog *gitops.ServiceCatalog, sl
 
 // add adds to r the outcome of syncPreview for slug: res, or err, which is
 // logged.
-func (r *SyncReport) add(ctx context.Context, slug string, res *gitops.SyncResult, err error) {
+func (r *SyncReport) add(ctx context.Context, slug string, res *store.SyncResult, err error) {
 	switch {
 	case err != nil:
 		previewSyncFailed(ctx, slug, err)

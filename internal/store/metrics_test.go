@@ -1,4 +1,4 @@
-package gitops_test
+package store_test
 
 import (
 	"context"
@@ -12,8 +12,8 @@ import (
 
 	gh "github.com/google/go-github/v71/github"
 
-	"github.com/badilhq/badil/internal/gitops"
 	"github.com/badilhq/badil/internal/metrics"
+	"github.com/badilhq/badil/internal/store"
 )
 
 func TestClientMetrics_TimesRetryOperations(t *testing.T) {
@@ -40,7 +40,7 @@ func TestClientMetrics_TimesRetryOperations(t *testing.T) {
 	ghc := gh.NewClient(nil)
 	ghc.BaseURL = u
 	m := metrics.New()
-	c := gitops.NewClient(ghc, "acme", "gitops", gitops.WithMetrics(m))
+	c := store.NewClient(ghc, "acme", "gitops", store.WithMetrics(m))
 
 	ctx := context.Background()
 	if _, err := c.WritePreviewWithRetry(ctx, "fresh", testCatalog("backend-1"),

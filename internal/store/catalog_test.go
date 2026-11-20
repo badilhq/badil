@@ -1,4 +1,4 @@
-package gitops_test
+package store_test
 
 import (
 	"fmt"
@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/badilhq/badil/internal/gitops"
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store"
 )
 
 // catalogServices is a services block of four lines, so that a preview
@@ -76,7 +76,7 @@ func TestParseCatalog_Preview(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := gitops.ParseCatalog([]byte(catalogServices + tt.preview))
+			got, err := store.ParseCatalog([]byte(catalogServices + tt.preview))
 			if err != nil {
 				t.Fatalf("ParseCatalog: %v", err)
 			}
@@ -126,7 +126,7 @@ func TestParseCatalog_PreviewAliases(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := gitops.ParseCatalog([]byte(catalogServices + tt.raw))
+			got, err := store.ParseCatalog([]byte(catalogServices + tt.raw))
 			if err != nil {
 				t.Fatalf("ParseCatalog: %v", err)
 			}
@@ -143,8 +143,8 @@ func TestParseCatalog_MalformedPreview(t *testing.T) {
 		preview string
 		key     string
 	}{
-		{"preview not a map", "preview: [a]\n", "line 5: cannot unmarshal !!seq into gitops.previewBlock"},
-		{"preview scalar", "preview: on\n", "line 5: cannot unmarshal !!str `on` into gitops.previewBlock"},
+		{"preview not a map", "preview: [a]\n", "line 5: cannot unmarshal !!seq into store.previewBlock"},
+		{"preview scalar", "preview: on\n", "line 5: cannot unmarshal !!str `on` into store.previewBlock"},
 		{"domain not a string", "preview:\n  domain: [a]\n", "preview.domain"},
 		{"domain number", "preview:\n  domain: 42\n", "preview.domain"},
 		{"domain with scheme", "preview:\n  domain: https://example.com\n", "preview.domain"},
@@ -157,12 +157,12 @@ func TestParseCatalog_MalformedPreview(t *testing.T) {
 		{
 			"expose not a map",
 			"preview:\n  domain: example.com\n  expose: [front]\n",
-			"line 7: cannot unmarshal !!seq into map[string]*gitops.exposeEntry",
+			"line 7: cannot unmarshal !!seq into map[string]*store.exposeEntry",
 		},
 		{
 			"expose entry not null or map",
 			"preview:\n  domain: example.com\n  expose:\n    front: yes\n",
-			"line 8: cannot unmarshal !!str `yes` into gitops.exposeEntry",
+			"line 8: cannot unmarshal !!str `yes` into store.exposeEntry",
 		},
 		{
 			"path not a string",
@@ -210,7 +210,7 @@ func TestParseCatalog_MalformedPreview(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := gitops.ParseCatalog([]byte(catalogServices + tt.preview))
+			_, err := store.ParseCatalog([]byte(catalogServices + tt.preview))
 			if err == nil {
 				t.Fatal("ParseCatalog: want error, got nil")
 			}
@@ -236,7 +236,7 @@ func TestParseCatalog_Label(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := gitops.ParseCatalog([]byte(catalogServices + tt.preview))
+			got, err := store.ParseCatalog([]byte(catalogServices + tt.preview))
 			if err != nil {
 				t.Fatalf("ParseCatalog: %v", err)
 			}
@@ -256,7 +256,7 @@ func TestParseCatalog_MalformedLabel(t *testing.T) {
 		"sequence":     "preview:\n  label: [preview]\n",
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := gitops.ParseCatalog([]byte(catalogServices + preview))
+			_, err := store.ParseCatalog([]byte(catalogServices + preview))
 			if err == nil || err.Error() != want {
 				t.Fatalf("err = %v, want %q", err, want)
 			}
@@ -279,7 +279,7 @@ func TestParseCatalog_MaxPreviews(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := gitops.ParseCatalog([]byte(catalogServices + tt.preview))
+			got, err := store.ParseCatalog([]byte(catalogServices + tt.preview))
 			if err != nil {
 				t.Fatalf("ParseCatalog: %v", err)
 			}
@@ -301,7 +301,7 @@ func TestParseCatalog_MalformedMaxPreviews(t *testing.T) {
 		"sequence": "preview:\n  maxPreviews: [3]\n",
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := gitops.ParseCatalog([]byte(catalogServices + preview))
+			_, err := store.ParseCatalog([]byte(catalogServices + preview))
 			if err == nil || err.Error() != want {
 				t.Fatalf("err = %v, want %q", err, want)
 			}
@@ -343,7 +343,7 @@ func TestParseCatalog_ArgoCDURL(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := gitops.ParseCatalog([]byte(catalogServices + tt.preview))
+			got, err := store.ParseCatalog([]byte(catalogServices + tt.preview))
 			if err != nil {
 				t.Fatalf("ParseCatalog: %v", err)
 			}
@@ -420,7 +420,7 @@ func TestParseCatalog_MalformedArgoCDURL(t *testing.T) {
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			_, err := gitops.ParseCatalog([]byte(catalogServices + tt.preview))
+			_, err := store.ParseCatalog([]byte(catalogServices + tt.preview))
 			if err == nil || err.Error() != prefix+tt.want {
 				t.Fatalf("err = %v, want %q", err, prefix+tt.want)
 			}
@@ -438,7 +438,7 @@ func TestParseCatalog_Services(t *testing.T) {
   backend-1:
     repo: https://github.com/acme/backend-1.git
 `
-	got, err := gitops.ParseCatalog([]byte(raw))
+	got, err := store.ParseCatalog([]byte(raw))
 	if err != nil {
 		t.Fatalf("ParseCatalog: %v", err)
 	}
@@ -476,7 +476,7 @@ func TestParseCatalog_Branch(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := gitops.ParseCatalog([]byte("services:\n  front: " + tt.entry + "\n"))
+			got, err := store.ParseCatalog([]byte("services:\n  front: " + tt.entry + "\n"))
 			if err != nil {
 				t.Fatalf("ParseCatalog: %v", err)
 			}
@@ -494,7 +494,7 @@ func TestParseCatalog_ServiceAliases(t *testing.T) {
     branch: develop
   backend-2: *s
 `
-	got, err := gitops.ParseCatalog([]byte(raw))
+	got, err := store.ParseCatalog([]byte(raw))
 	if err != nil {
 		t.Fatalf("ParseCatalog: %v", err)
 	}
@@ -522,7 +522,7 @@ func TestParseCatalog_MalformedServices(t *testing.T) {
 		{
 			"unknown top-level key",
 			"services:\n  front: {repo: r}\nserviceRepos:\n  front: r\n",
-			"badil.yaml: yaml: unmarshal errors:\n  line 3: field serviceRepos not found in type gitops.badilFile",
+			"badil.yaml: yaml: unmarshal errors:\n  line 3: field serviceRepos not found in type store.badilFile",
 		},
 		{
 			"entry a string",
@@ -626,7 +626,7 @@ func TestParseCatalog_MalformedServices(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := gitops.ParseCatalog([]byte(tt.raw))
+			_, err := store.ParseCatalog([]byte(tt.raw))
 			if err == nil || err.Error() != tt.want {
 				t.Fatalf("err = %v, want %q", err, tt.want)
 			}
@@ -643,7 +643,7 @@ func TestServicesForRepo(t *testing.T) {
   ssh: {repo: "git@github.com:acme/ssh.git"}
   ghe: {repo: https://github.acme.example/acme/ghe.git}
 `
-	catalog, err := gitops.ParseCatalog([]byte(raw))
+	catalog, err := store.ParseCatalog([]byte(raw))
 	if err != nil {
 		t.Fatalf("ParseCatalog: %v", err)
 	}
@@ -689,7 +689,7 @@ services:
     repo: https://github.com/acme/worker.git
     chart: {hostParam: ingress.host}
 `
-	got, err := gitops.ParseCatalog([]byte(raw))
+	got, err := store.ParseCatalog([]byte(raw))
 	if err != nil {
 		t.Fatalf("ParseCatalog: %v", err)
 	}
@@ -730,7 +730,7 @@ func TestParseCatalog_RendererDefaults(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := gitops.ParseCatalog([]byte(tt.raw))
+			got, err := store.ParseCatalog([]byte(tt.raw))
 			if err != nil {
 				t.Fatalf("ParseCatalog: %v", err)
 			}
@@ -892,7 +892,7 @@ func TestParseCatalog_MalformedRendererSettings(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := gitops.ParseCatalog([]byte(tt.raw))
+			_, err := store.ParseCatalog([]byte(tt.raw))
 			if err == nil || err.Error() != tt.want {
 				t.Fatalf("err = %v, want %q", err, tt.want)
 			}
@@ -922,7 +922,7 @@ preview:
   domain: example.com
   expose: {api: {}, mailpit: {}}
 `
-	got, err := gitops.ParseCatalog([]byte(raw))
+	got, err := store.ParseCatalog([]byte(raw))
 	if err != nil {
 		t.Fatalf("ParseCatalog: %v", err)
 	}
@@ -957,7 +957,7 @@ preview:
 
 func TestParseCatalog_NoDependencies(t *testing.T) {
 	for _, raw := range []string{catalogServices, catalogServices + "dependencies: {}\n"} {
-		got, err := gitops.ParseCatalog([]byte(raw))
+		got, err := store.ParseCatalog([]byte(raw))
 		if err != nil {
 			t.Fatalf("ParseCatalog: %v", err)
 		}
@@ -1052,7 +1052,7 @@ func TestParseCatalog_MalformedDependencies(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := gitops.ParseCatalog([]byte(catalogServices + tt.deps))
+			_, err := store.ParseCatalog([]byte(catalogServices + tt.deps))
 			if err == nil || err.Error() != tt.want {
 				t.Fatalf("err = %v, want %q", err, tt.want)
 			}
@@ -1080,7 +1080,7 @@ func TestParseCatalog_Needs(t *testing.T) {
 		"version: 1.0.0, needs: [zookeeper]}\n  zookeeper: {chart: oci://r/zookeeper, version: 1.0.0}\n  elasticsearch",
 		1,
 	)
-	got, err := gitops.ParseCatalog([]byte(raw))
+	got, err := store.ParseCatalog([]byte(raw))
 	if err != nil {
 		t.Fatalf("ParseCatalog: %v", err)
 	}
@@ -1101,7 +1101,7 @@ func TestParseCatalog_NeedsCycle(t *testing.T) {
   a: {repo: r, needs: [b]}
   b: {repo: s, needs: [a]}
 `
-	got, err := gitops.ParseCatalog([]byte(raw))
+	got, err := store.ParseCatalog([]byte(raw))
 	if err != nil {
 		t.Fatalf("ParseCatalog: %v", err)
 	}
@@ -1111,7 +1111,7 @@ func TestParseCatalog_NeedsCycle(t *testing.T) {
 }
 
 func TestParseCatalog_NoNeeds(t *testing.T) {
-	got, err := gitops.ParseCatalog(
+	got, err := store.ParseCatalog(
 		[]byte(catalogServices + "dependencies: {db: {chart: oci://r/c, version: 1.0.0}}\n"),
 	)
 	if err != nil {
@@ -1178,7 +1178,7 @@ func TestParseCatalog_MalformedNeeds(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := gitops.ParseCatalog([]byte(tt.raw))
+			_, err := store.ParseCatalog([]byte(tt.raw))
 			if err == nil || err.Error() != tt.want {
 				t.Fatalf("err = %v, want %q", err, tt.want)
 			}
@@ -1194,7 +1194,7 @@ func TestParseCatalog_Paths(t *testing.T) {
   web: {repo: https://github.com/acme/platform.git, paths: ["web/**"]}
   docs: {repo: https://github.com/acme/platform.git}
 `
-	got, err := gitops.ParseCatalog([]byte(raw))
+	got, err := store.ParseCatalog([]byte(raw))
 	if err != nil {
 		t.Fatalf("ParseCatalog: %v", err)
 	}
@@ -1236,7 +1236,7 @@ func TestParseCatalog_MalformedPaths(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := gitops.ParseCatalog([]byte(tt.raw))
+			_, err := store.ParseCatalog([]byte(tt.raw))
 			if err == nil || err.Error() != tt.want {
 				t.Fatalf("err = %v, want %q", err, tt.want)
 			}

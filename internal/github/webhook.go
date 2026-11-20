@@ -10,8 +10,3 @@ import (
 func (a *App) ValidateWebhook(r *http.Request) ([]byte, error) {
 	return gh.ValidatePayload(r, a.webhookSecret)
 }
-
-// ParseEvent parses a webhook payload into a typed event struct.
-func (a *App) ParseEvent(eventType string, payload []byte) (any, error) {
-	return gh.ParseWebHook(eventType, payload)
-}

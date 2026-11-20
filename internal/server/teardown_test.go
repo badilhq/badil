@@ -8,10 +8,9 @@ import (
 	"testing"
 	"time"
 
-	gh "github.com/google/go-github/v71/github"
-
-	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store"
 )
 
 const (
@@ -27,30 +26,31 @@ func newTeardownServer(t *testing.T, fg *fakeGitops, opts ...Option) (*Server, *
 	prev := slog.Default()
 	slog.SetDefault(slog.New(capture))
 	t.Cleanup(func() { slog.SetDefault(prev) })
-	return NewServer(nil, fg, "t", 123, opts...), capture
+	return NewServer(fg, fg, "t", append([]Option{withFanOut(fg)}, opts...)...), capture
 }
 
 // prEvent builds a pull_request event for acme/backend-1#42 on
-// feature/add-pricing.
-func prEvent(action string, merged bool) *gh.PullRequestEvent {
-	return &gh.PullRequestEvent{
-		Action: gh.Ptr(action),
-		Number: gh.Ptr(42),
-		Repo: &gh.Repository{
-			Name:     gh.Ptr("backend-1"),
-			FullName: gh.Ptr("acme/backend-1"),
-			Owner:    &gh.User{Login: gh.Ptr("acme")},
-		},
-		PullRequest: &gh.PullRequest{
-			Merged: gh.Ptr(merged),
-			Head:   &gh.PullRequestBranch{Ref: gh.Ptr("feature/add-pricing")},
+// feature/add-pricing. Whether the PR was merged is not part of a
+// forge.Event, which carries only what the server reads: both values of the
+// second argument build the same event.
+func prEvent(action string, _ bool) forge.Event {
+	return forge.Event{
+		Name: "pull_request",
+		Kind: forge.KindPullRequest,
+		PullRequest: forge.PullRequestEvent{
+			Owner:    "acme",
+			Repo:     "backend-1",
+			FullName: "acme/backend-1",
+			Number:   42,
+			Action:   action,
+			HeadRef:  "feature/add-pricing",
 		},
 	}
 }
 
 // closedPR is acme/backend-1#42 on feature/add-pricing, closed, as read from
 // GitHub.
-func closedPR() *gitops.PullRequest {
+func closedPR() *forge.PullRequest {
 	pr := fetchedPR(false)
 	pr.HeadRef = "feature/add-pricing"
 	return pr
@@ -162,7 +162,7 @@ func TestTeardown_UpdateComments(t *testing.T) {
 	fg := &fakeGitops{
 		pr:      closedPR(),
 		catalog: []string{"backend-1", "backend-2", "front"},
-		teardownResult: &gitops.TeardownResult{
+		teardownResult: &store.TeardownResult{
 			Values: preview.PreviewValues{Services: []preview.ServiceEntry{
 				{Name: "backend-1", Branch: "main"},
 				{Name: "backend-2", CommitSha: "bbbbbbbbbb", Metadata: &preview.Metadata{
@@ -230,7 +230,7 @@ func TestTeardown_UpdateCommentsLinkArgoCD(t *testing.T) {
 			"  backend-1: {repo: https://github.com/acme/backend-1.git}\n" +
 			"  front: {repo: https://github.com/acme/front.git}\n" +
 			"preview:\n  argocdURL: https://argocd.example.com\n",
-		teardownResult: &gitops.TeardownResult{
+		teardownResult: &store.TeardownResult{
 			Values: preview.PreviewValues{
 				Services: []preview.ServiceEntry{{Name: "backend-1"}, {Name: "front"}},
 			},
@@ -255,7 +255,7 @@ func TestTeardown_DeleteComment(t *testing.T) {
 	const msg = "chore(preview): delete feature-add-pricing preview"
 	fg := &fakeGitops{
 		pr: closedPR(),
-		teardownResult: &gitops.TeardownResult{
+		teardownResult: &store.TeardownResult{
 			Removed:       []string{"backend-1"},
 			Deleted:       true,
 			CommitURL:     teardownCommitURL,
@@ -338,8 +338,8 @@ func TestTeardown_ClosedEmptyBranchSlugWithNamedLabel(t *testing.T) {
 	fg := &fakeGitops{badilYAML: servicesWithPreview, pr: pr}
 	s, _ := newTeardownServer(t, fg)
 	ev := prEvent("closed", true)
-	ev.PullRequest.Head.Ref = gh.Ptr("---")
-	ev.PullRequest.Labels = []*gh.Label{{Name: gh.Ptr("preview:pricing")}}
+	ev.PullRequest.HeadRef = "---"
+	ev.PullRequest.Labels = []string{"preview:pricing"}
 	s.handlePullRequest(context.Background(), ev)
 	if err := s.WaitBackground(context.Background()); err != nil {
 		t.Fatalf("WaitBackground: %v", err)
@@ -357,8 +357,8 @@ func TestTeardown_ClosedWithoutSlugSkipped(t *testing.T) {
 	fg := &fakeGitops{pr: closedPR()}
 	s, capture := newTeardownServer(t, fg)
 	ev := prEvent("closed", true)
-	ev.PullRequest.Head.Ref = gh.Ptr("---")
-	ev.PullRequest.Labels = []*gh.Label{{Name: gh.Ptr("preview")}, {Name: gh.Ptr("preview:---")}}
+	ev.PullRequest.HeadRef = "---"
+	ev.PullRequest.Labels = []string{"preview", "preview:---"}
 	s.handlePullRequest(context.Background(), ev)
 	if err := s.WaitBackground(context.Background()); err != nil {
 		t.Fatalf("WaitBackground: %v", err)

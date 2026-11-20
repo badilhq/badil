@@ -1,4 +1,4 @@
-package gitops_test
+package store_test
 
 import (
 	"context"
@@ -6,14 +6,14 @@ import (
 	"maps"
 	"testing"
 
-	"github.com/badilhq/badil/internal/gitops"
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store"
 )
 
 // withDependencies sets on c the dependencies postgres (an OCI chart with
 // values and a values file) and mailpit (a chart of a Helm repository,
 // exposed), in that order.
-func withDependencies(c *gitops.ServiceCatalog) {
+func withDependencies(c *store.ServiceCatalog) {
 	c.Dependencies = []preview.DependencyEntry{
 		{
 			Name: "postgres",

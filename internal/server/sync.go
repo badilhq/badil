@@ -8,9 +8,9 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/badilhq/badil/internal/gitops"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store"
 )
 
 // SyncRequest is the optional body of POST /v1/sync. Without a slug, every
@@ -57,7 +57,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			status, msg = http.StatusNotFound, fmt.Sprintf("preview %s not found", slug)
 		case errors.Is(err, lifecycle.ErrConfigUnavailable):
 			status = http.StatusServiceUnavailable
-		case errors.Is(err, gitops.ErrUnauthorized):
+		case errors.Is(err, store.ErrUnauthorized):
 			status = http.StatusBadGateway
 		}
 		slog.WarnContext(ctx, "sync failed",

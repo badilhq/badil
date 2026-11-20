@@ -1,6 +1,4 @@
-// Package gitops provides read/write operations for the gitops repository
-// hosting preview environment values.yaml files.
-package gitops
+package store
 
 import (
 	"bytes"
@@ -20,10 +18,6 @@ import (
 	"github.com/badilhq/badil/internal/preview"
 )
 
-// PRCommentMarker is the HTML comment used as a sentinel for find-or-create
-// semantics on PR comments.
-const PRCommentMarker = "<!-- badil:preview -->"
-
 // MaxWriteRetries is the cap on 409-conflict retries for WritePreviewWithRetry.
 const MaxWriteRetries = 3
 
@@ -33,31 +27,32 @@ var (
 	ErrUnauthorized = errors.New("gitops: unauthorized")
 )
 
-// Client wraps a go-github client scoped to a specific gitops owner/repo.
-type Client struct {
+// GitHubStore is the gitops repo read and written through the GitHub contents
+// API, with a go-github client scoped to its owner/repo.
+type GitHubStore struct {
 	gh      *gh.Client
 	owner   string
 	repo    string
 	metrics *metrics.Metrics
 }
 
-// Option configures a Client built by NewClient.
-type Option func(*Client)
+// Option configures a GitHubStore built by NewClient.
+type Option func(*GitHubStore)
 
 // WithMetrics times WritePreviewWithRetry, TeardownPreviewWithRetry (and
 // UnpinServicesWithRetry, as the teardown operation) and
 // SyncPreviewWithRetry in m, and counts the previews WritePreviewWithRetry
 // creates.
 func WithMetrics(m *metrics.Metrics) Option {
-	return func(c *Client) {
+	return func(c *GitHubStore) {
 		c.metrics = m
 	}
 }
 
 // NewClient binds the gh client to owner/repo. owner is the GitHub
 // organization or user; repo is the bare repository name.
-func NewClient(client *gh.Client, owner, repo string, opts ...Option) *Client {
-	c := &Client{gh: client, owner: owner, repo: repo}
+func NewClient(client *gh.Client, owner, repo string, opts ...Option) *GitHubStore {
+	c := &GitHubStore{gh: client, owner: owner, repo: repo}
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -66,7 +61,7 @@ func NewClient(client *gh.Client, owner, repo string, opts ...Option) *Client {
 
 // observe records the duration since start of the gitops operation op, which
 // ended with err.
-func (c *Client) observe(op string, start time.Time, err error) {
+func (c *GitHubStore) observe(op string, start time.Time, err error) {
 	result := "ok"
 	if err != nil {
 		result = "error"
@@ -96,7 +91,7 @@ func classifyHTTPError(resp *gh.Response, err error) error {
 // validated service catalog (the keys of its services mapping, with each
 // service's repo and branch) and `preview` block. A malformed file is an
 // error.
-func (c *Client) FetchServiceCatalog(ctx context.Context) (*ServiceCatalog, error) {
+func (c *GitHubStore) FetchServiceCatalog(ctx context.Context) (*ServiceCatalog, error) {
 	catalog, _, err := c.FetchServiceCatalogSHA(ctx)
 	return catalog, err
 }
@@ -105,7 +100,7 @@ func (c *Client) FetchServiceCatalog(ctx context.Context) (*ServiceCatalog, erro
 // badil.yaml it read on the default branch. When the file was read but its
 // content can't be decoded or parsed, the SHA is returned with the error; it
 // is "" when the file could not be read.
-func (c *Client) FetchServiceCatalogSHA(ctx context.Context) (*ServiceCatalog, string, error) {
+func (c *GitHubStore) FetchServiceCatalogSHA(ctx context.Context) (*ServiceCatalog, string, error) {
 	content, _, resp, err := c.gh.Repositories.GetContents(ctx, c.owner, c.repo, configFile, nil)
 	if err != nil {
 		return nil, "", classifyHTTPError(resp, err)
@@ -123,7 +118,7 @@ func (c *Client) FetchServiceCatalogSHA(ctx context.Context) (*ServiceCatalog, s
 }
 
 // FullName returns the gitops repo as owner/repo.
-func (c *Client) FullName() string {
+func (c *GitHubStore) FullName() string {
 	return c.owner + "/" + c.repo
 }
 
@@ -133,7 +128,7 @@ const previewsDir = "previews"
 // ListPreviews returns the sorted names of the directories under previews/.
 // A missing previews/ directory yields an empty slice. The contents API caps
 // a directory listing at 1,000 entries; this is not paginated.
-func (c *Client) ListPreviews(ctx context.Context) ([]string, error) {
+func (c *GitHubStore) ListPreviews(ctx context.Context) ([]string, error) {
 	_, entries, resp, err := c.gh.Repositories.GetContents(ctx, c.owner, c.repo, previewsDir, nil)
 	if err != nil {
 		err = classifyHTTPError(resp, err)
@@ -152,87 +147,6 @@ func (c *Client) ListPreviews(ctx context.Context) ([]string, error) {
 	return slugs, nil
 }
 
-// PullRequest is the state of a pull request as read from GitHub.
-type PullRequest struct {
-	// Open is true when the state is open; a merged PR is closed.
-	Open    bool
-	HeadRef string
-	HeadSHA string
-	// Author is the PR author's login.
-	Author string
-	// URL is the PR's html_url.
-	URL string
-	// Labels holds the names of the PR's labels.
-	Labels []string
-	// FullName is the base repository's owner/repo.
-	FullName string
-	// HeadFullName is the head repository's owner/repo; it differs from
-	// FullName on a fork PR.
-	HeadFullName string
-	// ChangedFiles is the number of files the PR changes (changed_files).
-	ChangedFiles int
-}
-
-// GetPullRequest reads owner/repo#number. Lookup failures (including 404 and
-// 403) are returned as errors.
-func (c *Client) GetPullRequest(ctx context.Context, owner, repo string, number int) (*PullRequest, error) {
-	pr, resp, err := c.gh.PullRequests.Get(ctx, owner, repo, number)
-	if err != nil {
-		return nil, classifyHTTPError(resp, err)
-	}
-	labels := make([]string, 0, len(pr.Labels))
-	for _, l := range pr.Labels {
-		labels = append(labels, l.GetName())
-	}
-	return &PullRequest{
-		Open:         pr.GetState() == "open",
-		HeadRef:      pr.GetHead().GetRef(),
-		HeadSHA:      pr.GetHead().GetSHA(),
-		Author:       pr.GetUser().GetLogin(),
-		URL:          pr.GetHTMLURL(),
-		Labels:       labels,
-		FullName:     pr.GetBase().GetRepo().GetFullName(),
-		HeadFullName: pr.GetHead().GetRepo().GetFullName(),
-		ChangedFiles: pr.GetChangedFiles(),
-	}, nil
-}
-
-// filesPerPage is the page size of ListPullRequestFiles, GitHub's maximum.
-const filesPerPage = 100
-
-// MaxListedPullRequestFiles is the most files GitHub lists for a pull
-// request: "Responses include a maximum of 3000 files."
-const MaxListedPullRequestFiles = 3000
-
-// ChangedFile is a file a pull request changes, its path relative to the
-// repository root. PreviousFilename is its path before a rename, empty
-// otherwise.
-type ChangedFile struct {
-	Filename         string
-	PreviousFilename string
-}
-
-// ListPullRequestFiles lists the files owner/repo#number changes, reading
-// every page (100 files each). GitHub lists at most MaxListedPullRequestFiles.
-// A failure on any page is returned as an error.
-func (c *Client) ListPullRequestFiles(ctx context.Context, owner, repo string, number int) ([]ChangedFile, error) {
-	opts := &gh.ListOptions{PerPage: filesPerPage}
-	var files []ChangedFile
-	for {
-		page, resp, err := c.gh.PullRequests.ListFiles(ctx, owner, repo, number, opts)
-		if err != nil {
-			return nil, classifyHTTPError(resp, err)
-		}
-		for _, f := range page {
-			files = append(files, ChangedFile{Filename: f.GetFilename(), PreviousFilename: f.GetPreviousFilename()})
-		}
-		if resp == nil || resp.NextPage == 0 {
-			return files, nil
-		}
-		opts.Page = resp.NextPage
-	}
-}
-
 // previewPath returns the gitops repo path for a preview slug's values file.
 func previewPath(slug string) string {
 	return fmt.Sprintf("previews/%s/values.yaml", slug)
@@ -241,7 +155,7 @@ func previewPath(slug string) string {
 // GetPreview reads previews/<slug>/values.yaml and returns the parsed values
 // plus the file SHA (needed for subsequent updates). Returns ErrNotFound when
 // the file does not exist.
-func (c *Client) GetPreview(ctx context.Context, slug string) (*preview.PreviewValues, string, error) {
+func (c *GitHubStore) GetPreview(ctx context.Context, slug string) (*preview.PreviewValues, string, error) {
 	content, _, resp, err := c.gh.Repositories.GetContents(ctx, c.owner, c.repo, previewPath(slug), nil)
 	if err != nil {
 		return nil, "", classifyHTTPError(resp, err)
@@ -278,7 +192,7 @@ func marshalPreview(vals preview.PreviewValues) ([]byte, error) {
 // WritePreview persists vals at previews/<slug>/values.yaml. When sha is empty
 // the file is created; otherwise an update is performed against that SHA.
 // Returns the html_url of the resulting commit.
-func (c *Client) WritePreview(
+func (c *GitHubStore) WritePreview(
 	ctx context.Context,
 	slug string,
 	vals preview.PreviewValues,
@@ -359,7 +273,7 @@ type WriteResult struct {
 //
 // Its duration, retries included, is observed as the write operation, and a
 // write that Created the file increments the previews gauge.
-func (c *Client) WritePreviewWithRetry(
+func (c *GitHubStore) WritePreviewWithRetry(
 	ctx context.Context,
 	slug string,
 	catalog *ServiceCatalog,
@@ -381,14 +295,14 @@ func (c *Client) WritePreviewWithRetry(
 
 // gitopsRepoURL returns the git URL of the gitops repo (GITOPS_REPO):
 // https://github.com/<owner>/<repo>.git.
-func (c *Client) gitopsRepoURL() string {
+func (c *GitHubStore) gitopsRepoURL() string {
 	return "https://github.com/" + c.owner + "/" + c.repo + ".git"
 }
 
 // applyCatalog returns vals projected on catalog (preview.ApplyCatalog) with
 // its hosts (preview.ApplyHosts), and logs a dependency left out because a
 // kept pinned entry has its name.
-func (c *Client) applyCatalog(
+func (c *GitHubStore) applyCatalog(
 	ctx context.Context, vals preview.PreviewValues, slug string, catalog *ServiceCatalog,
 ) preview.Projection {
 	cat := catalog.Catalog
@@ -405,7 +319,7 @@ func (c *Client) applyCatalog(
 }
 
 // writePreviewWithRetry is WritePreviewWithRetry, untimed.
-func (c *Client) writePreviewWithRetry(
+func (c *GitHubStore) writePreviewWithRetry(
 	ctx context.Context,
 	slug string,
 	catalog *ServiceCatalog,
@@ -492,7 +406,7 @@ type TeardownResult struct {
 // nothing is a no-op: an empty TeardownResult and a nil error.
 //
 // Its duration, retries included, is observed as the teardown operation.
-func (c *Client) TeardownPreviewWithRetry(
+func (c *GitHubStore) TeardownPreviewWithRetry(
 	ctx context.Context,
 	slug, owner, repo string,
 	prNumber int,
@@ -514,7 +428,7 @@ func (c *Client) TeardownPreviewWithRetry(
 // always false.
 //
 // Its duration, retries included, is observed as the teardown operation.
-func (c *Client) UnpinServicesWithRetry(
+func (c *GitHubStore) UnpinServicesWithRetry(
 	ctx context.Context,
 	slug, owner, repo string,
 	prNumber int,
@@ -532,7 +446,7 @@ func (c *Client) UnpinServicesWithRetry(
 // unpinWithRetry applies unpin to previews/<slug>/values.yaml and writes the
 // result, as TeardownPreviewWithRetry describes. The file is deleted when no
 // pin remains, unless keepFile is set. op prefixes its errors.
-func (c *Client) unpinWithRetry(
+func (c *GitHubStore) unpinWithRetry(
 	ctx context.Context,
 	op, slug string,
 	unpin func(preview.PreviewValues) (preview.PreviewValues, []string, bool),
@@ -581,7 +495,7 @@ func (c *Client) unpinWithRetry(
 // when update is set, it is updated, projected on catalog (applyCatalog);
 // otherwise it is deleted, and an empty result is returned when it is
 // already gone.
-func (c *Client) writeUnpinned(
+func (c *GitHubStore) writeUnpinned(
 	ctx context.Context,
 	slug, sha string,
 	vals preview.PreviewValues,
@@ -631,7 +545,11 @@ type SyncResult struct {
 // NotFound set and a nil error.
 //
 // Its duration, retries included, is observed as the sync operation.
-func (c *Client) SyncPreviewWithRetry(ctx context.Context, slug string, catalog *ServiceCatalog) (*SyncResult, error) {
+func (c *GitHubStore) SyncPreviewWithRetry(
+	ctx context.Context,
+	slug string,
+	catalog *ServiceCatalog,
+) (*SyncResult, error) {
 	start := time.Now()
 	res, err := c.syncPreviewWithRetry(ctx, slug, catalog)
 	c.observe("sync", start, err)
@@ -639,7 +557,11 @@ func (c *Client) SyncPreviewWithRetry(ctx context.Context, slug string, catalog 
 }
 
 // syncPreviewWithRetry is SyncPreviewWithRetry, untimed.
-func (c *Client) syncPreviewWithRetry(ctx context.Context, slug string, catalog *ServiceCatalog) (*SyncResult, error) {
+func (c *GitHubStore) syncPreviewWithRetry(
+	ctx context.Context,
+	slug string,
+	catalog *ServiceCatalog,
+) (*SyncResult, error) {
 	existing, sha, err := c.GetPreview(ctx, slug)
 	if errors.Is(err, ErrNotFound) {
 		return &SyncResult{NotFound: true}, nil
@@ -706,7 +628,7 @@ type DeleteResult struct {
 // MaxWriteRetries attempts. A stillDelete returning false, or a missing file
 // (on read, re-fetch or delete), deletes nothing: an empty DeleteResult and a
 // nil error.
-func (c *Client) DeletePreviewWithRetry(
+func (c *GitHubStore) DeletePreviewWithRetry(
 	ctx context.Context,
 	slug, message string,
 	stillDelete func(preview.PreviewValues) bool,
@@ -748,96 +670,9 @@ func (c *Client) DeletePreviewWithRetry(
 	return nil, fmt.Errorf("delete %s: %d attempts exhausted", previewPath(slug), MaxWriteRetries)
 }
 
-// FanOutPRComments posts (or updates) the same markdown body as a comment on
-// every open PR referenced in vals.Services.Metadata.pr-url. Closed PRs are
-// skipped, so a stale summary never overwrites their teardown comment.
-// Failures on individual services (including a PR state lookup) are collected
-// but do not abort the loop — best-effort delivery.
-//
-// Find-or-create semantics: the comment body is prefixed with PRCommentMarker
-// (HTML comment), so subsequent runs find and update the existing comment
-// rather than spamming new ones.
-func (c *Client) FanOutPRComments(ctx context.Context, vals preview.PreviewValues, body string) error {
-	var errs []error
-	for _, svc := range vals.Services {
-		if svc.Metadata == nil || svc.Metadata.PRURL == "" {
-			continue
-		}
-		prURL := svc.Metadata.PRURL
-		owner, repo, prNumber, ok := preview.ParsePRURL(prURL)
-		if !ok {
-			errs = append(errs, fmt.Errorf("service %s: unrecognized pr-url %q", svc.Name, prURL))
-			continue
-		}
-		pr, stateErr := c.GetPullRequest(ctx, owner, repo, prNumber)
-		if stateErr != nil {
-			errs = append(errs,
-				fmt.Errorf("service %s (%s/%s#%d): pr state: %w", svc.Name, owner, repo, prNumber, stateErr))
-			continue
-		}
-		if !pr.Open {
-			continue
-		}
-		if upsertErr := c.UpsertPRComment(ctx, owner, repo, prNumber, body); upsertErr != nil {
-			errs = append(errs, fmt.Errorf("service %s (%s/%s#%d): %w", svc.Name, owner, repo, prNumber, upsertErr))
-		}
-	}
-	return errors.Join(errs...)
-}
-
-// UpsertPRComment posts body as badil's comment on owner/repo#prNumber,
-// prefixed with PRCommentMarker: the existing marked comment is updated, or a
-// new one is created.
-func (c *Client) UpsertPRComment(ctx context.Context, owner, repo string, prNumber int, body string) error {
-	return c.upsertPRComment(ctx, owner, repo, prNumber, PRCommentMarker+"\n"+body)
-}
-
-// upsertPRComment finds an existing comment by marker and updates it, or
-// creates a new one if none is found. Paginates through all comments.
-func (c *Client) upsertPRComment(ctx context.Context, owner, repo string, prNumber int, body string) error {
-	opts := &gh.IssueListCommentsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
-	for {
-		comments, resp, err := c.gh.Issues.ListComments(ctx, owner, repo, prNumber, opts)
-		if err != nil {
-			return classifyHTTPError(resp, err)
-		}
-		for _, comment := range comments {
-			if comment.Body == nil || !strings.Contains(*comment.Body, PRCommentMarker) {
-				continue
-			}
-			_, editResp, editErr := c.gh.Issues.EditComment(
-				ctx,
-				owner,
-				repo,
-				comment.GetID(),
-				&gh.IssueComment{Body: gh.Ptr(body)},
-			)
-			if editErr != nil {
-				return classifyHTTPError(editResp, editErr)
-			}
-			return nil
-		}
-		if resp == nil || resp.NextPage == 0 {
-			break
-		}
-		opts.Page = resp.NextPage
-	}
-	_, createResp, createErr := c.gh.Issues.CreateComment(
-		ctx,
-		owner,
-		repo,
-		prNumber,
-		&gh.IssueComment{Body: gh.Ptr(body)},
-	)
-	if createErr != nil {
-		return classifyHTTPError(createResp, createErr)
-	}
-	return nil
-}
-
 // deletePreview removes previews/<slug>/values.yaml at blob sha and returns
 // the html_url of the resulting commit.
-func (c *Client) deletePreview(ctx context.Context, slug, sha, message string) (string, error) {
+func (c *GitHubStore) deletePreview(ctx context.Context, slug, sha, message string) (string, error) {
 	opts := &gh.RepositoryContentFileOptions{
 		Message: gh.Ptr(message),
 		SHA:     gh.Ptr(sha),

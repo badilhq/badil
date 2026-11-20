@@ -1,4 +1,4 @@
-package gitops_test
+package store_test
 
 import (
 	"context"
@@ -21,14 +21,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"gopkg.in/yaml.v3"
 
-	"github.com/badilhq/badil/internal/gitops"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store"
 )
 
 // newClient wires a go-github client to a httptest server. The trailing slash
 // on BaseURL is required by go-github's URL resolution.
-func newClient(t *testing.T, srv *httptest.Server, opts ...gitops.Option) *gitops.Client {
+func newClient(t *testing.T, srv *httptest.Server, opts ...store.Option) *store.GitHubStore {
 	t.Helper()
 	u, err := url.Parse(srv.URL + "/")
 	if err != nil {
@@ -37,7 +37,7 @@ func newClient(t *testing.T, srv *httptest.Server, opts ...gitops.Option) *gitop
 	c := gh.NewClient(nil)
 	c.BaseURL = u
 	c.UploadURL = u
-	return gitops.NewClient(c, "acme", "gitops", opts...)
+	return store.NewClient(c, "acme", "gitops", opts...)
 }
 
 // encodeContent returns a Repository contents response body for a single file.
@@ -156,7 +156,7 @@ func TestFetchServiceCatalogSHA(t *testing.T) {
 }
 
 func TestFullName(t *testing.T) {
-	if got := gitops.NewClient(gh.NewClient(nil), "acme", "gitops").FullName(); got != "acme/gitops" {
+	if got := store.NewClient(gh.NewClient(nil), "acme", "gitops").FullName(); got != "acme/gitops" {
 		t.Errorf("FullName = %q, want acme/gitops", got)
 	}
 }
@@ -209,7 +209,7 @@ func TestGetPreview_NotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !errors.Is(err, gitops.ErrNotFound) {
+	if !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }
@@ -294,7 +294,7 @@ func TestWritePreview_Unauthorized(t *testing.T) {
 			c := newClient(t, srv)
 			vals := preview.BuildPreviewValues("backend-1", "sha", []string{"backend-1"}, sampleInputs())
 			_, err := c.WritePreview(context.Background(), "slug", vals, "", "msg")
-			if !errors.Is(err, gitops.ErrUnauthorized) {
+			if !errors.Is(err, store.ErrUnauthorized) {
 				t.Errorf("expected ErrUnauthorized, got %v", err)
 			}
 		})
@@ -308,12 +308,12 @@ func hostURLs() preview.URLConfig {
 
 // testCatalog is a catalog of services, each at https://github.com/acme/<name>.git
 // and tracking main, with the hosts of hostURLs.
-func testCatalog(services ...string) *gitops.ServiceCatalog {
+func testCatalog(services ...string) *store.ServiceCatalog {
 	repos := make(map[string]string, len(services))
 	for _, name := range services {
 		repos[name] = "https://github.com/acme/" + name + ".git"
 	}
-	return &gitops.ServiceCatalog{Catalog: preview.Catalog{Services: services, Repos: repos}, URLs: hostURLs()}
+	return &store.ServiceCatalog{Catalog: preview.Catalog{Services: services, Repos: repos}, URLs: hostURLs()}
 }
 
 func TestWritePreviewWithRetry_ConflictThenSuccess(t *testing.T) {
@@ -538,65 +538,6 @@ func TestWritePreviewWithRetry_FreshCreateUsesCatalog(t *testing.T) {
 	assertWrittenHosts(t, result.Values, &capturedBody, "fresh-slug")
 }
 
-func TestFanOutPRComments_UpdateAndCreate(t *testing.T) {
-	// Two services with PR URLs:
-	//   backend-1: PR #42 → existing marker comment → expect PATCH
-	//   backend-2: PR #7  → no existing comment    → expect POST
-	var sawEdit, sawCreate atomic.Bool
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/pulls/"):
-			_, _ = io.WriteString(w, `{"state":"open"}`)
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/issues/42/comments"):
-			_, _ = io.WriteString(w, `[{"id": 999, "body": "<!-- badil:preview -->\n old body"}]`)
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/issues/7/comments"):
-			_, _ = io.WriteString(w, `[{"id": 111, "body": "unrelated"}]`)
-		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/issues/comments/999"):
-			sawEdit.Store(true)
-			body, _ := io.ReadAll(r.Body)
-			if !strings.Contains(string(body), "<!-- badil:preview -->") {
-				t.Errorf("PATCH body missing marker: %s", body)
-			}
-			_, _ = io.WriteString(w, `{"id":999}`)
-		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/issues/7/comments"):
-			sawCreate.Store(true)
-			body, _ := io.ReadAll(r.Body)
-			if !strings.Contains(string(body), "<!-- badil:preview -->") {
-				t.Errorf("POST body missing marker: %s", body)
-			}
-			w.WriteHeader(http.StatusCreated)
-			_, _ = io.WriteString(w, `{"id":222}`)
-		default:
-			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
-		}
-	}))
-	defer srv.Close()
-
-	c := newClient(t, srv)
-
-	in1 := sampleInputs()
-	in2 := sampleInputs()
-	in2.ServiceName = "backend-2"
-	in2.PRURL = "https://github.com/acme/backend-2/pull/7"
-	in2.PRNumber = "7"
-
-	vals := preview.PreviewValues{Services: []preview.ServiceEntry{
-		{Name: "backend-1", CommitSha: "abc", Metadata: preview.BuildServiceMetadata(in1)},
-		{Name: "backend-2", CommitSha: "def", Metadata: preview.BuildServiceMetadata(in2)},
-	}}
-
-	if err := c.FanOutPRComments(context.Background(), vals, "## body"); err != nil {
-		t.Fatalf("FanOutPRComments: %v", err)
-	}
-	if !sawEdit.Load() {
-		t.Error("expected PATCH on existing comment for PR #42")
-	}
-	if !sawCreate.Load() {
-		t.Error("expected POST for PR #7")
-	}
-}
-
 // defaultChartYAML is the chart block of an entry whose service sets no chart
 // settings in the catalog.
 const defaultChartYAML = "    chart:\n" +
@@ -676,7 +617,7 @@ type writeServer struct {
 	message   atomic.Value
 }
 
-func (s *writeServer) start(t *testing.T, opts ...gitops.Option) *gitops.Client {
+func (s *writeServer) start(t *testing.T, opts ...store.Option) *store.GitHubStore {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -721,7 +662,7 @@ func TestWritePreviewWithRetry_SkipUnchanged(t *testing.T) {
 		name          string
 		files         []string
 		conflicts     int32
-		catalog       func(*gitops.ServiceCatalog)
+		catalog       func(*store.ServiceCatalog)
 		skipUnchanged bool
 		wantUnchanged bool
 		wantGets      int32
@@ -757,17 +698,17 @@ func TestWritePreviewWithRetry_SkipUnchanged(t *testing.T) {
 		{
 			name:  "catalog branch change",
 			files: []string{pinnedFile()}, skipUnchanged: true, wantGets: 1, wantPuts: 1,
-			catalog: func(c *gitops.ServiceCatalog) { c.Branches = map[string]string{"backend-2": "develop"} },
+			catalog: func(c *store.ServiceCatalog) { c.Branches = map[string]string{"backend-2": "develop"} },
 		},
 		{
 			name:  "catalog repo url change",
 			files: []string{pinnedFile()}, skipUnchanged: true, wantGets: 1, wantPuts: 1,
-			catalog: func(c *gitops.ServiceCatalog) { c.Repos["backend-2"] = "https://github.com/acme/b2.git" },
+			catalog: func(c *store.ServiceCatalog) { c.Repos["backend-2"] = "https://github.com/acme/b2.git" },
 		},
 		{
 			name:  "service removed from the catalog",
 			files: []string{pinnedFile()}, skipUnchanged: true, wantGets: 1, wantPuts: 1,
-			catalog: func(c *gitops.ServiceCatalog) { delete(c.Repos, "backend-2"); c.Services = c.Services[:1] },
+			catalog: func(c *store.ServiceCatalog) { delete(c.Repos, "backend-2"); c.Services = c.Services[:1] },
 		},
 		{
 			name: "file without apiVersion",
@@ -818,7 +759,7 @@ func TestWritePreviewWithRetry_SkipUnchanged(t *testing.T) {
 
 // assertSkipResult checks result is an update written as "update", or, when
 // unchanged, the fetched file with no commit.
-func assertSkipResult(t *testing.T, result *gitops.WriteResult, unchanged bool) {
+func assertSkipResult(t *testing.T, result *store.WriteResult, unchanged bool) {
 	t.Helper()
 	if result.Unchanged != unchanged || result.Created {
 		t.Errorf("Unchanged, Created = %v, %v; want %v, false", result.Unchanged, result.Created, unchanged)
@@ -856,7 +797,7 @@ func TestWritePreviewWithRetry_Created(t *testing.T) {
 			s := &writeServer{files: tt.files, conflicts: tt.conflicts}
 			m := metrics.New()
 			m.PreviewsListed(1)
-			c := s.start(t, gitops.WithMetrics(m))
+			c := s.start(t, store.WithMetrics(m))
 
 			result, err := c.WritePreviewWithRetry(
 				context.Background(), "slug", testCatalog("backend-1", "backend-2"),
