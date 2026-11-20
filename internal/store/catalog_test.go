@@ -634,16 +634,20 @@ func TestParseCatalog_MalformedServices(t *testing.T) {
 	}
 }
 
-func TestServicesForRepo(t *testing.T) {
-	const raw = `services:
+// reposCatalog has services on GitHub repos written in several forms, and
+// on an SSH and an enterprise URL.
+const reposCatalog = `services:
   api: {repo: https://github.com/acme/monorepo.git}
   worker: {repo: https://github.com/Acme/MonoRepo/}
   front: {repo: https://github.com/acme/front}
   web: {repo: HTTPS://GITHUB.COM/ACME/WEB.GIT}
   ssh: {repo: "git@github.com:acme/ssh.git"}
   ghe: {repo: https://github.acme.example/acme/ghe.git}
+  nested: {repo: https://github.com/acme/group/nested}
 `
-	catalog, err := store.ParseCatalog([]byte(raw))
+
+func TestServicesForRepo(t *testing.T) {
+	catalog, err := store.ParseCatalog([]byte(reposCatalog))
 	if err != nil {
 		t.Fatalf("ParseCatalog: %v", err)
 	}
@@ -665,6 +669,21 @@ func TestServicesForRepo(t *testing.T) {
 				t.Errorf("ServicesForRepo(%q, %q) = %v, want %v", tt.owner, tt.repo, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestGitHubRepos(t *testing.T) {
+	catalog, err := store.ParseCatalog([]byte(reposCatalog))
+	if err != nil {
+		t.Fatalf("ParseCatalog: %v", err)
+	}
+	want := []store.GitHubRepo{
+		{Owner: "acme", Repo: "monorepo"},
+		{Owner: "acme", Repo: "front"},
+		{Owner: "acme", Repo: "web"},
+	}
+	if got := catalog.GitHubRepos(); !reflect.DeepEqual(got, want) {
+		t.Errorf("GitHubRepos = %v, want %v", got, want)
 	}
 }
 

@@ -50,6 +50,31 @@ func sweepAPI(st *store.GitHubStore, f forge.Forge, m *metrics.Metrics) lifecycl
 	return lifecycle.SweepAPI{Store: st, Forge: f, Recorder: m, FanOut: lifecycle.FanOutPRComments}
 }
 
+// reconcileAPI is st, f and the fan-out with the metrics recorder
+// lifecycle.ReconcilePR expects. A nil *metrics.Metrics records nothing.
+func reconcileAPI(st *store.GitHubStore, f forge.Forge, m *metrics.Metrics) lifecycle.ReconcileAPI {
+	return lifecycle.ReconcileAPI{Store: st, Forge: f, Recorder: m, FanOut: lifecycle.FanOutPRComments}
+}
+
+// catchUpAPI is st, f and the metrics recorder lifecycle.CatchUp expects. A
+// nil *metrics.Metrics records nothing.
+func catchUpAPI(st *store.GitHubStore, f forge.Forge, m *metrics.Metrics) lifecycle.CatchUpAPI {
+	return lifecycle.CatchUpAPI{Store: st, Forge: f, Recorder: m}
+}
+
+// catchUpRunner runs one catch-up: *lifecycle.CatchUp.
+type catchUpRunner interface {
+	Run(ctx context.Context)
+}
+
+// runCatchUp runs one catch-up of c, bounded by cleanupTimeout and cancelled
+// with ctx.
+func runCatchUp(ctx context.Context, c catchUpRunner) {
+	cctx, cancel := context.WithTimeout(ctx, cleanupTimeout)
+	defer cancel()
+	c.Run(cctx)
+}
+
 func main() {
 	if err := rootCmd().Execute(); err != nil {
 		os.Exit(1)
@@ -109,6 +134,7 @@ func serveCmd() *cobra.Command {
 
 			srv := server.NewServer(f, st, cfg.DeployToken,
 				server.WithMetrics(m), server.WithArgoCDToken(cfg.ArgoCDWebhookToken))
+			catchUp := lifecycle.NewCatchUp(catchUpAPI(st, f, m), srv.QueueReconcile)
 			httpSrv := &http.Server{
 				Addr:              cfg.ListenAddr,
 				Handler:           srv.Handler(),
@@ -121,7 +147,8 @@ func serveCmd() *cobra.Command {
 			countPreviews(ctx, st, m)
 			serveInBackground(ctx, "server", httpSrv)
 			metricsSrv := startMetricsServer(ctx, cfg.MetricsAddr, m)
-			startSweepLoop(ctx, srv, sweepAPI(st, f, m), m, interval, ttl)
+			srv.Go(func() { runCatchUp(ctx, catchUp) })
+			startSweepLoop(ctx, srv, sweepAPI(st, f, m), catchUp, m, interval, ttl)
 
 			<-ctx.Done()
 			slog.InfoContext(ctx, "shutting down server")
@@ -209,6 +236,7 @@ func startSweepLoop(
 	ctx context.Context,
 	srv *server.Server,
 	api lifecycle.SweepAPI,
+	catchUp catchUpRunner,
 	m *metrics.Metrics,
 	interval, ttl time.Duration,
 ) {
@@ -220,16 +248,19 @@ func startSweepLoop(
 		slog.String("ttl", ttl.String()),
 	)
 	srv.Go(func() {
-		runSweepLoop(ctx, api, m, interval, ttl, time.Now)
+		runSweepLoop(ctx, api, catchUp, m, interval, ttl, time.Now)
 	})
 }
 
 // runSweepLoop sweeps every interval until ctx is done, starting one interval
-// from now. Runs never overlap: a tick that comes during a run waits for it.
-// Each run is bounded by cleanupTimeout and cancelled with ctx.
+// from now, and runs a catch-up after each sweep, whether it succeeded or
+// failed, unless ctx is done. Runs never overlap: a tick that comes during a
+// run waits for it. Each sweep and each catch-up is bounded by cleanupTimeout
+// and cancelled with ctx.
 func runSweepLoop(
 	ctx context.Context,
 	api lifecycle.SweepAPI,
+	catchUp catchUpRunner,
 	m *metrics.Metrics,
 	interval, ttl time.Duration,
 	now func() time.Time,
@@ -243,6 +274,10 @@ func runSweepLoop(
 		case <-ticker.C:
 		}
 		runSweep(ctx, api, m, ttl, now)
+		if ctx.Err() != nil {
+			return
+		}
+		runCatchUp(ctx, catchUp)
 	}
 }
 
@@ -376,7 +411,8 @@ func newApp(cfg *config.Config) (*github.App, error) {
 
 // cleanupCmd runs one sweep over the gitops repo's previews: previews with no
 // pin are deleted, previews idle for longer than CLEANUP_TTL (when set) are
-// deleted, and pins of closed PRs are torn down.
+// deleted, and pins of closed PRs are torn down. A catch-up follows it
+// (runCleanup).
 func cleanupCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "cleanup",
@@ -401,8 +437,32 @@ func cleanupCmd() *cobra.Command {
 				return err
 			}
 			defer closeStore(ctx, st)
-			return lifecycle.Sweep(ctx, sweepAPI(st, f, nil), time.Now().UTC(), ttl)
+			catchUp := lifecycle.NewCatchUp(catchUpAPI(st, f, nil), reconcileNow(reconcileAPI(st, f, nil)))
+			return runCleanup(cmd.Context(), ctx, sweepAPI(st, f, nil), catchUp, time.Now().UTC(), ttl)
 		},
+	}
+}
+
+// runCleanup runs one sweep under sweepCtx, then one catch-up of c under its
+// own cleanupTimeout from ctx (runCatchUp), whether the sweep succeeded or
+// failed. It returns the sweep's error: catch-up's failures are only logged
+// and counted.
+func runCleanup(
+	ctx, sweepCtx context.Context, api lifecycle.SweepAPI, c catchUpRunner, now time.Time, ttl time.Duration,
+) error {
+	err := lifecycle.Sweep(sweepCtx, api, now, ttl)
+	runCatchUp(ctx, c)
+	return err
+}
+
+// reconcileNow reconciles through lifecycle.ReconcilePR over api at once,
+// each reconcile capped at server.ReconcileTimeout, and calls done with its
+// result.
+func reconcileNow(api lifecycle.ReconcileAPI) lifecycle.ReconcileFunc {
+	return func(ctx context.Context, ev lifecycle.Event, done func(lifecycle.ReconcileResult)) {
+		rctx, cancel := context.WithTimeout(ctx, server.ReconcileTimeout)
+		defer cancel()
+		done(lifecycle.ReconcilePR(rctx, api, ev))
 	}
 }
 

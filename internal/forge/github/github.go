@@ -61,7 +61,34 @@ func (f *Forge) GetPullRequest(ctx context.Context, owner, repo string, number i
 	if err != nil {
 		return nil, classifyHTTPError(resp, err)
 	}
-	return &forge.PullRequest{
+	out := pullRequest(pr)
+	return &out, nil
+}
+
+// ListOpenPullRequests lists the open pull requests of owner/repo, reading
+// every page (100 each). Their ChangedFiles is 0: a listed pull request has
+// no changed_files. A failure on any page is returned as an error.
+func (f *Forge) ListOpenPullRequests(ctx context.Context, owner, repo string) ([]forge.PullRequest, error) {
+	opts := &gh.PullRequestListOptions{State: "open", ListOptions: gh.ListOptions{PerPage: perPage}}
+	var prs []forge.PullRequest
+	for {
+		page, resp, err := f.gh.PullRequests.List(ctx, owner, repo, opts)
+		if err != nil {
+			return nil, classifyHTTPError(resp, err)
+		}
+		for _, pr := range page {
+			prs = append(prs, pullRequest(pr))
+		}
+		if resp == nil || resp.NextPage == 0 {
+			return prs, nil
+		}
+		opts.Page = resp.NextPage
+	}
+}
+
+// pullRequest converts a go-github pull request.
+func pullRequest(pr *gh.PullRequest) forge.PullRequest {
+	return forge.PullRequest{
 		Open:         pr.GetState() == "open",
 		HeadRef:      pr.GetHead().GetRef(),
 		HeadSHA:      pr.GetHead().GetSHA(),
@@ -70,8 +97,9 @@ func (f *Forge) GetPullRequest(ctx context.Context, owner, repo string, number i
 		Labels:       labelNames(pr.Labels),
 		FullName:     pr.GetBase().GetRepo().GetFullName(),
 		HeadFullName: pr.GetHead().GetRepo().GetFullName(),
+		Number:       pr.GetNumber(),
 		ChangedFiles: pr.GetChangedFiles(),
-	}, nil
+	}
 }
 
 // ListChangedFiles lists the files owner/repo#number changes, reading every

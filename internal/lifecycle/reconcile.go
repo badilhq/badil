@@ -36,8 +36,9 @@ const previewLimitReason = "preview limit reached"
 const (
 	outcomeDeployed = "deployed"
 	outcomeSkipped  = "skipped"
-	outcomeFailed   = "failed"
 	outcomeTornDown = "torn_down"
+	// OutcomeFailed is the outcome of a reconcile that failed.
+	OutcomeFailed = "failed"
 )
 
 // ReconcileStore is the subset of store.GitHubStore used by ReconcilePR.
@@ -111,10 +112,19 @@ type Event struct {
 // listed (the teardowns from the PR's other previews are still committed),
 // or when the commit of a PR open with a target can't be pushed;
 // otherwise skipped (with its reason) when the reconcile was skipped;
-// otherwise deployed when a service was written; otherwise torn_down.
-func ReconcilePR(ctx context.Context, api ReconcileAPI, ev Event) {
+// otherwise deployed when a service was written; otherwise torn_down. It
+// returns that outcome and reason.
+func ReconcilePR(ctx context.Context, api ReconcileAPI, ev Event) ReconcileResult {
 	o, r := reconcile(ctx, api, ev)
 	api.Recorder.Reconcile(o, r)
+	return ReconcileResult{Outcome: o, Reason: r}
+}
+
+// ReconcileResult is the outcome ReconcilePR records and, when it is skipped,
+// the reason ("" otherwise).
+type ReconcileResult struct {
+	Outcome string
+	Reason  string
 }
 
 // reconcile is ReconcilePR without the recording. It returns the outcome and,
@@ -637,7 +647,7 @@ func previewLabel(name, label string) bool {
 // summary left to the deploy's when a service was written), logs each
 // service, records a created preview, and posts the preview's summary once
 // on its open PRs. It returns, as reconcile does, outcomeDeployed when at
-// least one service was written, outcomeFailed when none was and at least
+// least one service was written, OutcomeFailed when none was and at least
 // one failed, and otherwise, every service being unchanged, the skip of
 // reconcileSkipped with reason alreadyDeployedReason.
 func (p *reconcilePlan) afterDeploy(ctx context.Context, api ReconcileAPI, res store.Result) (string, string) {
@@ -684,7 +694,7 @@ func (p *reconcilePlan) afterDeploy(ctx context.Context, api ReconcileAPI, res s
 		}
 		return outcomeDeployed, ""
 	case failed:
-		return outcomeFailed, ""
+		return OutcomeFailed, ""
 	}
 	return reconcileSkipped(ctx, p.ev, alreadyDeployedReason)
 }
@@ -720,5 +730,5 @@ func reconcileFailed(ctx context.Context, ev Event, err error) (string, string) 
 		slog.Int("pr_number", ev.Number),
 		slog.String("err", err.Error()),
 	)
-	return outcomeFailed, ""
+	return OutcomeFailed, ""
 }

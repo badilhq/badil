@@ -36,6 +36,10 @@ type Forge interface {
 	// ListChangedFiles lists the files owner/repo#number changes, every page,
 	// at most MaxListedFiles. A failure on any page is returned as an error.
 	ListChangedFiles(ctx context.Context, owner, repo string, number int) ([]ChangedFile, error)
+	// ListOpenPullRequests lists the open pull requests of owner/repo, every
+	// page. Their ChangedFiles is 0: the listing does not return it. A
+	// failure on any page is returned as an error.
+	ListOpenPullRequests(ctx context.Context, owner, repo string) ([]PullRequest, error)
 	// UpsertComment posts body as badil's comment on owner/repo#number: the
 	// existing one is updated, or a new one is created.
 	UpsertComment(ctx context.Context, owner, repo string, number int, body string) error
@@ -63,6 +67,8 @@ type PullRequest struct {
 	// HeadFullName is the head repository's owner/repo; it differs from
 	// FullName on a fork PR.
 	HeadFullName string
+	// Number is the PR's number in FullName.
+	Number int
 	// ChangedFiles is the number of files the PR changes (changed_files).
 	ChangedFiles int
 }

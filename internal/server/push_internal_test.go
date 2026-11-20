@@ -39,6 +39,10 @@ func (*pushForge) ListChangedFiles(context.Context, string, string, int) ([]forg
 	return nil, errUnexpected
 }
 
+func (*pushForge) ListOpenPullRequests(context.Context, string, string) ([]forge.PullRequest, error) {
+	return nil, errUnexpected
+}
+
 func (*pushForge) UpsertComment(context.Context, string, string, int, string) error {
 	return errUnexpected
 }

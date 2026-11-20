@@ -106,6 +106,10 @@ func (f *fakeAPI) ListChangedFiles(context.Context, string, string, int) ([]forg
 	return nil, errors.New("unexpected ListChangedFiles")
 }
 
+func (f *fakeAPI) ListOpenPullRequests(context.Context, string, string) ([]forge.PullRequest, error) {
+	return nil, errors.New("unexpected ListOpenPullRequests")
+}
+
 func (f *fakeAPI) ParseWebhook(*http.Request) (forge.Event, error) {
 	return forge.Event{}, errors.New("unexpected ParseWebhook")
 }

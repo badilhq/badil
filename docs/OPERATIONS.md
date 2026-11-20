@@ -24,6 +24,7 @@ Every label has a closed set of values. Go runtime (`go_*`) and process (`proces
 | `badil_previews_synced_total` | counter | | Previews rewritten to match `badil.yaml`, by a sweep (step 4 of the in-server sweep), a push or `/v1/sync` (see [Config sync](CLEANUP.md#config-sync)). |
 | `badil_previews` | gauge | | Previews in the gitops repo: listed at server startup, incremented when a deploy creates a preview, decremented when a teardown or sweep deletes one, and reset by each in-server sweep. |
 | `badil_preview_spinup_seconds` | histogram | `catalog_service` | Spin-up time of a pinned service, from badil's gitops write to its Application synced and Healthy (see [Spin-up time](#spin-up-time)). Buckets: 15, 30, 60, 120, 180, 300, 600, 900, 1800 s. `catalog_service` is a catalog service; it is not named `service` because that collides with the `service` target label Prometheus adds when scraping through a ServiceMonitor. |
+| `badil_catchup_reconciles_total` | counter | | Reconciles started by [catch-up](EVENTS.md#catch-up), at server start and after each in-server sweep. Each is also counted in `badil_reconciles_total` once it runs. |
 | `badil_argocd_events_total` | counter | `result` | Events accepted by `/webhooks/argocd`: `recorded` (a spin-up was observed) or `ignored`. 400 and 401 answers are not counted. |
 
 ### Gauges and the CronJob

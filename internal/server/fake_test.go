@@ -232,6 +232,10 @@ func (f *fakeGitops) ListChangedFiles(context.Context, string, string, int) ([]f
 	return nil, nil
 }
 
+func (f *fakeGitops) ListOpenPullRequests(context.Context, string, string) ([]forge.PullRequest, error) {
+	return nil, nil
+}
+
 func (f *fakeGitops) ParseWebhook(*http.Request) (forge.Event, error) {
 	return forge.Event{}, errors.New("unexpected ParseWebhook")
 }
