@@ -1,0 +1,33 @@
+version: 2
+
+project_name: badil
+
+builds:
+  - main: ./cmd/badil
+    binary: badil
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -X main.version={{ .Tag }}
+
+archives:
+  - formats: [tar.gz]
+    # Set explicitly: the default list also matches CHANGELOG*.
+    files:
+      - LICENSE
+      - README.md
+
+# release-please owns the tag, the changelog and the release notes.
+changelog:
+  disable: true
+
+release:
+  mode: keep-existing

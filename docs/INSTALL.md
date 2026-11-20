@@ -247,6 +247,27 @@ badil sets no quota or network policy on previews. To cap each preview's resourc
 4. Removing the label or closing the PR tears the preview down.
 5. PRs from forks never get a preview.
 
+### Install the badil CLI
+
+`badil list` and `badil wait` ship as release binaries for linux and darwin, on amd64 and arm64. With the release `X.Y.Z`:
+
+```bash
+BADIL_VERSION=X.Y.Z
+OS=linux ARCH=amd64   # or darwin, arm64
+base=https://github.com/badilhq/badil/releases/download/v$BADIL_VERSION
+curl -fsSLO "$base/badil_${BADIL_VERSION}_${OS}_${ARCH}.tar.gz"
+curl -fsSLO "$base/badil_${BADIL_VERSION}_checksums.txt"
+sha256sum --ignore-missing -c "badil_${BADIL_VERSION}_checksums.txt"
+tar -xzf "badil_${BADIL_VERSION}_${OS}_${ARCH}.tar.gz" badil
+sudo install badil /usr/local/bin/
+```
+
+Each archive holds `badil`, `LICENSE` and `README.md`. With a Go toolchain instead:
+
+```bash
+go install github.com/badilhq/badil/cmd/badil@latest
+```
+
 ### Wait for a preview
 
 A CI job or an agent can wait until a PR's preview is ready at its commit, or learn at once why it never will be, instead of sleeping. Generate a read token (e.g. `openssl rand -hex 32`) as `BADIL_READ_TOKEN`, add it to the badil Secret as `read-token` and restart badil. The deploy token is accepted too, but it also grants deploys. A preview reaches `ready` only through the [status callback](#preview-status-optional): without it badil never learns a service's state, so a pinned PR stays `progressing` and `badil wait` exits 2 when `--timeout` passes.
@@ -257,15 +278,70 @@ kubectl patch secret badil -n badil --type merge \
 kubectl rollout restart deployment/badil -n badil
 ```
 
-Then, where the job runs:
+Then, where the job runs, with the CLI installed ([Install the badil CLI](#install-the-badil-cli)):
 
 ```bash
-go install github.com/badilhq/badil/cmd/badil@latest
 export BADIL_SERVER=https://badil.example.com BADIL_TOKEN="$BADIL_READ_TOKEN"
 badil wait --repo acme/backend-1 --pr 42 --sha "$HEAD_SHA"   # or: badil wait --slug feature-pricing
 ```
 
 `badil wait` exits 0 when the preview is ready or the PR needs none, 1 when it failed or was refused, 2 when `--timeout` (default `15m`) passes first, and 3 on an error. `badil list` lists the previews. Details: [`GET /v1/wait`](API.md#get-v1wait) and [`badil wait`](API.md#badil-wait).
+
+### Wait for a preview in CI
+
+Both jobs pin a release, check its checksum, then run `badil wait`, which fails the job unless the preview is ready or the PR needs none.
+
+GitHub Actions, with the repository variable `BADIL_SERVER` and the secret `BADIL_READ_TOKEN`. The step writes the preview URLs to its `urls` output:
+
+```yaml
+on: pull_request
+
+jobs:
+  preview:
+    runs-on: ubuntu-24.04
+    outputs:
+      urls: ${{ steps.wait.outputs.urls }}
+    steps:
+      - name: Install badil
+        env:
+          BADIL_VERSION: X.Y.Z
+        run: |
+          cd "$RUNNER_TEMP"
+          base=https://github.com/badilhq/badil/releases/download/v$BADIL_VERSION
+          curl -fsSLO "$base/badil_${BADIL_VERSION}_linux_amd64.tar.gz"
+          curl -fsSLO "$base/badil_${BADIL_VERSION}_checksums.txt"
+          sha256sum --ignore-missing -c "badil_${BADIL_VERSION}_checksums.txt"
+          tar -xzf "badil_${BADIL_VERSION}_linux_amd64.tar.gz" badil
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - id: wait
+        name: Wait for the preview
+        env:
+          BADIL_SERVER: ${{ vars.BADIL_SERVER }}
+          BADIL_TOKEN: ${{ secrets.BADIL_READ_TOKEN }}
+        run: |
+          badil wait --json --repo "$GITHUB_REPOSITORY" --pr "${{ github.event.number }}" \
+            --sha "${{ github.event.pull_request.head.sha }}" > "$RUNNER_TEMP/wait.json"
+          echo "urls=$(jq -c .urls "$RUNNER_TEMP/wait.json")" >> "$GITHUB_OUTPUT"
+```
+
+GitLab CI, in the [external pull request pipelines](https://docs.gitlab.com/ci/ci_cd_for_external_repos/#pipelines-for-external-pull-requests) of a GitHub repo, with the CI/CD variables `BADIL_SERVER` and `BADIL_TOKEN` (the read token, masked). BusyBox `sha256sum` has no `--ignore-missing`, so the job checks the archive's line only:
+
+```yaml
+wait-for-preview:
+  image: alpine:3.24
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "external_pull_request_event"
+  variables:
+    BADIL_VERSION: X.Y.Z
+  script:
+    - base=https://github.com/badilhq/badil/releases/download/v$BADIL_VERSION
+    - wget -q "$base/badil_${BADIL_VERSION}_linux_amd64.tar.gz"
+    - wget -q "$base/badil_${BADIL_VERSION}_checksums.txt"
+    - grep " badil_${BADIL_VERSION}_linux_amd64.tar.gz\$" "badil_${BADIL_VERSION}_checksums.txt" | sha256sum -c -
+    - tar -xzf "badil_${BADIL_VERSION}_linux_amd64.tar.gz" badil
+    - ./badil wait --json --repo "$CI_EXTERNAL_PULL_REQUEST_TARGET_REPOSITORY" --pr "$CI_EXTERNAL_PULL_REQUEST_IID" --sha "$CI_EXTERNAL_PULL_REQUEST_SOURCE_BRANCH_SHA"
+```
 
 ## 9. Preview URLs (optional)
 
