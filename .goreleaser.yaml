@@ -31,3 +31,5 @@ changelog:
 
 release:
   mode: keep-existing
+  # A re-run of a partly uploaded release replaces the assets already there.
+  replace_existing_artifacts: true
