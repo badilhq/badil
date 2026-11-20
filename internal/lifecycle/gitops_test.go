@@ -3,6 +3,7 @@ package lifecycle_test
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -14,15 +15,6 @@ import (
 	"github.com/badilhq/badil/internal/store/storetest"
 )
 
-// gitopsURL is the gitops repo of the tests' stores, acme/gitops.
-const gitopsURL = "https://github.com/acme/gitops.git"
-
-// testIdentity is the commit identity of the tests' stores.
-var testIdentity = store.CommitIdentity{ //nolint:gochecknoglobals // test fixture
-	Name:  "badil-test[bot]",
-	Email: "1+badil-test[bot]@users.noreply.github.com",
-}
-
 // gitops is the gitops repo of a lifecycle test: a remote and a store over
 // it.
 type gitops struct {
@@ -33,44 +25,14 @@ type gitops struct {
 
 // newGitops returns a gitops repo holding badil (no badil.yaml when ""), the
 // preview files of previews, each projected on badil's catalog when it
-// parses so that a sync leaves it alone, and raw files (path to content).
+// parses so that a sync leaves it alone, and raw files (path to content), as
+// storetest.Gitops makes it.
 func newGitops(
 	t *testing.T, badil string, previews map[string]*preview.PreviewValues, raw map[string]string,
 ) *gitops {
 	t.Helper()
-	files := map[string]string{}
-	var catalog *store.ServiceCatalog
-	if badil != "" {
-		files["badil.yaml"] = badil
-		catalog, _ = store.ParseCatalog([]byte(badil))
-	}
-	for slug, vals := range previews {
-		v := *vals
-		if catalog != nil {
-			v = projectOn(slug, v, catalog)
-		}
-		files["previews/"+slug+"/values.yaml"] = marshal(t, v)
-	}
-	for path, content := range raw {
-		files[path] = content
-	}
-	remote := storetest.NewRemote(t, files)
-	st, err := store.Open(context.Background(), "acme", "gitops", store.CloneConfig{URL: remote.URL()}, testIdentity)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
+	remote, st := storetest.Gitops(t, badil, previews, nil, raw)
 	return &gitops{t: t, remote: remote, st: st}
-}
-
-// projectOn returns vals projected on catalog, as a sync writes it.
-func projectOn(slug string, vals preview.PreviewValues, catalog *store.ServiceCatalog) preview.PreviewValues {
-	cat := catalog.Catalog
-	cat.GitopsRepoURL = gitopsURL
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.DiscardHandler))
-	defer slog.SetDefault(prev)
-	return preview.ApplyHosts(preview.ApplyCatalog(vals, cat).Values, slug, catalog.URLs)
 }
 
 // marshal returns vals as a preview file.
@@ -92,6 +54,21 @@ func (g *gitops) pushed() []storetest.Commit {
 		out = append(out, commits[i])
 	}
 	return out
+}
+
+// assertOneCommit fails t unless g was pushed exactly one commit, with
+// subject and body, and returns it.
+func (g *gitops) assertOneCommit(t *testing.T, subject string, body ...string) storetest.Commit {
+	t.Helper()
+	pushed := g.pushed()
+	if len(pushed) != 1 || pushed[0].Subject() != subject || !slices.Equal(pushed[0].Body(), body) {
+		var got []string
+		for _, c := range pushed {
+			got = append(got, c.Message)
+		}
+		t.Fatalf("pushed = %q, want one commit %q with body %q", got, subject, body)
+	}
+	return pushed[0]
 }
 
 // subjects returns the subjects of the pushed commits, oldest first.

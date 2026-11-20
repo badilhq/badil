@@ -148,15 +148,7 @@ func (f *fakeAPI) sweep(t *testing.T, ttl time.Duration) error {
 // and body, and returns it.
 func (f *fakeAPI) assertOneCommit(t *testing.T, subject string, body ...string) storetest.Commit {
 	t.Helper()
-	pushed := f.g.pushed()
-	if len(pushed) != 1 || pushed[0].Subject() != subject || !slices.Equal(pushed[0].Body(), body) {
-		var got []string
-		for _, c := range pushed {
-			got = append(got, c.Message)
-		}
-		t.Fatalf("pushed = %q, want one commit %q with body %q", got, subject, body)
-	}
-	return pushed[0]
+	return f.g.assertOneCommit(t, subject, body...)
 }
 
 // pin is an entry pinned by prURL and last deployed at updatedAt.
@@ -399,7 +391,7 @@ func TestSweep_RulesOnRetriedTree(t *testing.T) {
 				if !raced {
 					raced = true
 					r.Set("previews/feature-x/values.yaml", marshal(t,
-						projectOn("feature-x", *tc.fresh, sweepCatalog(t))))
+						storetest.Project("feature-x", *tc.fresh, sweepCatalog(t))))
 				}
 				return nil
 			}
@@ -445,7 +437,7 @@ func TestSweep_PRPinnedAfterThePreRead(t *testing.T) {
 	f.beforePush = func(r *storetest.Remote) error {
 		if !raced {
 			raced = true
-			r.Set("previews/feature-x/values.yaml", marshal(t, projectOn("feature-x",
+			r.Set("previews/feature-x/values.yaml", marshal(t, storetest.Project("feature-x",
 				*values(pin("backend-1", pr42, recent), pin("backend-2", pr7, recent)), sweepCatalog(t))))
 		}
 		return nil

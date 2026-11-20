@@ -376,7 +376,7 @@ func TestDeploy_PushUnauthorized(t *testing.T) {
 	srv := httptest.NewServer(remote.HTTPHandler(http.StatusForbidden))
 	t.Cleanup(srv.Close)
 	st, err := store.Open(context.Background(), "acme", "gitops",
-		store.CloneConfig{URL: srv.URL + "/acme/gitops.git"}, testIdentity)
+		store.CloneConfig{URL: srv.URL + "/acme/gitops.git"}, storetest.Identity)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
