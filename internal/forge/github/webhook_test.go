@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/badilhq/badil/internal/forge"
@@ -57,6 +58,64 @@ func TestParseEvent(t *testing.T) {
 		}
 		if event.PullRequest.Action != "opened" {
 			t.Fatalf("action = %q, want %q", event.PullRequest.Action, "opened")
+		}
+	})
+
+	t.Run("pull_request payload fields", func(t *testing.T) {
+		payload := []byte(`{"action":"labeled","number":42,` +
+			`"label":{"name":"preview"},` +
+			`"pull_request":{"number":42,"labels":[{"name":"preview"},{"name":"bug"}],` +
+			`"head":{"ref":"feature/add-pricing","sha":"0000000000000000000000000000000000000001"},` +
+			`"user":{"login":"octocat"}},` +
+			`"repository":{"name":"backend-1","full_name":"acme/backend-1","owner":{"login":"acme"}},` +
+			`"sender":{"login":"someone-else"},` + allowedInstallationField + `}`)
+		event, err := f.ParseWebhook(signedWebhook("pull_request", payload))
+		if err != nil {
+			t.Fatalf("ParseWebhook() error = %v", err)
+		}
+		want := forge.Event{
+			Name: "pull_request",
+			Kind: forge.KindPullRequest,
+			PullRequest: forge.PullRequestEvent{
+				Owner:    "acme",
+				Repo:     "backend-1",
+				FullName: "acme/backend-1",
+				Number:   42,
+				Action:   "labeled",
+				Label:    "preview",
+				Labels:   []string{"preview", "bug"},
+				HeadRef:  "feature/add-pricing",
+				HeadSHA:  "0000000000000000000000000000000000000001",
+				Author:   "octocat",
+			},
+		}
+		if !reflect.DeepEqual(event, want) {
+			t.Fatalf("event = %+v, want %+v", event, want)
+		}
+	})
+
+	t.Run("push payload fields", func(t *testing.T) {
+		payload := []byte(`{"ref":"refs/heads/main","before":"0000000000000000000000000000000000000003",` +
+			`"after":"0000000000000000000000000000000000000002","deleted":true,` +
+			`"repository":{"name":"backend-1","full_name":"acme/backend-1","default_branch":"main",` +
+			`"master_branch":"legacy"},` + allowedInstallationField + `}`)
+		event, err := f.ParseWebhook(signedWebhook("push", payload))
+		if err != nil {
+			t.Fatalf("ParseWebhook() error = %v", err)
+		}
+		want := forge.Event{
+			Name: "push",
+			Kind: forge.KindPush,
+			Push: forge.PushEvent{
+				FullName:      "acme/backend-1",
+				Ref:           "refs/heads/main",
+				DefaultBranch: "main",
+				After:         "0000000000000000000000000000000000000002",
+				Deleted:       true,
+			},
+		}
+		if !reflect.DeepEqual(event, want) {
+			t.Fatalf("event = %+v, want %+v", event, want)
 		}
 	})
 
