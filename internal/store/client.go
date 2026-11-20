@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -28,8 +27,8 @@ type GitHubStore struct {
 	identity CommitIdentity
 	metrics  *metrics.Metrics
 	clone    *gitClone
-	// applyMu serialises Apply.
-	applyMu sync.Mutex
+	// applySlot serialises Apply: it holds one token while an Apply runs.
+	applySlot chan struct{}
 	// sleep waits between Apply's attempts.
 	sleep func(ctx context.Context, d time.Duration) error
 }
@@ -56,7 +55,9 @@ func Open(
 	if identity.Name == "" || identity.Email == "" {
 		return nil, errors.New("gitops commit identity: name and email are required")
 	}
-	c := &GitHubStore{owner: owner, repo: repo, identity: identity, sleep: sleepCtx}
+	c := &GitHubStore{
+		owner: owner, repo: repo, identity: identity, applySlot: make(chan struct{}, 1), sleep: sleepCtx,
+	}
 	for _, opt := range opts {
 		opt(c)
 	}

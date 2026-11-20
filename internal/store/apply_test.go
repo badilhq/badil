@@ -257,7 +257,8 @@ func TestBackoff(t *testing.T) {
 }
 
 // TestApply_NoOp checks a Change that stages nothing, or only what is
-// already there, commits nothing.
+// already there, commits nothing and returns the remote head with its
+// subject.
 func TestApply_NoOp(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -282,7 +283,8 @@ func TestApply_NoOp(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Apply: %v", err)
 			}
-			if !out.NoOp || out.Commit != head || out.Subject != "" || f.pushCount() != 0 || f.remote.Head() != head {
+			if !out.NoOp || out.Commit != head || out.Subject != "normalise" ||
+				f.pushCount() != 0 || f.remote.Head() != head {
 				t.Errorf("result = %+v, pushes = %d; want a no-op on %s", out, f.pushCount(), head)
 			}
 		})
@@ -380,5 +382,48 @@ func TestApply_Serialised(t *testing.T) {
 	assertConflicts(t, m, map[string]float64{})
 	if got := opCount(t, m, store.OpSync, "ok"); got != uint64(len(slugs)) {
 		t.Errorf("sync operations = %d, want %d", got, len(slugs))
+	}
+}
+
+// TestApply_WaitBoundedByContext checks that an Apply waiting for the one
+// before it gives up when its ctx is done, runs nothing and is observed as a
+// failed operation, and that the store accepts the next Apply once the first
+// one ends.
+func TestApply_WaitBoundedByContext(t *testing.T) {
+	f := newGitopsFake(t, applyFiles)
+	m := metrics.New()
+	c := f.open(t, store.WithMetrics(m))
+	started, release := make(chan struct{}), make(chan struct{})
+	first := make(chan error, 1)
+	go func() {
+		_, err := apply(c, store.OpSweep, func(tree *store.Tree) (store.Summary, error) {
+			close(started)
+			<-release
+			return rename("a", "renamed-a", "rename a")(tree)
+		})
+		first <- err
+	}()
+	<-started
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	ran := false
+	_, err := c.Apply(ctx, store.Op{Kind: store.OpDeploy, Change: func(*store.Tree) (store.Summary, error) {
+		ran = true
+		return store.Summary{}, nil
+	}})
+	if !errors.Is(err, context.DeadlineExceeded) || ran {
+		t.Fatalf("waiting Apply = %v, ran %v; want context.DeadlineExceeded without running", err, ran)
+	}
+	if got := opCount(t, m, store.OpDeploy, "error"); got != 1 {
+		t.Errorf("failed deploy operations = %d, want 1", got)
+	}
+
+	close(release)
+	if err = <-first; err != nil {
+		t.Fatalf("first Apply: %v", err)
+	}
+	if _, err = apply(c, store.OpSync, rename("b", "renamed-b", "rename b")); err != nil {
+		t.Fatalf("Apply after the first: %v", err)
 	}
 }

@@ -58,8 +58,8 @@ type Op struct {
 
 // Result is the outcome of a successful Apply. NoOp is true when the last
 // attempt's Change changed nothing: nothing was committed, and Commit is the
-// remote head it ran on. Otherwise Commit is the pushed commit, Subject its
-// subject line. URL is Commit's GitHub URL.
+// remote head it ran on. Otherwise Commit is the pushed commit. Subject is
+// Commit's subject line, URL its GitHub URL.
 type Result struct {
 	NoOp    bool
 	Commit  string
@@ -76,13 +76,35 @@ type Result struct {
 // a new fetch, after a backoff, up to maxAttempts attempts. Any other push
 // failure is returned, as ErrUnauthorized when the remote refused the
 // credentials. Its duration, retries included, is observed as op.Kind.
+//
+// An Apply waiting for the one before it gives up when ctx is done, with
+// ctx's error and nothing run, observed as a failed op.Kind.
 func (c *GitHubStore) Apply(ctx context.Context, op Op) (Result, error) {
-	c.applyMu.Lock()
-	defer c.applyMu.Unlock()
+	if err := c.acquire(ctx); err != nil {
+		c.observe(op.Kind, time.Now(), err)
+		return Result{}, err
+	}
+	defer func() { <-c.applySlot }()
 	start := time.Now()
 	res, err := c.apply(ctx, op)
 	c.observe(op.Kind, start, err)
 	return res, err
+}
+
+// acquire takes the store's Apply slot, waiting for the Apply that holds
+// it, or returns ctx's error when ctx is done first.
+func (c *GitHubStore) acquire(ctx context.Context) error {
+	select {
+	case c.applySlot <- struct{}{}:
+		return nil
+	default:
+	}
+	select {
+	case c.applySlot <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("wait for gitops write: %w", ctx.Err())
+	}
 }
 
 // apply is Apply, unserialised and untimed.
@@ -138,16 +160,15 @@ func (c *GitHubStore) attempt(ctx context.Context, op Op) (Result, plumbing.Hash
 	if err != nil {
 		return Result{}, parent, err
 	}
-	noop := Result{NoOp: true, Commit: parent.String(), URL: c.commitURL(parent)}
 	if !tree.staged() {
-		return noop, parent, nil
+		return c.noop(parent)
 	}
 	commit, err := c.clone.commit(parent, tree, c.message(summary, tree), c.identity)
 	if err != nil {
 		return Result{}, parent, err
 	}
 	if commit.IsZero() {
-		return noop, parent, nil
+		return c.noop(parent)
 	}
 	if err = c.clone.push(ctx, commit); err != nil {
 		return Result{}, parent, &pushError{err: err}
@@ -156,6 +177,15 @@ func (c *GitHubStore) attempt(ctx context.Context, op Op) (Result, plumbing.Hash
 		return Result{}, parent, err
 	}
 	return Result{Commit: commit.String(), Subject: summary.Subject, URL: c.commitURL(commit)}, parent, nil
+}
+
+// noop returns the result of an attempt that changed nothing on parent.
+func (c *GitHubStore) noop(parent plumbing.Hash) (Result, plumbing.Hash, error) {
+	subject, err := c.clone.subject(parent)
+	if err != nil {
+		return Result{}, parent, err
+	}
+	return Result{NoOp: true, Commit: parent.String(), Subject: subject, URL: c.commitURL(parent)}, parent, nil
 }
 
 // change runs op.Change on the tree of the remote-tracking ref, holding the
@@ -216,6 +246,19 @@ func (c *gitClone) lockedRemoteHead() (plumbing.Hash, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.remoteHead()
+}
+
+// subject returns the subject line of the commit h, read under the read
+// lock.
+func (c *gitClone) subject(h plumbing.Hash) (string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	commit, err := c.repo.CommitObject(h)
+	if err != nil {
+		return "", fmt.Errorf("read commit %s: %w", h, err)
+	}
+	subject, _, _ := strings.Cut(commit.Message, "\n")
+	return subject, nil
 }
 
 // commit stores, holding the write lock, a commit of tree's files on parent
