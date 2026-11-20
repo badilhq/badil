@@ -67,7 +67,10 @@ type gitClone struct {
 	branch  string
 	creds   CredentialProvider
 	observe func(op string, start time.Time, err error)
-	now     func() time.Time
+	// headMoved is called after a fetch moved the remote-tracking ref, nil
+	// for none.
+	headMoved func()
+	now       func() time.Time
 
 	// mu is held for reading by reads of the tree and for writing by a fetch.
 	mu sync.RWMutex
@@ -82,11 +85,15 @@ type gitClone struct {
 	inflight   *checkCall
 }
 
-// openClone clones cfg.URL as cfg says, timing the clone with observe.
+// openClone clones cfg.URL as cfg says, timing the clone with observe. Each
+// later fetch that moves the remote-tracking ref calls headMoved, when not
+// nil.
 func openClone(
-	ctx context.Context, cfg CloneConfig, observe func(string, time.Time, error),
+	ctx context.Context, cfg CloneConfig, observe func(string, time.Time, error), headMoved func(),
 ) (_ *gitClone, err error) {
-	c := &gitClone{url: cfg.URL, dir: cfg.Dir, creds: cfg.Credentials, observe: observe, now: time.Now}
+	c := &gitClone{
+		url: cfg.URL, dir: cfg.Dir, creds: cfg.Credentials, observe: observe, headMoved: headMoved, now: time.Now,
+	}
 	if c.dir == "" {
 		if c.dir, err = os.MkdirTemp("", "badil-gitops-"); err != nil {
 			return nil, fmt.Errorf("gitops clone dir: %w", err)
@@ -294,7 +301,8 @@ func (c *gitClone) lsRemote(ctx context.Context) (_ plumbing.Hash, err error) {
 }
 
 // fetch updates the remote-tracking ref of the branch, holding the write lock,
-// timed as the fetch operation.
+// timed as the fetch operation. When the ref moved, it calls headMoved once
+// the lock is released.
 func (c *gitClone) fetch(ctx context.Context) (err error) {
 	start := time.Now()
 	defer func() { c.observe("fetch", start, err) }()
@@ -302,9 +310,26 @@ func (c *gitClone) fetch(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
+	moved, err := c.lockedFetch(ctx, auth)
+	if err != nil {
+		return err
+	}
+	if moved && c.headMoved != nil {
+		c.headMoved()
+	}
+	return nil
+}
+
+// lockedFetch fetches the branch into the remote-tracking ref, holding the
+// write lock, and reports whether the ref moved.
+func (c *gitClone) lockedFetch(ctx context.Context, auth transport.AuthMethod) (bool, error) {
 	refspec := config.RefSpec(fmt.Sprintf("+%s:%s", plumbing.NewBranchReferenceName(c.branch), c.trackingRef()))
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	before, err := c.remoteHead()
+	if err != nil {
+		return false, err
+	}
 	err = c.repo.FetchContext(ctx, &git.FetchOptions{
 		RemoteName: remoteName,
 		RefSpecs:   []config.RefSpec{refspec},
@@ -312,15 +337,19 @@ func (c *gitClone) fetch(ctx context.Context) (err error) {
 		Tags:       git.NoTags,
 	})
 	if errors.Is(err, git.NoErrAlreadyUpToDate) {
-		return nil
+		return false, nil
 	}
 	if err != nil {
-		return fmt.Errorf("fetch gitops repo: %w", classifyGitError(err))
+		return false, fmt.Errorf("fetch gitops repo: %w", classifyGitError(err))
 	}
 	if repackErr := c.repack(); repackErr != nil {
 		slog.WarnContext(ctx, "repack gitops clone", slog.String("err", repackErr.Error()))
 	}
-	return nil
+	after, err := c.remoteHead()
+	if err != nil {
+		return false, err
+	}
+	return after != before, nil
 }
 
 // repack consolidates the clone's packs into one when there are more than
@@ -426,4 +455,34 @@ func dirNames(root *object.Tree, dir string) ([]string, error) {
 	}
 	slices.Sort(names)
 	return names, nil
+}
+
+// listPreviewFiles returns the sorted slugs of the directories under
+// previews/ that hold a values.yaml in the fetched commit.
+func (c *gitClone) listPreviewFiles(ctx context.Context) ([]string, error) {
+	if err := c.ensureFresh(ctx); err != nil {
+		return nil, err
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	tree, err := c.tree()
+	if err != nil {
+		return nil, err
+	}
+	dirs, err := dirNames(tree, previewsDir)
+	if err != nil {
+		return nil, err
+	}
+	slugs := make([]string, 0, len(dirs))
+	for _, slug := range dirs {
+		_, findErr := tree.FindEntry(previewPath(slug))
+		if errors.Is(findErr, object.ErrEntryNotFound) || errors.Is(findErr, object.ErrDirectoryNotFound) {
+			continue
+		}
+		if findErr != nil {
+			return nil, fmt.Errorf("read %s: %w", previewPath(slug), findErr)
+		}
+		slugs = append(slugs, slug)
+	}
+	return slugs, nil
 }

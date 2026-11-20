@@ -205,7 +205,7 @@ The PR comment lists each dependency after the services: ``- **<name>** · 📦 
 
 The triggers of [`github-deployments-values.yaml`](../examples/argocd/github-deployments-values.yaml) skip dependency Applications, whose revision annotation is empty (see [Preview deployments on GitHub](OPERATIONS.md#preview-deployments-on-github)).
 
-`on-preview-healthy` of `notifications-values.yaml` still fires for them. badil ignores the event, as for a branch-tracking service: it has no `updated-at`.
+The `on-status-*` triggers of `notifications-values.yaml` fire for dependency Applications too, and badil records their status like a service's. No spin-up time is observed for them, since a dependency is never pinned.
 
 ### Name collision
 

@@ -1,0 +1,35 @@
+# Expected results of the triggers in ../../notifications-values.yaml and
+# ../../github-deployments-values.yaml.
+# A sync of a new pin is running: the previous pin is still synced.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: feature-x-api
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/instance: feature-x
+  annotations:
+    preview.badil.dev/vcs.ref.revision: "2222222222222222222222222222222222222222"
+    test.badil.dev/on-preview-deployed: "false"
+    test.badil.dev/on-preview-degraded: "false"
+    test.badil.dev/on-preview-sync-error: "false"
+    test.badil.dev/on-preview-unpinned: "false"
+    test.badil.dev/on-preview-healthy: "false"
+    test.badil.dev/on-status-progressing: "true"
+    test.badil.dev/on-status-ready: "false"
+    test.badil.dev/on-status-degraded: "false"
+    test.badil.dev/on-status-sync-failed: "false"
+    test.badil.dev/status: "progressing"
+    test.badil.dev/revision: "2222222222222222222222222222222222222222"
+spec:
+  project: feature-x
+  source:
+    repoURL: https://github.com/acme/api.git
+    targetRevision: "2222222222222222222222222222222222222222"
+    path: k8s/
+status:
+  reconciledAt: "2026-11-17T04:22:24Z"
+  health: {status: Healthy, lastTransitionTime: "2026-11-17T04:01:10Z"}
+  sync: {status: OutOfSync, revision: "1111111111111111111111111111111111111111", comparedTo: {source: {targetRevision: "2222222222222222222222222222222222222222"}}}
+  operationState: {phase: Running, startedAt: "2026-11-17T04:22:23Z", syncResult: {revision: "2222222222222222222222222222222222222222"}}

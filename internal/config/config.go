@@ -22,9 +22,9 @@ type Config struct {
 	// MetricsAddr is the listen address of the metrics server, "" when it is
 	// disabled.
 	MetricsAddr string
-	// ArgoCDWebhookToken authenticates POST /webhooks/argocd, "" when it is
+	// StatusToken authenticates POST /webhooks/status, "" when it is
 	// disabled.
-	ArgoCDWebhookToken string
+	StatusToken string
 	// GitOpsCloneDir is the directory of the gitops repo clone, "" for a
 	// temporary directory of the process.
 	GitOpsCloneDir string
@@ -68,16 +68,16 @@ func Load() (*Config, error) {
 	}
 
 	return &Config{
-		AppID:              appID,
-		PrivateKey:         privateKey,
-		WebhookSecret:      webhookSecret,
-		InstallationID:     installationID,
-		GitOpsRepo:         gitOpsRepo,
-		ListenAddr:         listenAddr,
-		DeployToken:        os.Getenv("BADIL_DEPLOY_TOKEN"),
-		MetricsAddr:        metricsAddr,
-		ArgoCDWebhookToken: os.Getenv("ARGOCD_WEBHOOK_TOKEN"),
-		GitOpsCloneDir:     os.Getenv("GITOPS_CLONE_DIR"),
+		AppID:          appID,
+		PrivateKey:     privateKey,
+		WebhookSecret:  webhookSecret,
+		InstallationID: installationID,
+		GitOpsRepo:     gitOpsRepo,
+		ListenAddr:     listenAddr,
+		DeployToken:    os.Getenv("BADIL_DEPLOY_TOKEN"),
+		MetricsAddr:    metricsAddr,
+		StatusToken:    os.Getenv("BADIL_STATUS_TOKEN"),
+		GitOpsCloneDir: os.Getenv("GITOPS_CLONE_DIR"),
 	}, nil
 }
 

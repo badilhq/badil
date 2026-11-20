@@ -1,12 +1,12 @@
 # Preview contract
 
-badil and the renderer of a preview never talk to each other. A **renderer** is whatever reads a preview file from the gitops repo and creates the preview's workloads from it.
+A **renderer** is whatever reads a preview file from the gitops repo and creates the preview's workloads from it. badil never calls the renderer: it writes the file, and the renderer may report each service's status back through the [status callback](#status-callback).
 
 badil ships one, the [`preview-apps`](../charts/preview-apps) Helm chart: the example [ApplicationSet](../examples/argocd/applicationset-previews.yaml) renders it once per `previews/<slug>/` directory into an AppProject, a Namespace and one Argo CD Application per service and per dependency.
 
-Any tool that follows this page can replace it, such as an [ApplicationSet without Helm](#applicationset-without-helm), Kustomize or your own app-of-apps (see [Bring your own renderer](#bring-your-own-renderer)). badil only writes the file: it never calls, configures or waits on the renderer.
+Any tool that follows this page can replace it, such as an [ApplicationSet without Helm](#applicationset-without-helm), Kustomize or your own app-of-apps (see [Bring your own renderer](#bring-your-own-renderer)). badil only writes the file: it never calls or configures the renderer.
 
-This page is that file's contract, `badil.dev/v1beta1`, and what a renderer must do with it.
+This page is that file's contract, `badil.dev/v1beta1`, what a renderer must do with it, and the status callback it may send.
 
 ## Versioning
 
@@ -155,9 +155,35 @@ A renderer of `badil.dev/v1beta1`:
 8. Deletes everything of the preview when its directory disappears, its data included: `preview-apps` deletes the preview namespace, which is how per-preview data is dropped.
 9. Rejects a file whose `apiVersion` it does not support, instead of rendering it.
 
+## Status callback
+
+A renderer reports the status of each service and dependency of a preview to `POST /webhooks/status` on badil, with `Authorization: Bearer $BADIL_STATUS_TOKEN` (see [API](API.md#post-webhooksstatus)). The callback is optional: without it badil knows nothing about whether a preview is up. Argo CD notifications is the reference sender, configured in [`examples/argocd/notifications-values.yaml`](../examples/argocd/notifications-values.yaml).
+
+```json
+{
+  "apiVersion": "badil.dev/v1beta1",
+  "preview": "feature-x",
+  "service": "backend-1",
+  "revision": "2222222222222222222222222222222222222222",
+  "status": "ready",
+  "at": "2026-11-19T21:11:37Z"
+}
+```
+
+| Field | Rule |
+|---|---|
+| `apiVersion` | `badil.dev/v1beta1` |
+| `preview` | non-empty: the preview slug |
+| `service` | non-empty: a service or dependency `name` of the preview file |
+| `revision` | non-empty: the revision the status is about, stored as given and never parsed. For a source with several revisions (a dependency with `valueFiles`), the revisions joined with `,` |
+| `status` | `ready` (synced and healthy), `progressing` (a deploy is running), `degraded` (deployed and unhealthy) or `sync-failed` (the deploy or the render failed) |
+| `at` | RFC 3339: when the renderer observed the status |
+
+Other fields are ignored. badil answers 204 to every valid event, 400 to an invalid one, and 503 when it cannot read the preview: a renderer retries a 5xx, and in any case sends the status again on its next change. An event for a preview or a service the gitops repo does not have, or older than the stored status of that service, is ignored. For a pinned service, `revision` starts with `commitSha` (the full SHA, or a prefix when the pin is shorter).
+
 ## What badil never does
 
-- Touch the cluster: it writes to the gitops repo and to PR comments, and the renderer does every deploy and deletion.
+- Touch preview namespaces: it writes to the gitops repo and to PR comments, and the renderer does every deploy and deletion. Its only cluster access is the status ConfigMaps it keeps in its own namespace (`badil-status-<slug>`); it never reads or writes preview namespaces.
 - Build images: each service's CI pushes images tagged as its `imageTag` format renders the commit SHA.
 - Read, provision or drop data stores: data in the preview namespace goes with it, data outside it belongs to whatever provisions it. See [Preview data](ARCHITECTURE.md#preview-data).
 

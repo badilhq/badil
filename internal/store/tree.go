@@ -50,6 +50,23 @@ func (t *Tree) body() []string {
 	return lines
 }
 
+// deleted returns the sorted slugs of the previews whose values.yaml the
+// operation deleted from the tree it read.
+func (t *Tree) deleted() []string {
+	var slugs []string
+	for path, content := range t.files {
+		slug, ok := previewSlug(path)
+		if !ok || content != nil || path != previewPath(slug) {
+			continue
+		}
+		if _, err := t.root.FindEntry(path); err == nil {
+			slugs = append(slugs, slug)
+		}
+	}
+	slices.Sort(slugs)
+	return slugs
+}
+
 // record adds change to the commit body lines of the preview slug.
 func (t *Tree) record(slug, change string) {
 	t.changes[slug] = append(t.changes[slug], change)

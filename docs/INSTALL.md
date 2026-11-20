@@ -122,7 +122,7 @@ helm install badil oci://ghcr.io/badilhq/charts/badil -n badil \
 ```
 
 - Without `--version`, Helm installs the latest chart. Add `--version X.Y.Z` to pin a release (do so in production), and take the step 3 example files from the same `vX.Y.Z` tag. The image tag defaults to the chart `appVersion`.
-- When the Secret has `deploy-token`, the Ingress also exposes `POST /v1/deploy`, the manual trigger, and `POST /v1/sync`, which syncs every preview (or one) with `badil.yaml` at once, both protected by that bearer token (see [README](../README.md)). `deploy-token` is optional: leave out the `--from-literal=deploy-token=...` line to turn both endpoints off (404). The Ingress also exposes `POST /webhooks/argocd`, protected by the optional `argocd-webhook-token` bearer token.
+- When the Secret has `deploy-token`, the Ingress also exposes `POST /v1/deploy`, the manual trigger, and `POST /v1/sync`, which syncs every preview (or one) with `badil.yaml` at once, both protected by that bearer token (see [README](../README.md)). `deploy-token` is optional: leave out the `--from-literal=deploy-token=...` line to turn both endpoints off (404). The Ingress also exposes `POST /webhooks/status`, the renderer's status callback, protected by the optional `status-token` bearer token (see [Preview status](#preview-status-optional)).
 - `cleanup.ttl` (e.g. `168h`) is optional: it also deletes previews with no deploy for that long.
 - The cleanup sweep runs in the server every hour by default (`cleanup.interval`, `1h`): it deletes stale previews and rewrites every kept preview to match `badil.yaml`, and exports its metrics (with the Prometheus Operator, scrape them with `metrics.serviceMonitor.enabled=true` and `metrics.serviceMonitor.labels` matching its selector, e.g. `release: <kube-prometheus-stack release>`). `cleanup.enabled=true` switches it to an hourly CronJob without metrics and turns the in-server sweep off.
 - Keep `replicaCount: 1`.
@@ -135,32 +135,32 @@ Check:
 curl https://badil.example.com/healthz   # {"status":"ok"}
 ```
 
-### Spin-up time (optional)
+### Preview status (optional)
 
-To measure how long each preview service takes to come up (`badil_preview_spinup_seconds`), Argo CD's notifications controller calls badil when a service is Healthy. Generate a token (e.g. `openssl rand -hex 32`) as `ARGOCD_WEBHOOK_TOKEN`, add it to the badil Secret as `argocd-webhook-token` (a merge patch keeps the other keys) and restart badil, then apply [`examples/argocd/notifications-values.yaml`](../examples/argocd/notifications-values.yaml) to your Argo CD release:
+To let badil know how each preview service is doing, and measure how long it takes to come up (`badil_preview_spinup_seconds`), Argo CD's notifications controller sends badil's [status callback](CONTRACT.md#status-callback) when a service starts a sync, is Healthy, turns Degraded or fails to sync. Generate a token (e.g. `openssl rand -hex 32`) as `BADIL_STATUS_TOKEN`, add it to the badil Secret as `status-token` (a merge patch keeps the other keys) and restart badil, then apply [`examples/argocd/notifications-values.yaml`](../examples/argocd/notifications-values.yaml) to your Argo CD release:
 
 ```bash
 kubectl patch secret badil -n badil --type merge \
-  -p "{\"stringData\":{\"argocd-webhook-token\":\"$ARGOCD_WEBHOOK_TOKEN\"}}"
+  -p "{\"stringData\":{\"status-token\":\"$BADIL_STATUS_TOKEN\"}}"
 kubectl rollout restart deployment/badil -n badil
 helm upgrade argocd argo/argo-cd -n argocd --version <your installed argo-cd chart version> \
   --reuse-values -f notifications-values.yaml \
-  --set-string notifications.secret.items.badil-webhook-token="$ARGOCD_WEBHOOK_TOKEN"
+  --set-string notifications.secret.items.badil-status-token="$BADIL_STATUS_TOKEN"
 ```
 
-Applying it while pinned previews exist produces one-off spin-up samples for them, measured from their last deploy.
+badil keeps each preview's status in a ConfigMap `badil-status-<slug>` of its namespace: the chart gives its Deployment a Role for ConfigMaps in that namespace only. Applying the notifications while pinned previews exist produces one-off spin-up samples for them, measured from their last deploy.
 
-Check: `badil_argocd_events_total{result="recorded"}` increases after the next labeled PR. Without Prometheus, read it through the API server:
+Check: `badil_status_events_total{result="recorded"}` increases after the next labeled PR, and `kubectl get configmaps -n badil -l badil.dev/preview` lists the preview's status. Without Prometheus, read the metric through the API server:
 
 ```bash
-kubectl get --raw /api/v1/namespaces/badil/services/badil:metrics/proxy/metrics | grep badil_argocd_events_total
+kubectl get --raw /api/v1/namespaces/badil/services/badil:metrics/proxy/metrics | grep badil_status_events_total
 ```
 
-Without Helm, see the file's comments. To remove the setup later, revert the Argo CD release without the file, then delete the token, which Helm leaves in the Secret: `kubectl -n argocd patch secret argocd-notifications-secret --type=json -p '[{"op":"remove","path":"/data/badil-webhook-token"}]'`. Details: [Spin-up time](OPERATIONS.md#spin-up-time).
+Without Helm, see the file's comments. To remove the setup later, revert the Argo CD release without the file, then delete the token, which Helm leaves in the Secret: `kubectl -n argocd patch secret argocd-notifications-secret --type=json -p '[{"op":"remove","path":"/data/badil-status-token"}]'`. Details: [Preview status](OPERATIONS.md#preview-status) and [Spin-up time](OPERATIONS.md#spin-up-time).
 
 ### Preview deployments on GitHub (optional)
 
-To show each pinned preview service on its PR as a GitHub deployment (with a "View deployment" button, and a `deployment_status` event for anything that waits on it), Argo CD's notifications controller posts GitHub Deployments when the service's Application is synced and Healthy, Degraded, or fails to sync. Argo CD decides health, not badil. It requires [Spin-up time](#spin-up-time-optional).
+To show each pinned preview service on its PR as a GitHub deployment (with a "View deployment" button, and a `deployment_status` event for anything that waits on it), Argo CD's notifications controller posts GitHub Deployments when the service's Application is synced and Healthy, Degraded, or fails to sync. Argo CD decides health, not badil. It requires [Preview status](#preview-status-optional).
 
 Create a second GitHub App, for Argo CD:
 
@@ -194,7 +194,7 @@ Check: the PR shows the deployment, and `kubectl -n argocd logs deploy/argocd-no
 
 To remove the setup later:
 
-1. Re-run the [Spin-up time](#spin-up-time-optional) `helm upgrade` with `-f notifications-values.yaml`, setting the three secret items to `null` so they leave the release values:
+1. Re-run the [Preview status](#preview-status-optional) `helm upgrade` with `-f notifications-values.yaml`, setting the three secret items to `null` so they leave the release values:
 
    ```bash
    helm upgrade argocd argo/argo-cd -n argocd --version <your installed argo-cd chart version> \
@@ -225,7 +225,7 @@ With the Prometheus Operator (e.g. kube-prometheus-stack), add to the `helm inst
 - `dashboard.enabled=true` renders the Grafana dashboard as a ConfigMap labelled `grafana_dashboard: "1"`, which the Grafana sidecar of kube-prometheus-stack loads from any namespace. Change the label with `dashboard.labels` if your sidecar uses another one.
 - Without the sidecar, import [`charts/badil/dashboards/badil.json`](../charts/badil/dashboards/badil.json) as a Grafana dashboard and pick your Prometheus data source.
 
-Last successful sweep needs `cleanup.interval`; the spin-up panels need [Spin-up time](#spin-up-time-optional). Details: [Dashboard](OPERATIONS.md#dashboard).
+Last successful sweep needs `cleanup.interval`; the spin-up panels need [Preview status](#preview-status-optional). Details: [Dashboard](OPERATIONS.md#dashboard).
 
 ### Preview limits (optional)
 

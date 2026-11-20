@@ -31,6 +31,12 @@ type GitHubStore struct {
 	applySlot chan struct{}
 	// sleep waits between Apply's attempts.
 	sleep func(ctx context.Context, d time.Duration) error
+	// applied is called with the result of every Apply whose push landed,
+	// nil when unset.
+	applied func(Result)
+	// headMoved is called after every fetch that moved the remote-tracking
+	// ref, nil when unset.
+	headMoved func()
 }
 
 // Option configures a GitHubStore built by Open.
@@ -41,6 +47,25 @@ type Option func(*GitHubStore)
 func WithMetrics(m *metrics.Metrics) Option {
 	return func(c *GitHubStore) {
 		c.metrics = m
+	}
+}
+
+// WithApplied calls f with the result of every Apply whose push landed,
+// whichever caller ran it; not after a no-op or a failed Apply. f runs on
+// Apply's goroutine before Apply returns: it must not block.
+func WithApplied(f func(Result)) Option {
+	return func(c *GitHubStore) {
+		c.applied = f
+	}
+}
+
+// WithHeadMoved calls f after every fetch of the clone that moved the
+// remote-tracking ref of the default branch, Apply's fetches included. f runs
+// on the fetching goroutine, after the clone's locks are released: it must
+// not block.
+func WithHeadMoved(f func()) Option {
+	return func(c *GitHubStore) {
+		c.headMoved = f
 	}
 }
 
@@ -61,7 +86,7 @@ func Open(
 	for _, opt := range opts {
 		opt(c)
 	}
-	cl, err := openClone(ctx, clone, c.observe)
+	cl, err := openClone(ctx, clone, c.observe, c.headMoved)
 	if err != nil {
 		return nil, err
 	}
@@ -125,6 +150,12 @@ const previewsDir = "previews"
 // all of them. A missing previews/ directory yields an empty slice.
 func (c *GitHubStore) ListPreviews(ctx context.Context) ([]string, error) {
 	return c.clone.listDirs(ctx, previewsDir)
+}
+
+// ListPreviewFiles returns the sorted slugs of the previews whose
+// previews/<slug>/values.yaml is in the gitops clone.
+func (c *GitHubStore) ListPreviewFiles(ctx context.Context) ([]string, error) {
+	return c.clone.listPreviewFiles(ctx)
 }
 
 // previewPath returns the gitops repo path for a preview slug's values file.

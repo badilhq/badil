@@ -13,6 +13,7 @@ import (
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
+	"github.com/badilhq/badil/internal/status"
 )
 
 // syncTimeout caps each config sync run (a push to the gitops default branch,
@@ -29,11 +30,12 @@ func WithMetrics(m *metrics.Metrics) Option {
 	}
 }
 
-// WithArgoCDToken enables POST /webhooks/argocd, authenticated by the Bearer
-// token. An empty token leaves the route unregistered.
-func WithArgoCDToken(token string) Option {
+// WithStatus enables POST /webhooks/status, authenticated by the Bearer
+// token, recording into st. An empty token leaves the route unregistered.
+func WithStatus(token string, st *status.Store) Option {
 	return func(s *Server) {
-		s.argoCDToken = token
+		s.statusToken = token
+		s.status = st
 	}
 }
 
@@ -45,11 +47,11 @@ type Server struct {
 	fanOut      lifecycle.FanOutFunc
 	metrics     *metrics.Metrics
 	deployToken string
-	// argoCDToken authenticates POST /webhooks/argocd, "" when it is
+	// statusToken authenticates POST /webhooks/status, "" when it is
 	// disabled.
-	argoCDToken string
-	// now is the clock spin-up durations are measured against.
-	now    func() time.Time
+	statusToken string
+	// status holds the status the renderer reports.
+	status *status.Store
 	router chi.Router
 	// bg tracks background jobs (reconciles), queued or running,
 	// for WaitBackground.
@@ -77,7 +79,6 @@ func NewServer(
 		fanOut:      lifecycle.FanOutPRComments,
 		deployToken: deployToken,
 		jobTimeout:  ReconcileTimeout,
-		now:         time.Now,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -89,8 +90,8 @@ func NewServer(
 	r.Use(accessLog)
 	r.Get(healthzPath, s.handleHealthz)
 	r.Post("/webhooks/github", s.handleWebhook)
-	if s.argoCDToken != "" {
-		r.With(requireBearer(s.argoCDToken)).Post("/webhooks/argocd", s.handleArgoCDEvent)
+	if s.statusToken != "" && s.status != nil {
+		r.With(requireBearer(s.statusToken)).Post(statusPath, s.handleStatusEvent)
 	}
 	if deployToken != "" {
 		r.Route("/v1", func(r chi.Router) {

@@ -15,6 +15,12 @@ metadata:
     test.badil.dev/on-preview-sync-error: "false"
     test.badil.dev/on-preview-unpinned: "false"
     test.badil.dev/on-preview-healthy: "false"
+    test.badil.dev/on-status-progressing: "false"
+    test.badil.dev/on-status-ready: "false"
+    test.badil.dev/on-status-degraded: "true"
+    test.badil.dev/on-status-sync-failed: "true"
+    test.badil.dev/status: "sync-failed"
+    test.badil.dev/revision: "main"
 spec:
   project: feature-x
   source:

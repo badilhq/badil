@@ -173,12 +173,15 @@ notifications:
         oncePer: let p = findLast(app.status?.history ?? [], {.revision != nil and .source?.targetRevision != nil and .revision matches '^[0-9a-f]{40}$' and .source?.targetRevision matches '^[0-9a-f]{7,40}$' and .revision startsWith .source?.targetRevision}); p?.revision + '/' + string(p?.id)
         send: [badil-preview-unpinned]
 
-  # Full list: repeats the spin-up subscription from notifications-values.yaml.
+  # Full list: repeats the status subscription from notifications-values.yaml.
   subscriptions:
     - recipients:
         - badil
       triggers:
-        - on-preview-healthy
+        - on-status-progressing
+        - on-status-ready
+        - on-status-degraded
+        - on-status-sync-failed
       selector: app.kubernetes.io/part-of=preview-environments,app.kubernetes.io/managed-by=argocd
     - recipients:
         - github

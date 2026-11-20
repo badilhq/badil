@@ -1,21 +1,25 @@
-# Argo CD notifications for badil's preview spin-up time
-# (badil_preview_spinup_seconds): values for the argo-helm argo-cd chart.
+# Argo CD notifications reporting preview status to badil: values for the
+# argo-helm argo-cd chart.
 #
-# When a preview service's Application is synced and Healthy at a new
-# revision, the notifications controller POSTs to badil's
-# /webhooks/argocd, authenticated by badil's ARGOCD_WEBHOOK_TOKEN.
+# Whenever a preview service's or dependency's Application starts a sync,
+# becomes synced and Healthy, turns Degraded or fails to sync at its current
+# revision, the notifications controller POSTs badil's status callback,
+# /webhooks/status, authenticated by badil's BADIL_STATUS_TOKEN. badil keeps
+# the latest status of every service and records the spin-up time
+# (badil_preview_spinup_seconds) from the first ready at a pinned revision.
 #
 # Apply to your Argo CD release, passing the token at install time (this file
 # holds no secret):
 #
 #   helm upgrade argocd argo/argo-cd -n argocd --version <your installed argo-cd chart version> \
 #     --reuse-values -f notifications-values.yaml \
-#     --set-string notifications.secret.items.badil-webhook-token="$ARGOCD_WEBHOOK_TOKEN"
+#     --set-string notifications.secret.items.badil-status-token="$BADIL_STATUS_TOKEN"
 #
 # Argo CD installed without Helm: put the same keys (service.webhook.badil,
-# template.badil-spinup, trigger.on-preview-healthy and subscriptions) under
-# `data` of the argocd-notifications-cm ConfigMap, and the badil-webhook-token
-# key in the argocd-notifications-secret Secret.
+# template.badil-status, trigger.on-status-progressing, trigger.on-status-ready,
+# trigger.on-status-degraded, trigger.on-status-sync-failed and subscriptions)
+# under `data` of the argocd-notifications-cm ConfigMap, and the
+# badil-status-token key in the argocd-notifications-secret Secret.
 notifications:
   notifiers:
     # Point the url at wherever badil's Service is.
@@ -23,40 +27,94 @@ notifications:
       url: http://badil.badil.svc:8080
       headers:
         - name: Authorization
-          value: Bearer $badil-webhook-token
+          value: Bearer $badil-status-token
 
   templates:
-    template.badil-spinup: |
+    # The body of badil's status callback (apiVersion badil.dev/v1beta1).
+    # revision is the revision the status is about: the source revisions of a
+    # multi-source Application (a dependency with value files), joined with
+    # ","; the target that failed to render when the sync status is Unknown;
+    # the compared revision when Degraded; otherwise the synced revision.
+    # status follows the triggers' conditions, in this order: a running sync
+    # is progressing, a failed sync at the current target is sync-failed, a
+    # Degraded and Synced Application at the current target is degraded, and
+    # anything else is ready. $current and $failed are the triggers'
+    # "current" and "failed-sync" conditions.
+    template.badil-status: |
       webhook:
         badil:
           method: POST
-          path: /webhooks/argocd
+          path: /webhooks/status
           body: |
+            {{- $multi := .app.spec.sources -}}
+            {{- $phase := dig "status" "operationState" "phase" "" .app -}}
+            {{- $syncStatus := dig "status" "sync" "status" "" .app -}}
+            {{- $health := dig "status" "health" "status" "" .app -}}
+            {{- $current := or $multi (eq (dig "status" "sync" "comparedTo" "source" "targetRevision" "" .app) (dig "spec" "source" "targetRevision" "" .app)) -}}
+            {{- $failed := or (and (has $phase (list "Error" "Failed")) (or $multi (eq (dig "status" "operationState" "syncResult" "revision" "" .app) (dig "status" "sync" "revision" "" .app)))) (eq $syncStatus "Unknown") -}}
+            {{- $status := "ready" -}}
+            {{- if eq $phase "Running" -}}
+              {{- $status = "progressing" -}}
+            {{- else if and $current $failed -}}
+              {{- $status = "sync-failed" -}}
+            {{- else if and $current (eq $health "Degraded") (eq $syncStatus "Synced") -}}
+              {{- $status = "degraded" -}}
+            {{- end -}}
             {
-              "app": "{{ .app.metadata.name }}",
-              "service": "{{ index .app.metadata.labels "app.kubernetes.io/name" }}",
+              "apiVersion": "badil.dev/v1beta1",
               "preview": "{{ index .app.metadata.labels "app.kubernetes.io/instance" }}",
-              "revision": "{{ .app.status.operationState.syncResult.revision }}",
-              "updatedAt": "{{ index .app.metadata.annotations "preview.badil.dev/updated-at" }}"
+              "service": "{{ index .app.metadata.labels "app.kubernetes.io/name" }}",
+              "revision": "{{ if .app.spec.sources }}{{ join "," (or .app.status.operationState.syncResult.revisions .app.status.sync.revisions) }}{{ else if eq .app.status.sync.status "Unknown" }}{{ .app.status.sync.comparedTo.source.targetRevision }}{{ else if eq .app.status.health.status "Degraded" }}{{ .app.status.sync.revision }}{{ else }}{{ or .app.status.operationState.syncResult.revision .app.status.sync.revision }}{{ end }}",
+              "status": "{{ $status }}",
+              "at": "{{ dateInZone "2006-01-02T15:04:05Z" now "UTC" }}"
             }
 
+  # Every trigger fires for pinned and branch-tracking services and for
+  # dependencies. "current" (the status was compared against the
+  # Application's current target; a multi-source Application always passes)
+  # and "failed-sync" (the failed operation was for the revision the
+  # Application targets now, or the render at the current target failed) are
+  # written inline in each condition: a failure at a previous pin is not
+  # reported at the new one.
   triggers:
-    # Fires once per Application revision, once health is computed after the
-    # sync: a status refresh later than the sync's end (reconciledAt >
-    # finishedAt), or a health change after the sync started
-    # (lastTransitionTime > startedAt, as when the new pods turn Healthy).
-    # Until then, health still describes the pods from before the sync. All
-    # timestamps have one-second precision, and equal seconds count as stale.
-    trigger.on-preview-healthy: |
+    # A sync started. Once per synced revision and health transition.
+    trigger.on-status-progressing: |
+      - when: app.status?.operationState?.phase in ['Running']
+        oncePer: (app.status?.operationState?.syncResult?.revision ?? app.status?.sync?.revision ?? '') + '/' + (app.status?.health?.lastTransitionTime ?? '')
+        send: [badil-status]
+    # Synced and Healthy, once health is computed after the sync: a status
+    # refresh later than the sync's end (reconciledAt > finishedAt), or a
+    # health change after the sync started (lastTransitionTime > startedAt,
+    # as when the new pods turn Healthy). Until then, health still describes
+    # the pods from before the sync. All timestamps have one-second
+    # precision, and equal seconds count as stale. Once per synced revision
+    # and health transition, so a recovery at the same revision is sent
+    # again.
+    trigger.on-status-ready: |
       - when: app.status?.operationState?.phase in ['Succeeded'] and app.status?.health?.status == 'Healthy' and app.status?.operationState?.finishedAt != nil and app.status?.operationState?.startedAt != nil and ((app.status?.reconciledAt != nil and date(app.status.reconciledAt) > date(app.status.operationState.finishedAt)) or (app.status?.health?.lastTransitionTime != nil and date(app.status.health.lastTransitionTime) > date(app.status.operationState.startedAt)))
-        oncePer: app.status?.operationState?.syncResult?.revision
-        send: [badil-spinup]
+        oncePer: (app.status?.operationState?.syncResult?.revision ?? app.status?.sync?.revision ?? '') + '/' + (app.status?.health?.lastTransitionTime ?? '')
+        send: [badil-status]
+    # Degraded and Synced at the current target. Once per target, compared
+    # revision and health transition, so a second failure at a new pin is
+    # sent even when the synced revision did not move.
+    trigger.on-status-degraded: |
+      - when: app.status?.health?.status == 'Degraded' and app.status?.sync?.status == 'Synced' and (app.spec?.sources != nil or app.status?.sync?.comparedTo?.source?.targetRevision == app.spec?.source?.targetRevision)
+        oncePer: (app.spec?.source?.targetRevision ?? '') + '/' + (app.status?.sync?.revision ?? '') + '/' + (app.status?.health?.lastTransitionTime ?? '')
+        send: [badil-status]
+    # The sync failed, or the render failed, at the current target.
+    trigger.on-status-sync-failed: |
+      - when: (app.spec?.sources != nil or app.status?.sync?.comparedTo?.source?.targetRevision == app.spec?.source?.targetRevision) and ((app.status?.operationState?.phase in ['Error', 'Failed'] and (app.spec?.sources != nil or app.status?.operationState?.syncResult?.revision == app.status?.sync?.revision)) or app.status?.sync?.status == 'Unknown')
+        oncePer: (app.spec?.source?.targetRevision ?? '') + '/' + (app.status?.sync?.revision ?? '') + '/' + (app.status?.health?.lastTransitionTime ?? '')
+        send: [badil-status]
 
-  # Service Applications of every preview; the selector excludes the
-  # per-preview parent Applications, which carry only part-of.
+  # Service and dependency Applications of every preview; the selector
+  # excludes the per-preview parent Applications, which carry only part-of.
   subscriptions:
     - recipients:
         - badil
       triggers:
-        - on-preview-healthy
+        - on-status-progressing
+        - on-status-ready
+        - on-status-degraded
+        - on-status-sync-failed
       selector: app.kubernetes.io/part-of=preview-environments,app.kubernetes.io/managed-by=argocd

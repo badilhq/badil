@@ -9,7 +9,7 @@
 | [`POST /v1/deploy`](#post-v1deploy) | `LISTEN_ADDR` | `BADIL_DEPLOY_TOKEN` | manual deploy |
 | [`POST /v1/sync`](#post-v1sync) | `LISTEN_ADDR` | `BADIL_DEPLOY_TOKEN` | sync previews with `badil.yaml` |
 | [`POST /webhooks/github`](#post-webhooksgithub) | `LISTEN_ADDR` | always | GitHub App deliveries |
-| [`POST /webhooks/argocd`](#post-webhooksargocd) | `LISTEN_ADDR` | `ARGOCD_WEBHOOK_TOKEN` | Argo CD spin-up events |
+| [`POST /webhooks/status`](#post-webhooksstatus) | `LISTEN_ADDR` | `BADIL_STATUS_TOKEN` | renderer status callback |
 
 Each endpoint below follows the same pattern: availability, auth, request, response and errors.
 
@@ -97,18 +97,20 @@ Each event is handled as follows:
 | `push` | any other push | log only |
 | any other event | | structured log only |
 
-## `POST /webhooks/argocd`
+## `POST /webhooks/status`
 
-Receives the spin-up events of Argo CD's notifications controller (see [Spin-up time](OPERATIONS.md#spin-up-time)).
+Receives the renderer's status callback: the status of one service or dependency of a preview. Its body is part of the renderer contract ([Status callback](CONTRACT.md#status-callback)); Argo CD notifications is the reference sender ([`examples/argocd/notifications-values.yaml`](../examples/argocd/notifications-values.yaml)).
 
-- **Availability:** only when `ARGOCD_WEBHOOK_TOKEN` is set; 404 otherwise. In the chart, it is the optional `argocd-webhook-token` key of `existingSecret`. The public Ingress exposes the route too.
-- **Auth:** `Authorization: Bearer $ARGOCD_WEBHOOK_TOKEN`, compared in constant time. A missing or wrong token gets 401.
-- **Request:** `{ "app", "service", "preview", "revision", "updatedAt" }`, at most 64 KiB.
-- **Response:** 204 for every valid, authorized event, recorded or not.
-- **Errors:** invalid JSON or a larger body gets 400.
+- **Availability:** only when `BADIL_STATUS_TOKEN` is set; 404 otherwise. In the chart, it is the optional `status-token` key of `existingSecret`. The public Ingress exposes the route too.
+- **Auth:** `Authorization: Bearer $BADIL_STATUS_TOKEN`, compared in constant time. A missing or wrong token gets 401.
+- **Request:** `{ "apiVersion": "badil.dev/v1beta1", "preview", "service", "revision", "status", "at" }`, at most 64 KiB. Unknown fields are ignored.
+- **Response:** 204 for every valid, authorized event, recorded or ignored.
+- **Errors:**
+  - invalid JSON, a larger body, or a body failing the contract's validation gets 400;
+  - 503, with nothing recorded, when badil cannot read the preview from the gitops repo (for example a failed `ls-remote` or fetch). The renderer retries or sends the status again on its next change.
 
-An event is recorded when `service` is set and `updatedAt` is RFC 3339 and 0 to 24h old. Any other valid event is ignored. Unpinned services carry no `updated-at`, so their events are ignored.
+An event is recorded when `previews/<preview>/values.yaml` exists, its services or dependencies include `service`, and `at` is not older than the status stored for that service. Otherwise it is ignored, with reason `unknown_preview`, `unknown_service` or `stale`. badil keeps the latest status per preview and service in memory and in a ConfigMap of its namespace (see [Preview status](OPERATIONS.md#preview-status)).
 
-Events are not checked against the catalog: the token is the gate.
+A recorded `ready` also records the service's spin-up time (see [Spin-up time](OPERATIONS.md#spin-up-time)).
 
-Each valid, authorized event logs `argocd event` with `app`, `service`, `preview`, `revision`, `result` and, when recorded, `spinup_seconds`.
+Each valid, authorized event logs `status event` with `preview`, `service`, `revision`, `status` and `result` (`recorded`, `ignored` or `error`), plus `reason` when ignored, `err` on an error, and `spinup_seconds` when a spin-up was observed.

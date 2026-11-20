@@ -317,12 +317,12 @@ jobs:
             exit 1
           fi
 
-      - name: Render badil optional Argo CD webhook token
+      - name: Render badil optional status token
         run: |
           got=$(helm template t charts/badil -f charts/badil/ci/test-values.yaml \
-            | yq -N 'select(.kind == "Deployment") | .spec.template.spec.containers[0].env[] | select(.name == "ARGOCD_WEBHOOK_TOKEN") | .valueFrom.secretKeyRef | .name + " " + .key + " " + (.optional | to_string)')
-          if [ "$got" != 'badil argocd-webhook-token true' ]; then
-            echo '::error::expected ARGOCD_WEBHOOK_TOKEN from optional key argocd-webhook-token of Secret badil on the Deployment'
+            | yq -N 'select(.kind == "Deployment") | .spec.template.spec.containers[0].env[] | select(.name == "BADIL_STATUS_TOKEN") | .valueFrom.secretKeyRef | .name + " " + .key + " " + (.optional | to_string)')
+          if [ "$got" != 'badil status-token true' ]; then
+            echo '::error::expected BADIL_STATUS_TOKEN from optional key status-token of Secret badil on the Deployment'
             printf 'got: %s\n' "$got"
             exit 1
           fi
@@ -424,9 +424,11 @@ jobs:
           fi
           echo "$out" | grep -q 'existingSecret is required'
 
-      # Evaluates the triggers of the GitHub deployments example against the
-      # Application fixtures in examples/argocd/testdata/notifications, each
-      # annotated with the result it expects from each trigger.
+      # Evaluates the triggers of the GitHub deployments and status examples
+      # against the Application fixtures in
+      # examples/argocd/testdata/notifications, each annotated with the result
+      # it expects from each trigger, and renders badil-status for the
+      # fixtures a status trigger fires on.
       - name: Argo CD GitHub deployments triggers
         run: |
           tmp=$(mktemp -d)
@@ -451,7 +453,7 @@ jobs:
           cp examples/argocd/testdata/notifications/*.yaml "$tmp/apps/"
           # The image runs as user argocd: let it read the runner's mktemp dir.
           chmod -R a+rX "$tmp"
-          triggers='on-preview-deployed on-preview-degraded on-preview-sync-error on-preview-unpinned on-preview-healthy'
+          triggers='on-preview-deployed on-preview-degraded on-preview-sync-error on-preview-unpinned on-status-progressing on-status-ready on-status-degraded on-status-sync-failed'
           want=$(for f in "$tmp"/apps/*.yaml; do
             for t in $triggers; do
               echo "$(basename "$f" .yaml) $t $(yq ".metadata.annotations[\"test.badil.dev/$t\"]" "$f")"
@@ -482,6 +484,48 @@ jobs:
               done')
           if [ "$got" != "$want" ]; then
             echo "::error::trigger results differ from the fixtures' test.badil.dev annotations"
+            printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
+            exit 1
+          fi
+          # A fixture on which a status trigger fires carries the status and
+          # revision badil-status must send; the others carry neither.
+          status_fixtures=''
+          for f in "$tmp"/apps/*.yaml; do
+            n=$(basename "$f" .yaml)
+            fires=$(yq '[.metadata.annotations | to_entries[] | select(.key | test("^test\.badil\.dev/on-status-")) | select(.value == "true")] | length' "$f")
+            annotated=$(yq '[.metadata.annotations | keys[] | select(. == "test.badil.dev/status" or . == "test.badil.dev/revision")] | length' "$f")
+            if [ "$fires" -gt 0 ] && [ "$annotated" != 2 ]; then
+              echo "::error::$n fires a status trigger but lacks test.badil.dev/status or test.badil.dev/revision"
+              exit 1
+            fi
+            if [ "$fires" -eq 0 ] && [ "$annotated" != 0 ]; then
+              echo "::error::$n fires no status trigger but has test.badil.dev/status or test.badil.dev/revision"
+              exit 1
+            fi
+            if [ "$fires" -gt 0 ]; then
+              status_fixtures="$status_fixtures $n"
+            fi
+          done
+          mkdir "$tmp/out"
+          chmod a+rwX "$tmp/out"
+          # shellcheck disable=SC2016
+          docker run --rm -e KUBECONFIG=/w/kubeconfig -e FIXTURES="$status_fixtures" -v "$tmp":/w -w /w \
+            quay.io/argoproj/argocd:v3.6.1 bash -c '
+              for n in $FIXTURES; do
+                argocd admin notifications template notify badil-status "./apps/$n.yaml" \
+                  --config-map ./cm.yaml --secret :empty > "out/$n.yaml" || exit 1
+              done'
+          want=''
+          got=''
+          for n in $status_fixtures; do
+            f="$tmp/apps/$n.yaml"
+            want="$want$n $(yq '.metadata.annotations["test.badil.dev/status"] + " " + .metadata.annotations["test.badil.dev/revision"]' "$f")
+          "
+            got="$got$n $(yq '.webhook.badil.body' "$tmp/out/$n.yaml" | jq -r '.status + " " + .revision')
+          "
+          done
+          if [ "$got" != "$want" ]; then
+            echo "::error::badil-status bodies differ from the fixtures' test.badil.dev/status and test.badil.dev/revision"
             printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
             exit 1
           fi

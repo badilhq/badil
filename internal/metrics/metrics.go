@@ -20,8 +20,6 @@ const (
 	resultDeleted  = "deleted"
 	resultOK       = "ok"
 	resultError    = "error"
-	resultRecorded = "recorded"
-	resultIgnored  = "ignored"
 
 	labelResult = "result"
 )
@@ -42,7 +40,7 @@ type Metrics struct {
 	previewsSynced    prometheus.Counter
 	previews          prometheus.Gauge
 	spinUp            *prometheus.HistogramVec
-	argoCDEvents      *prometheus.CounterVec
+	statusEvents      *prometheus.CounterVec
 	catchUpReconciles prometheus.Counter
 
 	// previewsMu guards previewsN, the value of previews, which never goes
@@ -119,11 +117,11 @@ func New() *Metrics {
 			Help:      "Time from badil's gitops write to the service's Argo CD Application being synced and Healthy.",
 			Buckets:   []float64{15, 30, 60, 120, 180, 300, 600, 900, 1800},
 		}, []string{"catalog_service"}),
-		argoCDEvents: prometheus.NewCounterVec(prometheus.CounterOpts{
+		statusEvents: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: namespace,
-			Name:      "argocd_events_total",
-			Help:      "Argo CD notification events, by whether they were recorded as a spin-up.",
-		}, []string{labelResult}),
+			Name:      "status_events_total",
+			Help:      "Renderer status events, by reported status and by whether they were recorded, ignored or failed.",
+		}, []string{"status", labelResult}),
 		catchUpReconciles: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: namespace,
 			Name:      "catchup_reconciles_total",
@@ -145,7 +143,7 @@ func New() *Metrics {
 		m.previewsSynced,
 		m.previews,
 		m.spinUp,
-		m.argoCDEvents,
+		m.statusEvents,
 		m.catchUpReconciles,
 	)
 	return m
@@ -284,22 +282,21 @@ func (m *Metrics) SweepRun(ok bool, at time.Time) {
 	m.sweepLastSuccess.Set(float64(at.Unix()))
 }
 
-// SpinUp observes the spin-up duration d of service and counts one recorded
-// Argo CD event.
+// SpinUp observes the spin-up duration d of service.
 func (m *Metrics) SpinUp(service string, d time.Duration) {
 	if m == nil {
 		return
 	}
 	m.spinUp.WithLabelValues(service).Observe(d.Seconds())
-	m.argoCDEvents.WithLabelValues(resultRecorded).Inc()
 }
 
-// ArgoCDEventIgnored counts one Argo CD event that recorded no spin-up.
-func (m *Metrics) ArgoCDEventIgnored() {
+// StatusEvent counts one renderer status event reporting status, with
+// result recorded, ignored or error.
+func (m *Metrics) StatusEvent(status, result string) {
 	if m == nil {
 		return
 	}
-	m.argoCDEvents.WithLabelValues(resultIgnored).Inc()
+	m.statusEvents.WithLabelValues(status, result).Inc()
 }
 
 // CatchUpReconcile counts one reconcile started by catch-up.
