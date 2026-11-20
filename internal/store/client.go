@@ -286,10 +286,15 @@ func (c *GitHubStore) WritePreviewWithRetry(
 	return res, err
 }
 
-// gitopsRepoURL returns the git URL of the gitops repo (GITOPS_REPO):
+// RepoURL returns the git URL of the GitHub repo owner/repo:
 // https://github.com/<owner>/<repo>.git.
+func RepoURL(owner, repo string) string {
+	return "https://github.com/" + owner + "/" + repo + ".git"
+}
+
+// gitopsRepoURL returns the git URL of the gitops repo (GITOPS_REPO).
 func (c *GitHubStore) gitopsRepoURL() string {
-	return "https://github.com/" + c.owner + "/" + c.repo + ".git"
+	return RepoURL(c.owner, c.repo)
 }
 
 // applyCatalog returns vals projected on catalog (preview.ApplyCatalog) with

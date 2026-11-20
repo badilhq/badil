@@ -226,6 +226,28 @@ func newGitopsFake(t *testing.T, files map[string]string) *gitopsFake {
 	return &gitopsFake{t: t, remote: newRemote(t, files)}
 }
 
+// newFileFake returns a gitopsFake around the file at path: the remote holds
+// versions[0] there (no file when versions is empty or versions[0] is ""),
+// plus extra, and each 409 of statuses commits the next of versions.
+func newFileFake(
+	t *testing.T, path string, versions []string, statuses []int, extra map[string]string,
+) *gitopsFake {
+	t.Helper()
+	files := maps.Clone(extra)
+	if files == nil {
+		files = map[string]string{}
+	}
+	if len(versions) > 0 && versions[0] != "" {
+		files[path] = versions[0]
+	}
+	f := newGitopsFake(t, files)
+	f.path, f.statuses = path, statuses
+	if len(versions) > 1 {
+		f.next = versions[1:]
+	}
+	return f
+}
+
 func (f *gitopsFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path, ok := strings.CutPrefix(r.URL.Path, "/repos/acme/gitops/contents/")
 	if !ok || (r.Method != http.MethodPut && r.Method != http.MethodDelete) {

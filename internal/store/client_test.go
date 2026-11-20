@@ -251,8 +251,7 @@ func TestWritePreviewWithRetry_ConflictThenSuccess(t *testing.T) {
       cicd.pipeline.run.url: https://github.com/x/y/actions/runs/0
   - name: backend-2
 `
-	f := newGitopsFake(t, map[string]string{slugPath: initialFile})
-	f.path, f.next, f.statuses = slugPath, []string{refreshedFile}, []int{http.StatusConflict}
+	f := newFileFake(t, slugPath, []string{initialFile, refreshedFile}, []int{http.StatusConflict}, nil)
 	c := f.open(t)
 	in := sampleInputs()
 	in.CommitSha = "newsha"
@@ -469,16 +468,7 @@ type writeServer struct {
 
 func (s *writeServer) start(t *testing.T, opts ...store.Option) *store.GitHubStore {
 	t.Helper()
-	files := map[string]string{}
-	if len(s.files) > 0 && s.files[0] != "" {
-		files[slugPath] = s.files[0]
-	}
-	s.fake = newGitopsFake(t, files)
-	s.fake.path = slugPath
-	if len(s.files) > 1 {
-		s.fake.next = s.files[1:]
-	}
-	s.fake.statuses = slices.Repeat([]int{http.StatusConflict}, s.conflicts)
+	s.fake = newFileFake(t, slugPath, s.files, slices.Repeat([]int{http.StatusConflict}, s.conflicts), nil)
 	return s.fake.open(t, opts...)
 }
 

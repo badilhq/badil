@@ -15,9 +15,9 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/go-git/go-git/v5/plumbing/storer"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
+	"github.com/go-git/go-git/v5/storage/filesystem"
 )
 
 // remoteCheckTTL is how long a successful ls-remote of the branch head is
@@ -101,14 +101,13 @@ func openClone(
 	}()
 
 	start := time.Now()
-	checkedAt := c.now()
 	err = c.clone(ctx, cfg.URL)
 	c.observe("clone", start, err)
 	if err != nil {
 		return nil, fmt.Errorf("clone gitops repo: %w", err)
 	}
-	// The clone is as fresh as an ls-remote made when it started.
-	c.checkedAt = checkedAt
+	// The clone counts as a check made when it started.
+	c.checkedAt = start
 	return c, nil
 }
 
@@ -207,7 +206,7 @@ func (c *gitClone) invalidate() {
 func (c *gitClone) ensureFresh(ctx context.Context) error {
 	for {
 		c.checkMu.Lock()
-		if c.checkedGen == c.gen && !c.checkedAt.IsZero() && c.now().Sub(c.checkedAt) < remoteCheckTTL {
+		if c.checkedGen == c.gen && c.now().Sub(c.checkedAt) < remoteCheckTTL {
 			c.checkMu.Unlock()
 			return nil
 		}
@@ -318,7 +317,7 @@ func (c *gitClone) fetch(ctx context.Context) (err error) {
 		return fmt.Errorf("fetch gitops repo: %w", classifyGitError(err))
 	}
 	if repackErr := c.repack(); repackErr != nil {
-		slog.WarnContext(ctx, "repack gitops clone", slog.Any("error", repackErr))
+		slog.WarnContext(ctx, "repack gitops clone", slog.String("err", repackErr.Error()))
 	}
 	return nil
 }
@@ -327,20 +326,19 @@ func (c *gitClone) fetch(ctx context.Context) (err error) {
 // maxPacks. The caller holds c.mu for writing. A failure leaves every object
 // readable: the new pack is complete before any old one is deleted.
 func (c *gitClone) repack() error {
-	pos, ok := c.repo.Storer.(storer.PackedObjectStorer)
+	// PlainCloneContext stores the clone in a *filesystem.Storage.
+	fs, ok := c.repo.Storer.(*filesystem.Storage)
 	if !ok {
-		return nil
+		return fmt.Errorf("gitops clone storage is %T, not *filesystem.Storage", c.repo.Storer)
 	}
-	packs, err := pos.ObjectPacks()
+	packs, err := fs.ObjectPacks()
 	if err != nil || len(packs) <= maxPacks {
 		return err
 	}
 	err = c.repo.RepackObjects(&git.RepackConfig{})
 	// RepackObjects deletes the old packs but leaves their indexes in the
 	// object storage's memory: drop them so lookups read the packs on disk.
-	if r, ok := c.repo.Storer.(interface{ Reindex() }); ok {
-		r.Reindex()
-	}
+	fs.Reindex()
 	return err
 }
 

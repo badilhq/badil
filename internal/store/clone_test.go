@@ -57,13 +57,15 @@ func clockedStore(
 	return st, remote, clock, m
 }
 
-// opCount returns how many gitops operations op ended with result.
-func opCount(t *testing.T, m *metrics.Metrics, op, result string) uint64 {
+// opCounts returns how many gitops operations m timed, keyed by
+// "<op>/<result>".
+func opCounts(t *testing.T, m *metrics.Metrics) map[string]uint64 {
 	t.Helper()
 	families, err := m.Gatherer().Gather()
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
+	counts := map[string]uint64{}
 	for _, mf := range families {
 		if mf.GetName() != "badil_gitops_operation_duration_seconds" {
 			continue
@@ -73,12 +75,16 @@ func opCount(t *testing.T, m *metrics.Metrics, op, result string) uint64 {
 			for _, l := range metric.GetLabel() {
 				labels[l.GetName()] = l.GetValue()
 			}
-			if labels["op"] == op && labels["result"] == result {
-				return metric.GetHistogram().GetSampleCount()
-			}
+			counts[labels["op"]+"/"+labels["result"]] = metric.GetHistogram().GetSampleCount()
 		}
 	}
-	return 0
+	return counts
+}
+
+// opCount returns how many gitops operations op ended with result.
+func opCount(t *testing.T, m *metrics.Metrics, op, result string) uint64 {
+	t.Helper()
+	return opCounts(t, m)[op+"/"+result]
 }
 
 // assertChecks fails t unless m counts lsRemote successful ls-remotes and

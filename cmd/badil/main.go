@@ -300,7 +300,7 @@ func newStoreAndForge(
 	itr := app.InstallationTransport(cfg.InstallationID)
 	client := gh.NewClient(&http.Client{Transport: itr})
 	st, err := store.Open(ctx, client, owner, repo, store.CloneConfig{
-		URL:         "https://github.com/" + owner + "/" + repo + ".git",
+		URL:         store.RepoURL(owner, repo),
 		Dir:         cfg.GitOpsCloneDir,
 		Credentials: gitCredentials(itr),
 	}, opts...)

@@ -31,18 +31,12 @@ type teardownGitHub struct {
 // open returns a store over g.
 func (g *teardownGitHub) open(t *testing.T) *store.GitHubStore {
 	t.Helper()
-	files := map[string]string{}
-	if len(g.gets) > 0 && g.gets[0] != "" {
-		files[teardownFile] = g.gets[0]
-	}
+	var extra map[string]string
 	if g.badil != "" {
-		files["badil.yaml"] = g.badil
+		extra = map[string]string{"badil.yaml": g.badil}
 	}
-	g.fake = newGitopsFake(t, files)
-	g.fake.path, g.fake.statuses, g.fake.onConflict = teardownFile, g.writes, g.onConflict
-	if len(g.gets) > 1 {
-		g.fake.next = g.gets[1:]
-	}
+	g.fake = newFileFake(t, teardownFile, g.gets, g.writes, extra)
+	g.fake.onConflict = g.onConflict
 	return g.fake.open(t)
 }
 

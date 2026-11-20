@@ -11,17 +11,22 @@ import (
 	"github.com/badilhq/badil/internal/store"
 )
 
+// TestListPreviews checks that the previews are listed in lexical order, which
+// differs from git's tree order for "feature" and "feature-x": git sorts a
+// directory as "feature/", after "feature-x/".
 func TestListPreviews(t *testing.T) {
 	c, _ := readStore(t, map[string]string{
 		"previews/feature-b/values.yaml": "services: []\n",
 		"previews/README.md":             "previews\n",
 		"previews/feature-a/values.yaml": "services: []\n",
+		"previews/feature-x/values.yaml": "services: []\n",
+		"previews/feature/values.yaml":   "services: []\n",
 	})
 	got, err := c.ListPreviews(context.Background())
 	if err != nil {
 		t.Fatalf("ListPreviews: %v", err)
 	}
-	if want := []string{"feature-a", "feature-b"}; !slices.Equal(got, want) {
+	if want := []string{"feature", "feature-a", "feature-b", "feature-x"}; !slices.Equal(got, want) {
 		t.Errorf("ListPreviews = %v, want %v", got, want)
 	}
 }

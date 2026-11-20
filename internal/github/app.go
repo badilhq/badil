@@ -1,7 +1,6 @@
 package github
 
 import (
-	"context"
 	"net/http"
 
 	"github.com/bradleyfalzon/ghinstallation/v2"
@@ -39,12 +38,6 @@ func NewAppFromTransport(tr *ghinstallation.AppsTransport, webhookSecret string)
 		webhookSecret: []byte(webhookSecret),
 		transport:     tr,
 	}, nil
-}
-
-// GetInstallationToken returns an installation access token for the given installation ID.
-func (a *App) GetInstallationToken(ctx context.Context, installationID int64) (string, error) {
-	itr := ghinstallation.NewFromAppsTransport(a.transport, installationID)
-	return itr.Token(ctx)
 }
 
 // InstallationTransport returns a transport authenticated as the given
