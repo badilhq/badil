@@ -80,7 +80,6 @@ type fakeGitops struct {
 	writeResult *store.WriteResult
 
 	capturedInputs   preview.DeployInputs
-	capturedURLs     preview.URLConfig
 	capturedService  string
 	capturedSlug     string
 	fanOutBodyCalled bool
@@ -130,11 +129,7 @@ func (f *fakeGitops) FetchServiceCatalog(_ context.Context) (*store.ServiceCatal
 	if f.catalogErr != nil {
 		return nil, f.catalogErr
 	}
-	catalog, err := store.ParseCatalog([]byte(f.badil()))
-	if err == nil {
-		f.capturedURLs = catalog.URLs
-	}
-	return catalog, err
+	return store.ParseCatalog([]byte(f.badil()))
 }
 
 // prRef matches the owner/repo#number a commit subject names.

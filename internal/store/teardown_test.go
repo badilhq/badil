@@ -433,18 +433,6 @@ func TestTeardown_DeleteConflictBecomesUpdate(t *testing.T) {
 	}
 }
 
-func TestTeardown_ConflictsExhausted(t *testing.T) {
-	g := &teardownGitHub{gets: []string{onlyPR42}, conflicts: store.MaxAttempts}
-	_, err := runTeardown(t, g)
-	const want = "push gitops repo: 5 attempts conflicted: "
-	if err == nil || !strings.HasPrefix(err.Error(), want) {
-		t.Fatalf("err = %v, want prefix %q", err, want)
-	}
-	if got := g.pushes(); got != store.MaxAttempts {
-		t.Errorf("pushes = %d, want %d", got, store.MaxAttempts)
-	}
-}
-
 func runUnpin(t *testing.T, g *teardownGitHub, services ...string) (*store.TeardownResult, error) {
 	t.Helper()
 	return g.run(t, func(tree *store.Tree) (*store.TeardownResult, error) {

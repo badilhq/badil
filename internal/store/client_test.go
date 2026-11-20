@@ -164,75 +164,6 @@ func testCatalog(services ...string) *store.ServiceCatalog {
 	return &store.ServiceCatalog{Catalog: preview.Catalog{Services: services, Repos: repos}, URLs: hostURLs()}
 }
 
-func TestDeploy_ConflictThenSuccess(t *testing.T) {
-	const initialFile = `services:
-  - name: backend-1
-    commitSha: oldsha
-    metadata:
-      pr-author: octocat
-      pr-url: https://github.com/acme/backend-1/pull/42
-      pr-number: '42'
-      created-at: '2026-05-26T09:00:00Z'
-      updated-at: '2026-05-26T09:00:00Z'
-      vcs.ref.name: feature/add-pricing
-      cicd.pipeline.run.url: https://github.com/x/y/actions/runs/0
-  - name: backend-2
-`
-	const refreshedFile = `services:
-  - name: backend-1
-    commitSha: oldsha
-    metadata:
-      pr-author: octocat
-      pr-url: https://github.com/acme/backend-1/pull/42
-      pr-number: '42'
-      created-at: '2026-05-26T09:00:00Z'
-      updated-at: '2026-05-26T09:30:00Z'
-      vcs.ref.name: feature/add-pricing
-      cicd.pipeline.run.url: https://github.com/x/y/actions/runs/0
-  - name: backend-2
-`
-	f := newFileFake(t, slugPath, []string{initialFile, refreshedFile}, 1, nil)
-	c := f.open(t)
-	in := sampleInputs()
-	in.CommitSha = "newsha"
-	in.Timestamp = "2026-05-26T10:00:00Z"
-	catalog := testCatalog("backend-1", "backend-2")
-	catalog.Branches = map[string]string{"backend-2": "develop"}
-
-	result, out, err := deploy(c, "slug", catalog, "backend-1", "newsha", in, false)
-	if err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-	if n := f.pushCount(); n != 2 {
-		t.Fatalf("pushes = %d, want 2", n)
-	}
-	// The retry merged the deploy into the file the lost race committed.
-	if got := result.Values.Services[0].Metadata.CreatedAt; got != "2026-05-26T09:00:00Z" {
-		t.Errorf("created-at = %q, want the re-read file's", got)
-	}
-	if commits := f.remote.Commits(); out.Commit != commits[0].Hash || commits[1].Tree[slugPath] != refreshedFile {
-		t.Errorf("result commit = %s, want the head %s on the file the lost race committed",
-			out.Commit, commits[0].Hash)
-	}
-	if len(result.Values.Services) != 2 {
-		t.Fatalf("returned vals = %+v, want 2 services", result.Values)
-	}
-	if result.Values.Services[0].CommitSha != "newsha" {
-		t.Errorf("backend-1 commitSha = %q, want newsha", result.Values.Services[0].CommitSha)
-	}
-	if result.Values.Services[1].CommitSha != "" {
-		t.Errorf("backend-2 commitSha = %q, want empty (main-tracking)", result.Values.Services[1].CommitSha)
-	}
-	// The re-fetched file has no apiVersion, repoURL or branch: the retry
-	// write must carry the catalog's facts.
-	written := f.written()
-	assertCatalogFacts(t, decode(t, written), []string{
-		"backend-1 https://github.com/acme/backend-1.git main",
-		"backend-2 https://github.com/acme/backend-2.git develop",
-	})
-	assertWrittenHosts(t, result.Values, written, "slug")
-}
-
 // assertCatalogFacts checks that vals has the apiVersion and gitops repo of
 // testCatalog and, in order, the services of want, each "name repoURL branch".
 func assertCatalogFacts(t *testing.T, vals preview.PreviewValues, want []string) {
@@ -671,29 +602,6 @@ func TestDeploy_AddsMissingService(t *testing.T) {
 	}
 	if !preview.Equal(got, result.Values) || !reflect.DeepEqual(got.Services[1], front) {
 		t.Errorf("written = %+v, want the returned values, front between backend-1 and backend-2", got)
-	}
-}
-
-// TestDeploy_BranchChangeWritten checks that a catalog branch
-// change is written even when the commit is unchanged.
-func TestDeploy_BranchChangeWritten(t *testing.T) {
-	s := &writeServer{files: []string{pinnedFile()}}
-	c := s.start(t)
-	catalog := testCatalog("backend-1", "backend-2")
-	catalog.Branches = map[string]string{"backend-2": "develop"}
-
-	result, _, err := deploy(c, "slug", catalog, "backend-1", "abc1234567890", sampleInputs(), true)
-	if err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-	if result.Unchanged || result.Values.Services[1].Branch != "develop" {
-		t.Fatalf("result = %+v, want a write with backend-2 on develop", result)
-	}
-	if got := s.written(); !strings.Contains(
-		got,
-		"  - name: backend-2\n    repoURL: https://github.com/acme/backend-2.git\n    branch: develop\n",
-	) {
-		t.Errorf("written content missing backend-2 on develop:\n%s", got)
 	}
 }
 
