@@ -322,14 +322,19 @@ func TestRunCleanup_ExitsWithTheSweepsError(t *testing.T) {
 		Labels: []string{"preview"}, FullName: "acme/front", HeadFullName: "acme/front", Number: 7,
 	}
 	cases := []struct {
-		name    string
-		listErr error
-		openErr error
-		openPRs []forge.PullRequest
-		wantErr string
-		wantLog string
+		name      string
+		listErr   error
+		openErr   error
+		openPRs   []forge.PullRequest
+		sweepDone bool
+		wantErr   string
+		wantLog   string
 	}{
 		{name: "failed sweep", listErr: errors.New("boom"), wantErr: "boom"},
+		{
+			name: "sweep out of time", sweepDone: true, listErr: context.DeadlineExceeded,
+			wantErr: context.DeadlineExceeded.Error(),
+		},
 		{
 			name: "failed sweep and catch-up listing", listErr: errors.New("boom"), openErr: errors.New("down"),
 			wantErr: "boom", wantLog: "catch-up list failed",
@@ -348,6 +353,9 @@ func TestRunCleanup_ExitsWithTheSweepsError(t *testing.T) {
 			c := lifecycle.NewCatchUp(lifecycle.CatchUpAPI{Store: f, Forge: f, Recorder: f}, reconcile)
 			sweepCtx, cancel := context.WithCancel(context.Background())
 			defer cancel()
+			if tc.sweepDone {
+				cancel()
+			}
 
 			err := runCleanup(context.Background(), sweepCtx, f.api(), c, time.Now(), 0)
 			if tc.wantErr == "" && err != nil {

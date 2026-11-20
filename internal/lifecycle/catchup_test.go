@@ -230,6 +230,32 @@ func TestCatchUp_QueuedIsNotQueuedTwice(t *testing.T) {
 	}
 }
 
+func TestCatchUp_StopsOnceCtxIsDone(t *testing.T) {
+	capture := captureLogs(t)
+	f := &reconcileFake{openPRs: map[string][]forge.PullRequest{
+		"acme/monorepo": {listed(7, "s7", "preview"), listed(8, "s8", "preview")},
+		"acme/front":    {listed(4, "s4", "preview")},
+	}}
+	f.open(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var got []int
+	reconcile := func(_ context.Context, ev lifecycle.Event, done func(lifecycle.ReconcileResult)) {
+		got = append(got, ev.Number)
+		cancel()
+		done(lifecycle.ReconcileResult{Outcome: "skipped"})
+	}
+	lifecycle.NewCatchUp(lifecycle.CatchUpAPI{Store: f, Forge: f, Recorder: f}, reconcile).Run(ctx)
+
+	if !slices.Equal(got, []int{7}) {
+		t.Errorf("reconciled = %v, want [7]", got)
+	}
+	if want := []string{"acme/monorepo"}; !slices.Equal(f.listed, want) {
+		t.Errorf("listed = %v, want %v", f.listed, want)
+	}
+	assertCatchUpLogged(t, capture, map[string]int64{"repos": 2, "open_labelled": 1, "reconciled": 1})
+}
+
 func TestCatchUp_CatalogUnreadable(t *testing.T) {
 	capture := captureLogs(t)
 	f := &reconcileFake{catalogErr: errors.New("boom")}

@@ -157,7 +157,7 @@ A deploy is not lost to a delivery that arrives while badil is down or restartin
 - After each in-server sweep, whether it succeeded or failed. It does not start once shutdown has begun.
 - After the sweep of each `badil cleanup` run, whether it succeeded or failed.
 
-With `CLEANUP_INTERVAL` unset and no CronJob, it runs only at start. Each run, listing and queueing, is bounded by 10 minutes, apart from the sweep's own bound.
+With `CLEANUP_INTERVAL` unset and no CronJob, it runs only at start. Each run, listing and queueing, is bounded by 10 minutes, apart from the sweep's own bound. Once that bound expires, or shutdown begins, the run lists no more repos and queues no more reconciles; it still logs its `catch-up` line.
 
 ### Which PRs
 

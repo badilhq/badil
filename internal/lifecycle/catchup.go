@@ -87,8 +87,9 @@ type catchUpStats struct {
 //     failed, it enters the seen map at the head SHA listed here.
 //
 // A repo whose listing fails is logged and skipped. When the catalog can't
-// be read, Run logs it and lists nothing. Each started reconcile is
-// recorded, and the run ends with the catch-up log line.
+// be read, Run logs it and lists nothing. Once ctx is done, Run lists no
+// more repos and claims no more PRs. Each started reconcile is recorded,
+// and the run ends with the catch-up log line.
 func (c *CatchUp) Run(ctx context.Context) {
 	catalog, err := c.api.Store.FetchServiceCatalog(ctx)
 	if err != nil {
@@ -99,6 +100,9 @@ func (c *CatchUp) Run(ctx context.Context) {
 	repos := catalog.GitHubRepos()
 	stats.repos = len(repos)
 	for _, r := range repos {
+		if ctx.Err() != nil {
+			break
+		}
 		prs, listErr := c.api.Forge.ListOpenPullRequests(ctx, r.Owner, r.Repo)
 		if listErr != nil {
 			stats.listErrors++
@@ -109,6 +113,9 @@ func (c *CatchUp) Run(ctx context.Context) {
 			continue
 		}
 		for _, pr := range prs {
+			if ctx.Err() != nil {
+				break
+			}
 			c.consider(ctx, catalog.Label, pr, &stats)
 		}
 	}
@@ -134,6 +141,9 @@ func (c *CatchUp) consider(ctx context.Context, label string, pr forge.PullReque
 	}
 	if t := preview.ResolveTarget(pr.Labels, pr.HeadRef, label); t.Slug != "" && c.pinnedAtHead(ctx, t.Slug, pr) {
 		stats.skippedPinned++
+		return
+	}
+	if ctx.Err() != nil {
 		return
 	}
 	if !c.claim(pr) {
