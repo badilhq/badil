@@ -50,7 +50,7 @@ A deploy runs these steps:
 5. Write it in one commit, `chore(preview): deploy <service>@<sha7> to <slug>`, pushed again on a moved remote head (the push retry). Steps 3 and 4 are decided again on every push attempt.
 6. Fan out the PR comment, best-effort: failures are returned as `warnings`.
 
-It always writes, even when only `updated-at` changes, so a repeated deploy of the same commit refreshes the TTL clock. `gitops_commit_url` is the URL of the pushed commit, `https://github.com/<GITOPS_REPO>/commit/<sha>`.
+It always writes, even when only `updated-at` changes, so a repeated deploy of the same commit refreshes the TTL clock. `gitops_commit_url` is the URL of the pushed commit, `https://github.com/<GITOPS_REPO>/commit/<sha>`. The one exception is two identical calls within the same second: the second leaves the file as it is, so it commits nothing, and its `gitops_commit_url` and comment link to the gitops repo's current head.
 
 A manual deploy runs outside the reconcile queue and skips the one-PR-per-service check (see [One PR per service](EVENTS.md#one-pr-per-service)). The cleanup sweep may later unpin it (see [Manual deploy pins](CLEANUP.md#manual-deploy-pins)).
 
@@ -60,7 +60,7 @@ The deploy reads `previews/<slug>/values.yaml` on the head its commit is made on
 
 At the cap, it answers `409 {"error": "preview limit (<max>) reached"}`, writes nothing and logs `deploy failed` with `op` `preview limit`. A failed write is logged with `op` `write preview`.
 
-The cap is soft: see [Preview cap](EVENTS.md#preview-cap).
+The check is decided again on every push attempt, so a concurrent deploy that creates a preview is counted: see [Preview cap](EVENTS.md#preview-cap).
 
 ## `POST /v1/sync`
 

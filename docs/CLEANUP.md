@@ -103,7 +103,7 @@ A webhook reconcile of the PR also unpins it from its branch slug and its named-
 
 Every preview that rules 1 and 2 did not match is re-read after rule 3, whose teardowns may have changed or deleted it. It is rewritten as its projection on the catalog (see [Preview file writes](SERVICES.md#preview-file-writes)) when it differs, in the sweep's commit. A file that already matches is not written.
 
-A preview whose rule 1–2 delete is cancelled by the re-check skips this step: the deploy that cancelled it already wrote the projection.
+The whole sweep is decided again on every push attempt. A preview that a concurrent deploy pinned again no longer matches rule 1 or 2 on the retried tree, so it is synced instead of deleted.
 
 A rewrite is logged (`preview synced`) and counted in `badil_previews_synced_total`. When it changed the list of services, the list of dependencies or a host, the open PRs' comments are refreshed.
 

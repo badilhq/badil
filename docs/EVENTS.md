@@ -17,7 +17,7 @@ badil answers `opened`, `reopened`, `synchronize`, `labeled`, `unlabeled` and `c
 5. The PR is torn down from every other preview it may still be pinned in (the [cleanup set](#cleanup-set)), before anything is deployed.
 6. An open PR with a target deploys to the target slug (see [Deploy step](#deploy-step)).
 
-Steps 5 and 6 are one commit, pushed again on a moved remote head (see [The gitops repo is the interface](ARCHITECTURE.md#the-gitops-repo-is-the-interface)). Its subject is `chore(preview): deploy <owner>/<repo>#<n> to <slug>` when a service was deployed, followed by `, unpin from <slug>, …` when the PR left other previews, and `chore(preview): unpin <owner>/<repo>#<n> from <slug>, …` otherwise. Its body has one line per change, by slug: `<slug>: pin <service>@<sha7>`, `<slug>: unpin <service>` or `<slug>: delete`. The PR comments are posted once the commit is pushed, one per PR and preview, and link to it.
+   Steps 5 and 6 are one commit, pushed again on a moved remote head (see [The gitops repo is the interface](ARCHITECTURE.md#the-gitops-repo-is-the-interface)). Its subject is `chore(preview): deploy <owner>/<repo>#<n> to <slug>` when a service was deployed, followed by `, unpin from <slug>, …` when the PR left other previews, and `chore(preview): unpin <owner>/<repo>#<n> from <slug>, …` otherwise. Its body has one line per change, by slug: `<slug>: pin <service>@<sha7>`, `<slug>: unpin <service>` or `<slug>: delete`. The PR comments are posted once the commit is pushed, one per PR and preview, and link to it. When the PR's files can't be listed, or the target preview can't be read, the commit holds only step 5 and the reconcile fails.
 7. An open PR with conflicting named labels gets no preview. Its comment is replaced last by:
 
    ```
@@ -143,6 +143,6 @@ The check reads the gitops clone, so it costs no extra GitHub call.
 
 Background reconciles run one at a time, in no guaranteed order. A reconcile reads the PR only once it runs.
 
-A reconcile has a 20s budget, counted from when it starts running. It covers the PR and files reads of [path filters](SERVICES.md#path-filters), then its commit with every push attempt, then its comments. The commit holds, in this order, its cleanup teardowns, the holder check, the preview cap check, the unpin of untouched services and its services. A reconcile whose commit is not pushed in time fails.
+A reconcile has a 20s budget, counted from when it starts running. It covers the PR and files reads of [path filters](SERVICES.md#path-filters), then its commit, including the wait for an operation already writing (a cleanup sweep, a manual deploy) and every push attempt, then its comments. The commit holds, in this order, its cleanup teardowns, the holder check, the preview cap check, the unpin of untouched services and its services. A reconcile that deploys fails when its commit is not pushed in time. One that only tears down records each of its teardowns as an error and keeps the `torn_down` outcome.
 
 Shutdown waits up to 25s for queued and running jobs. Jobs still queued then are dropped, and the cleanup sweeper catches missed teardowns of closed PRs.
