@@ -226,6 +226,6 @@ Each deploy write, and the cleanup sweep's sync ([step 4](CLEANUP.md#4-sync-with
 
 When an entry of `badil.yaml` declares `needs`, only the pinned entries and what they need are kept (see [Needs](#needs)). For removed services, see [Services added to or removed from the catalog](#services-added-to-or-removed-from-the-catalog).
 
-A `badil.yaml` change is written on the next deploy, even for an unchanged SHA. It is also written in every preview by the push that changed it, `POST /v1/sync` or the next sweep (see [Config sync](CLEANUP.md#config-sync)), in one commit for every preview. The PR comment is refreshed only when the services, the dependencies or hosts change.
+A `badil.yaml` change is written on the next deploy, even for an unchanged SHA. It is also written in every preview by the push that changed it, `POST /v1/sync` or the next sweep (see [Config sync](CLEANUP.md#config-sync)), in one commit covering every preview. The PR comment is refreshed only when the services, the dependencies or hosts change.
 
 Teardowns unpin, then project the file on `badil.yaml`, in the same commit, so an unpinned entry gets its branch-tracking `imageTag` at once. When `badil.yaml` cannot be read or parsed, such a teardown writes nothing and fails. The file keeps the PR's pin, and the next event of that PR or the next sweep retries it. A teardown that deletes the preview does not read `badil.yaml`.

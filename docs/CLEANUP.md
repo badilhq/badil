@@ -103,8 +103,6 @@ A webhook reconcile of the PR also unpins it from its branch slug and its named-
 
 Every preview that rules 1 and 2 did not match is re-read after rule 3, whose teardowns may have changed or deleted it. It is rewritten as its projection on the catalog (see [Preview file writes](SERVICES.md#preview-file-writes)) when it differs, in the sweep's commit. A file that already matches is not written.
 
-The whole sweep is decided again on every push attempt. A preview that a concurrent deploy pinned again no longer matches rule 1 or 2 on the retried tree, so it is synced instead of deleted.
-
 A rewrite is logged (`preview synced`) and counted in `badil_previews_synced_total`. When it changed the list of services, the list of dependencies or a host, the open PRs' comments are refreshed.
 
 ### Catalog changes
@@ -113,13 +111,13 @@ A `badil.yaml` change therefore reaches every preview within one sweep interval,
 
 A mistaken edit propagates the same way, except that pinned entries of a removed service stay until their PR leaves. A git revert of `badil.yaml` undoes it at the next sweep.
 
-After a catalog edit, one sweep makes one commit for every preview whose file differs. It updates the comment of each open PR of the previews whose services, dependencies or hosts changed. All of this stays within the GitHub App's rate limit, and `badil_previews_synced_total` shows the volume.
+After a catalog edit, one sweep makes one commit covering every preview whose file differs. It updates the comment of each open PR of the previews whose services, dependencies or hosts changed. All of this stays within the GitHub App's rate limit, and `badil_previews_synced_total` shows the volume.
 
 A failed sweep commit is retried by the next sweep. A failed comment refresh is logged (`preview sync comment failed`) and not retried. That comment stays stale until the PR's next deploy or teardown, as for every comment fan-out.
 
 ### Failures and races
 
-A sweep is one commit, `chore(preview): sweep: delete <d>, unpin <u>, sync <s>`, with the count of previews deleted, unpinned and kept, and synced, and one body line per change. The rules and step 4 are decided on the head the commit is made on. When the push is rejected because the remote head moved, they are decided again on the new head, so a deploy landing during the sweep cancels a delete.
+A sweep is one commit, `chore(preview): sweep: delete <d>, unpin <u>, sync <s>`, with the count of previews deleted, unpinned and kept, and synced, and one body line per change. The rules and step 4 are decided on the head the commit is made on. When the push is rejected because the remote head moved, they are decided again on the new head, so a deploy landing during the sweep cancels a delete: the preview it pinned again is synced instead of deleted.
 
 The PR states rule 3 needs are read once, before the commit, one read per PR. A PR that a retried attempt finds pinned without its state read keeps its pins until the next sweep. The comments are posted once the commit is pushed.
 
