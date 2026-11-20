@@ -35,6 +35,7 @@ type Metrics struct {
 	reconcileSkips    *prometheus.CounterVec
 	teardowns         *prometheus.CounterVec
 	gitopsDuration    *prometheus.HistogramVec
+	pushConflicts     *prometheus.CounterVec
 	sweepRuns         *prometheus.CounterVec
 	sweepLastSuccess  prometheus.Gauge
 	sweepDeleted      *prometheus.CounterVec
@@ -77,9 +78,14 @@ func New() *Metrics {
 		gitopsDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: namespace,
 			Name:      "gitops_operation_duration_seconds",
-			Help:      "Duration of gitops repo writes, teardowns and syncs, retries included, and of the gitops clone's git clone, ls-remote and fetch.",
+			Help:      "Duration of gitops repo operations (deploy, teardown, sweep, sync), push retries included, and of the gitops clone's git clone, ls-remote and fetch.",
 			Buckets:   prometheus.DefBuckets,
 		}, []string{"op", labelResult}),
+		pushConflicts: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "gitops_push_conflicts_total",
+			Help:      "Gitops repo pushes rejected because the remote head moved, by operation.",
+		}, []string{"op"}),
 		sweepRuns: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: namespace,
 			Name:      "sweep_runs_total",
@@ -126,6 +132,7 @@ func New() *Metrics {
 		m.reconcileSkips,
 		m.teardowns,
 		m.gitopsDuration,
+		m.pushConflicts,
 		m.sweepRuns,
 		m.sweepLastSuccess,
 		m.sweepDeleted,
@@ -245,6 +252,15 @@ func (m *Metrics) GitopsOp(op, result string, d time.Duration) {
 		return
 	}
 	m.gitopsDuration.WithLabelValues(op, result).Observe(d.Seconds())
+}
+
+// PushConflict counts one push of the gitops operation op rejected because
+// the remote head moved.
+func (m *Metrics) PushConflict(op string) {
+	if m == nil {
+		return
+	}
+	m.pushConflicts.WithLabelValues(op).Inc()
 }
 
 // SweepRun counts one in-server sweep run and, when ok, sets the last success

@@ -42,17 +42,8 @@ const (
 
 // ReconcileStore is the subset of store.GitHubStore used by ReconcilePR.
 type ReconcileStore interface {
-	DeployStore
-	TeardownStore
+	Applier
 	FetchServiceCatalog(ctx context.Context) (*store.ServiceCatalog, error)
-	GetPreview(ctx context.Context, slug string) (*preview.PreviewValues, string, error)
-	ListPreviews(ctx context.Context) ([]string, error)
-	UnpinServicesWithRetry(
-		ctx context.Context,
-		slug, owner, repo string,
-		prNumber int,
-		services []string,
-	) (*store.TeardownResult, error)
 }
 
 // ReconcileAPI is what ReconcilePR uses: the store, the forge, the Recorder
@@ -64,12 +55,7 @@ type ReconcileAPI struct {
 	FanOut   FanOutFunc
 }
 
-// deployAPI narrows a to what DeployPR uses.
-func (a ReconcileAPI) deployAPI() DeployAPI {
-	return DeployAPI{Store: a.Store, Forge: a.Forge, FanOut: a.FanOut}
-}
-
-// teardownAPI narrows a to what TeardownPR uses.
+// teardownAPI narrows a to what a teardown uses.
 func (a ReconcileAPI) teardownAPI() TeardownAPI {
 	return TeardownAPI{Store: a.Store, Forge: a.Forge, Recorder: a.Recorder, FanOut: a.FanOut}
 }
@@ -104,6 +90,11 @@ type Event struct {
 // conflicting named labels is told so. Fork PRs and repos outside the catalog
 // are skipped. Every outcome is logged.
 //
+// The forge is read first. The teardowns and the deploy are then one
+// operation of the store, one commit, decided on the tree each push attempt
+// reads (reconcilePlan.change): a deploy operation when the PR is open with
+// a target, a teardown otherwise. The comments are posted once it is pushed.
+//
 // A closed event is not guarded by its payload nor skipped for a repo outside
 // the catalog, and a closed fork PR is still torn down. When the catalog or
 // the PR can't be read, it falls back to tearing down the payload's head
@@ -115,12 +106,12 @@ type Event struct {
 // skipped as already deployed.
 //
 // Each call records exactly one outcome through the Recorder: failed when the
-// catalog, the PR or the target preview can't be read, or the previews can't
-// be listed, on a non-closed event, when the PR's files can't be listed or the
-// unpin of its untouched services fails, on any event, or when no service
-// write succeeded and at least one failed; otherwise skipped (with its
-// reason) when the reconcile was skipped; otherwise deployed when a service
-// write succeeded; otherwise torn_down.
+// catalog or the PR can't be read on a non-closed event, when the PR's files
+// can't be listed, the target preview can't be read or the previews can't be
+// listed (the teardowns from the PR's other previews are still committed),
+// or when the commit of a PR open with a target can't be pushed;
+// otherwise skipped (with its reason) when the reconcile was skipped;
+// otherwise deployed when a service was written; otherwise torn_down.
 func ReconcilePR(ctx context.Context, api ReconcileAPI, ev Event) {
 	o, r := reconcile(ctx, api, ev)
 	api.Recorder.Reconcile(o, r)
@@ -165,38 +156,287 @@ func reconcile(ctx context.Context, api ReconcileAPI, ev Event) (string, string)
 	if deploy && len(services) == 0 {
 		return reconcileSkipped(ctx, ev, "repo not in catalog")
 	}
-	removed := cleanup(ctx, api.teardownAPI(), ev, pr, t, catalog.Label)
-	repoServices := services
+	p := &reconcilePlan{
+		ev: ev, pr: pr, t: t, catalog: catalog, deploy: deploy, repoServices: services,
+		cleanupSlugs: cleanupSlugs(t, pr, ev, catalog.Label), cleanupReason: cleanupReason(t, pr, ev, catalog.Label),
+		timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
 	if deploy {
-		if services, err = touchedServices(ctx, api, catalog, ev, pr, services); err != nil {
-			return reconcileFailed(ctx, ev, err)
-		}
-		if len(services) == 0 {
-			return noServiceChanged(ctx, api, ev, t.Slug)
+		p.services, p.listErr = touchedServices(ctx, api, catalog, ev, pr, services)
+		if p.listErr != nil && len(p.cleanupSlugs) == 0 {
+			return reconcileFailed(ctx, ev, p.listErr)
 		}
 	}
-	o, r, vals := refused(ctx, api, catalog, ev, pr, t, services)
-	if o != "" {
+	kind := store.OpTeardown
+	if deploy {
+		kind = store.OpDeploy
+	}
+	res, applyErr := api.Store.Apply(ctx, store.Op{Kind: kind, Change: p.change})
+	return p.finish(ctx, api, res, applyErr)
+}
+
+// reconcilePlan is a reconcile once the forge was read: the PR, its target,
+// the catalog, the services of its repo and those it touches, and the
+// previews it leaves. change runs it on the gitops tree, as many times as
+// Apply attempts; the fields below the line hold the last attempt's
+// outcome, which finish acts on.
+type reconcilePlan struct {
+	ev            Event
+	pr            *forge.PullRequest
+	t             preview.Resolution
+	catalog       *store.ServiceCatalog
+	deploy        bool
+	repoServices  []string
+	services      []string
+	cleanupSlugs  []string
+	cleanupReason string
+	timestamp     string
+	// listErr is the error of the PR's file listing: the change only tears
+	// the PR down from cleanupSlugs, and the reconcile fails.
+	listErr error
+
+	ran bool
+	// readErr is the error of reading the target preview or listing the
+	// previews in the last attempt: the change only tears the PR down from
+	// cleanupSlugs, and the reconcile fails.
+	readErr   error
+	cleanup   []*teardownStep
+	noService *teardownStep
+	held      *heldPin
+	limited   bool
+	unpin     *teardownStep
+	deploys   []*deployStep
+}
+
+// heldPin is a service of the target preview pinned by another PR.
+type heldPin struct {
+	service, holder string
+}
+
+// deployStep is the deploy of one service in the last attempt: its result,
+// or its error.
+type deployStep struct {
+	service string
+	result  *store.WriteResult
+	err     error
+}
+
+// target returns the PR's Target in the preview slug.
+func (p *reconcilePlan) target(slug string) Target {
+	tt := p.ev.Target
+	tt.Slug = slug
+	return tt
+}
+
+// change runs the reconcile on tree. The PR is first torn down from every
+// preview of cleanupSlugs. Then, when it is open and has a target: when it
+// touches no service, it is torn down from the target too; otherwise it is
+// refused when one of its services is pinned there by another PR, or the
+// target does not exist and preview.maxPreviews previews already do; it is
+// not refused, its entries for the services of its repo it does not touch
+// are unpinned there, then each service it touches is deployed. A service
+// already deployed as it would be written is left alone unless the PR left
+// another preview. Teardowns and deploys that fail are recorded, not
+// returned. When the PR's files could not be listed, or the target preview
+// can't be read or the previews listed, only the teardowns from cleanupSlugs
+// are kept, and the error is recorded in listErr or readErr.
+func (p *reconcilePlan) change(tree *store.Tree) (store.Summary, error) {
+	p.ran, p.readErr, p.noService, p.held, p.limited, p.unpin, p.deploys = true, nil, nil, nil, false, nil, nil
+	p.cleanup = newSteps(p.ev.Target, p.cleanupSlugs, p.cleanupReason)
+	for _, s := range p.cleanup {
+		s.run(tree)
+	}
+	removed := len(removedSlugs(p.cleanup)) > 0
+	switch {
+	case !p.deploy, p.listErr != nil:
+	case len(p.services) == 0:
+		p.noService = &teardownStep{tt: p.target(p.t.Slug), reason: noServiceReason, trigger: triggerWebhook}
+		p.noService.run(tree)
+	default:
+		vals, err := tree.GetPreview(p.t.Slug)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			p.readErr = err
+			break
+		}
+		if vals != nil {
+			if service, holder, held := heldBy(vals, p.services, p.ev.Target); held {
+				p.held = &heldPin{service: service, holder: holder}
+				break
+			}
+		} else if limited, listErr := limitReached(tree, p.catalog.MaxPreviews); listErr != nil || limited {
+			p.limited, p.readErr = limited && listErr == nil, listErr
+			break
+		}
+		if p.unpin = p.untouchedUnpin(vals); p.unpin != nil {
+			p.unpin.run(tree)
+			removed = removed || p.unpin.removed()
+		}
+		p.deployAll(tree, !removed)
+	}
+	return p.summary(), nil
+}
+
+// limitReached reports whether maxPreviews previews exist in tree, with no
+// cap when maxPreviews is 0.
+func limitReached(tree *store.Tree, maxPreviews int) (bool, error) {
+	if maxPreviews <= 0 {
+		return false, nil
+	}
+	slugs, err := tree.ListPreviews()
+	return len(slugs) >= maxPreviews, err
+}
+
+// untouchedUnpin returns the unpin, in the target preview whose values are
+// vals, of the PR's entries for the services of its repo it does not touch,
+// which never deletes the file; nil when vals is nil (the preview does not
+// exist) or the PR pins none of them there.
+func (p *reconcilePlan) untouchedUnpin(vals *preview.PreviewValues) *teardownStep {
+	if vals == nil {
+		return nil
+	}
+	untouched := slices.DeleteFunc(slices.Clone(p.repoServices), func(name string) bool {
+		return slices.Contains(p.services, name)
+	})
+	_, names, _ := preview.UnpinPRServices(*vals, p.ev.Owner, p.ev.Repo, p.ev.Number, untouched)
+	if len(names) == 0 {
+		return nil
+	}
+	return &teardownStep{tt: p.target(p.t.Slug), trigger: triggerWebhook, services: names}
+}
+
+// deployAll deploys each touched service, in order, at the PR's head SHA in
+// the target preview. With skipUnchanged, a service whose deploy would change
+// nothing but its updated-at is left alone.
+func (p *reconcilePlan) deployAll(tree *store.Tree, skipUnchanged bool) {
+	for _, service := range p.services {
+		step := &deployStep{service: service}
+		step.result, step.err = tree.Deploy(p.t.Slug, p.catalog, service, p.pr.HeadSHA, preview.DeployInputs{
+			ServiceName:    service,
+			HeadRef:        p.pr.HeadRef,
+			CommitSha:      p.pr.HeadSHA,
+			PRAuthor:       p.pr.Author,
+			PRURL:          p.pr.URL,
+			PRNumber:       strconv.Itoa(p.ev.Number),
+			Timestamp:      p.timestamp,
+			WorkflowRunURL: "",
+		}, skipUnchanged)
+		p.deploys = append(p.deploys, step)
+	}
+}
+
+// written returns the deploy steps that changed the target preview.
+func (p *reconcilePlan) written() []*deployStep {
+	var out []*deployStep
+	for _, d := range p.deploys {
+		if d.err == nil && !d.result.Unchanged {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// summary returns the commit subject of the last attempt: a deploy to the
+// target when a service was written there, naming the other previews the PR
+// left; otherwise the previews the PR left.
+func (p *reconcilePlan) summary() store.Summary {
+	tt := p.ev.Target
+	others := removedSlugs(p.cleanup)
+	if len(p.written()) > 0 {
+		subject := fmt.Sprintf("chore(preview): deploy %s#%d to %s", tt.FullName, tt.Number, p.t.Slug)
+		if len(others) > 0 {
+			subject += ", unpin from " + strings.Join(others, ", ")
+		}
+		return store.Summary{Subject: subject}
+	}
+	steps := slices.Clone(p.cleanup)
+	for _, s := range []*teardownStep{p.noService, p.unpin} {
+		if s != nil {
+			steps = append(steps, s)
+		}
+	}
+	return store.Summary{Subject: unpinSubject(tt, removedSlugs(steps))}
+}
+
+// finish handles the reconcile's operation, which ended with res or
+// applyErr: it records and comments each teardown (afterTeardown), then
+// returns the outcome. A PR whose files or target preview could not be read
+// fails, as does a deploy whose operation failed. A reconcile that only
+// tears down keeps the torn_down outcome when its operation failed, unless
+// its open PR's named labels conflict: it is then told to keep one, and
+// skipped. Otherwise a PR that
+// touches no service is told so and skipped; a refused one is told why and
+// skipped; deployed services are logged and their preview's summary posted
+// once on its open PRs; an open PR whose named labels conflict is told to
+// keep one, and skipped.
+func (p *reconcilePlan) finish(
+	ctx context.Context, api ReconcileAPI, res store.Result, applyErr error,
+) (string, string) {
+	tapi := api.teardownAPI()
+	if !p.ran {
+		p.cleanup = newSteps(p.ev.Target, p.cleanupSlugs, p.cleanupReason)
+	}
+	for _, s := range p.cleanup {
+		afterTeardown(ctx, tapi, s, res, applyErr, true)
+	}
+	if p.noService != nil {
+		afterTeardown(ctx, tapi, p.noService, res, applyErr, true)
+		body := preview.BuildNoServiceSummary(p.t.Slug)
+		if err := api.Forge.UpsertComment(ctx, p.ev.Owner, p.ev.Repo, p.ev.Number, body); err != nil {
+			conflictCommentFailed(ctx, p.ev, err)
+		}
+		return reconcileSkipped(ctx, p.ev, noServiceReason)
+	}
+	if p.listErr != nil {
+		return reconcileFailed(ctx, p.ev, p.listErr)
+	}
+	if p.readErr != nil {
+		return reconcileFailed(ctx, p.ev, p.readErr)
+	}
+	if applyErr != nil {
+		if p.unpin != nil {
+			afterTeardown(ctx, tapi, p.unpin, res, applyErr, false)
+		}
+		if p.deploy {
+			return reconcileFailed(ctx, p.ev, applyErr)
+		}
+		if o, r := postLabelConflict(ctx, tapi, p.ev, p.pr, p.catalog.Label, p.t); o != "" {
+			return o, r
+		}
+		return outcomeTornDown, ""
+	}
+	if o, r := p.refusal(ctx, api); o != "" {
 		return o, r
 	}
-	if deploy {
-		unpinned, unpinErr := unpinUntouched(ctx, api, ev, t.Slug, vals, repoServices, services)
-		if unpinErr != nil {
-			return reconcileFailed(ctx, ev, unpinErr)
-		}
-		removed = removed || unpinned
-	}
 	outcome, reason := outcomeTornDown, ""
-	if deploy {
-		// After a teardown in this reconcile, the deploy always writes and
-		// comments, so its summary stays the last write to the PR's comment.
-		outcome, reason = deployServices(ctx, api.deployAPI(), catalog, services, ev, pr, t.Slug, !removed)
+	if p.deploy {
+		outcome, reason = p.afterDeploy(ctx, api, res)
 	}
 	// A conflict leaves the PR without a target, so nothing was deployed.
-	if o, r := postLabelConflict(ctx, api.teardownAPI(), ev, pr, catalog.Label, t); o != "" {
+	if o, r := postLabelConflict(ctx, api.teardownAPI(), p.ev, p.pr, p.catalog.Label, p.t); o != "" {
 		return o, r
 	}
 	return outcome, reason
+}
+
+// refusal tells the PR why the last attempt refused to deploy it, and
+// returns the skipped outcome and its reason; "" when it was not refused.
+func (p *reconcilePlan) refusal(ctx context.Context, api ReconcileAPI) (string, string) {
+	var body string
+	var o, r string
+	switch {
+	case p.held != nil:
+		body = preview.BuildServiceHeldSummary(p.t.Slug, p.held.service, p.held.holder, p.catalog.Label)
+		o, r = reconcileSkipped(ctx, p.ev, "service held by another pr", slog.String("holder", p.held.holder))
+	case p.limited:
+		body = preview.BuildPreviewLimitSummary(p.t.Slug, p.catalog.MaxPreviews)
+		o, r = reconcileSkipped(ctx, p.ev, previewLimitReason, slog.Int("max_previews", p.catalog.MaxPreviews))
+	default:
+		return "", ""
+	}
+	if err := api.Forge.UpsertComment(ctx, p.ev.Owner, p.ev.Repo, p.ev.Number, body); err != nil {
+		conflictCommentFailed(ctx, p.ev, err)
+	}
+	return o, r
 }
 
 // logIgnored logs each named label of t whose name has no slug.
@@ -208,29 +448,6 @@ func logIgnored(ctx context.Context, ev Event, t preview.Resolution) {
 			slog.String("label", label),
 		)
 	}
-}
-
-// cleanup tears the PR down from every slug of cleanupSlugs, with
-// cleanupReason. It reports whether any teardown removed the PR from a
-// preview.
-func cleanup(
-	ctx context.Context,
-	api TeardownAPI,
-	ev Event,
-	pr *forge.PullRequest,
-	t preview.Resolution,
-	label string,
-) bool {
-	reason := cleanupReason(t, pr, ev, label)
-	removed := false
-	for _, slug := range cleanupSlugs(t, pr, ev, label) {
-		tt := ev.Target
-		tt.Slug = slug
-		if teardown(ctx, api, tt, reason, triggerWebhook, true) {
-			removed = true
-		}
-	}
-	return removed
 }
 
 // cleanupSlugs returns, sorted and deduplicated, the previews the PR may still
@@ -327,140 +544,6 @@ func touches(patterns []string, files []forge.ChangedFile) bool {
 	})
 }
 
-// noServiceChanged handles an open PR with the target slug that touches no
-// service of its repo: it is torn down from slug, without editing its comment,
-// then told that nothing is deployed, and the reconcile is skipped with
-// noServiceReason. A failed teardown or comment does not change the outcome.
-func noServiceChanged(ctx context.Context, api ReconcileAPI, ev Event, slug string) (string, string) {
-	tt := ev.Target
-	tt.Slug = slug
-	teardown(ctx, api.teardownAPI(), tt, noServiceReason, triggerWebhook, false)
-	body := preview.BuildNoServiceSummary(slug)
-	if err := api.Forge.UpsertComment(ctx, ev.Owner, ev.Repo, ev.Number, body); err != nil {
-		conflictCommentFailed(ctx, ev, err)
-	}
-	return reconcileSkipped(ctx, ev, noServiceReason)
-}
-
-// unpinUntouched unpins, in the preview slug whose values refused read, the
-// PR's entries for the services of its repo, repoServices, that are not in
-// touched, in one write (unpinServices). Nothing is written when vals is nil
-// (the preview does not exist) or the PR pins none of them there. It reports
-// whether it unpinned an entry, and the write's error.
-func unpinUntouched(
-	ctx context.Context,
-	api ReconcileAPI,
-	ev Event,
-	slug string,
-	vals *preview.PreviewValues,
-	repoServices, touched []string,
-) (bool, error) {
-	if vals == nil {
-		return false, nil
-	}
-	untouched := slices.DeleteFunc(slices.Clone(repoServices), func(name string) bool {
-		return slices.Contains(touched, name)
-	})
-	_, names, _ := preview.UnpinPRServices(*vals, ev.Owner, ev.Repo, ev.Number, untouched)
-	if len(names) == 0 {
-		return false, nil
-	}
-	tt := ev.Target
-	tt.Slug = slug
-	return unpinServices(ctx, api, tt, names)
-}
-
-// refused reports whether the PR must not be deployed to t.Slug, as the
-// reconcile's outcome and reason: refusedByHolder's, then, when the preview
-// does not exist, refusedByLimit's. It returns "" when it is not refused. Its
-// third result is the preview t.Slug that refusedByHolder read, nil when the
-// preview does not exist or nothing was read.
-func refused(
-	ctx context.Context,
-	api ReconcileAPI,
-	catalog *store.ServiceCatalog,
-	ev Event,
-	pr *forge.PullRequest,
-	t preview.Resolution,
-	services []string,
-) (string, string, *preview.PreviewValues) {
-	o, r, vals := refusedByHolder(ctx, api, ev, pr, t, services, catalog.Label)
-	if o != "" || vals != nil {
-		return o, r, vals
-	}
-	o, r = refusedByLimit(ctx, api, ev, pr, t, catalog.MaxPreviews)
-	return o, r, nil
-}
-
-// refusedByHolder reports whether the PR must not be deployed to t.Slug, as
-// the reconcile's outcome and reason: skipped when one of its services is
-// already pinned there by another PR (it is then told so), failed when the
-// preview can't be read, and "" when it is not refused. It reads nothing
-// unless the PR is open and has a target. Its third result is the preview
-// t.Slug it read, nil when the preview does not exist or nothing was read.
-func refusedByHolder(
-	ctx context.Context,
-	api ReconcileAPI,
-	ev Event,
-	pr *forge.PullRequest,
-	t preview.Resolution,
-	services []string,
-	label string,
-) (string, string, *preview.PreviewValues) {
-	if !pr.Open || t.Slug == "" {
-		return "", "", nil
-	}
-	vals, _, err := api.Store.GetPreview(ctx, t.Slug)
-	if errors.Is(err, store.ErrNotFound) {
-		return "", "", nil
-	}
-	if err != nil {
-		o, r := reconcileFailed(ctx, ev, err)
-		return o, r, nil
-	}
-	service, holder, held := heldBy(vals, services, ev.Target)
-	if !held {
-		return "", "", vals
-	}
-	body := preview.BuildServiceHeldSummary(t.Slug, service, holder, label)
-	if upsertErr := api.Forge.UpsertComment(ctx, ev.Owner, ev.Repo, ev.Number, body); upsertErr != nil {
-		conflictCommentFailed(ctx, ev, upsertErr)
-	}
-	o, r := reconcileSkipped(ctx, ev, "service held by another pr", slog.String("holder", holder))
-	return o, r, vals
-}
-
-// refusedByLimit reports whether the PR must not create the preview t.Slug,
-// which does not exist, because maxPreviews previews already exist, as the
-// reconcile's outcome and reason: skipped when the cap is reached (the PR is
-// then told so), failed when the previews can't be listed, and "" when it is
-// not refused. It reads nothing unless the PR is open, has a target and
-// maxPreviews is set.
-func refusedByLimit(
-	ctx context.Context,
-	api ReconcileAPI,
-	ev Event,
-	pr *forge.PullRequest,
-	t preview.Resolution,
-	maxPreviews int,
-) (string, string) {
-	if !pr.Open || t.Slug == "" || maxPreviews <= 0 {
-		return "", ""
-	}
-	slugs, err := api.Store.ListPreviews(ctx)
-	if err != nil {
-		return reconcileFailed(ctx, ev, err)
-	}
-	if len(slugs) < maxPreviews {
-		return "", ""
-	}
-	body := preview.BuildPreviewLimitSummary(t.Slug, maxPreviews)
-	if upsertErr := api.Forge.UpsertComment(ctx, ev.Owner, ev.Repo, ev.Number, body); upsertErr != nil {
-		conflictCommentFailed(ctx, ev, upsertErr)
-	}
-	return reconcileSkipped(ctx, ev, previewLimitReason, slog.Int("max_previews", maxPreviews))
-}
-
 // heldBy returns the first entry of vals, in file order, that pins one of
 // services for a PR other than self: its service, its holder's PR URL and
 // true. It returns false when there is none.
@@ -503,7 +586,8 @@ func postLabelConflict(
 
 // payloadTeardown tears down a closed PR from its payload alone, after err
 // prevented reading the catalog or the PR: from its head branch's slug and
-// from the slug of each named label of label in the payload.
+// from the slug of each named label of label in the payload, in one
+// teardown operation.
 func payloadTeardown(ctx context.Context, api TeardownAPI, ev Event, label string, err error) {
 	slog.WarnContext(ctx, "preview reconcile fell back to payload teardown",
 		slog.String("repo", ev.FullName),
@@ -520,10 +604,8 @@ func payloadTeardown(ctx context.Context, api TeardownAPI, ev Event, label strin
 			slugs = append(slugs, slug)
 		}
 	}
-	for _, slug := range slugs {
-		t := ev.Target
-		t.Slug = slug
-		TeardownPR(ctx, api, t, PRClosedReason, triggerWebhook)
+	if len(slugs) > 0 {
+		teardownPRs(ctx, api, ev.Target, slugs, PRClosedReason)
 	}
 }
 
@@ -550,74 +632,61 @@ func previewLabel(name, label string) bool {
 	return plain || slug != ""
 }
 
-// deployServices deploys each of services, in order, at pr's head SHA in the
-// preview slug. A failed service is logged and the next one is still deployed.
-// With skipUnchanged, a service whose write would change nothing but its
-// updated-at is not written nor commented, and is logged as unchanged. It
-// returns, as reconcile does, outcomeDeployed when at least one service write
-// succeeded, outcomeFailed when none did and at least one failed, and
-// otherwise, every service being unchanged, the skip of reconcileSkipped with
-// reason alreadyDeployedReason.
-func deployServices(
-	ctx context.Context,
-	api DeployAPI,
-	catalog *store.ServiceCatalog,
-	services []string,
-	ev Event,
-	pr *forge.PullRequest,
-	slug string,
-	skipUnchanged bool,
-) (string, string) {
-	written, failed := false, false
-	timestamp := time.Now().UTC().Format(time.RFC3339)
-	for _, service := range services {
-		attrs := func(extra ...any) []any {
-			return append([]any{
-				slog.String("slug", slug),
-				slog.String("service", service),
-				slog.String("repo", ev.FullName),
-				slog.Int("pr_number", ev.Number),
-			}, extra...)
+// afterDeploy handles the deploys of the last attempt, pushed as res: it
+// handles the unpin of the PR's untouched services (afterTeardown, its
+// summary left to the deploy's when a service was written), logs each
+// service, records a created preview, and posts the preview's summary once
+// on its open PRs. It returns, as reconcile does, outcomeDeployed when at
+// least one service was written, outcomeFailed when none was and at least
+// one failed, and otherwise, every service being unchanged, the skip of
+// reconcileSkipped with reason alreadyDeployedReason.
+func (p *reconcilePlan) afterDeploy(ctx context.Context, api ReconcileAPI, res store.Result) (string, string) {
+	written := p.written()
+	if p.unpin != nil {
+		afterTeardown(ctx, api.teardownAPI(), p.unpin, res, nil, len(written) == 0)
+	}
+	failed, created := false, false
+	for _, d := range p.deploys {
+		attrs := []any{
+			slog.String("slug", p.t.Slug),
+			slog.String("service", d.service),
+			slog.String("repo", p.ev.FullName),
+			slog.Int("pr_number", p.ev.Number),
+			slog.String("commit_sha", p.pr.HeadSHA),
 		}
-		err := ctx.Err()
-		var result *store.WriteResult
-		var fanErr error
-		if err == nil {
-			result, fanErr, err = DeployPR(ctx, api, catalog, slug, preview.DeployInputs{
-				ServiceName:    service,
-				HeadRef:        pr.HeadRef,
-				CommitSha:      pr.HeadSHA,
-				PRAuthor:       pr.Author,
-				PRURL:          pr.URL,
-				PRNumber:       strconv.Itoa(ev.Number),
-				Timestamp:      timestamp,
-				WorkflowRunURL: "",
-			}, skipUnchanged)
-		}
-		if err != nil {
+		switch {
+		case d.err != nil:
 			failed = true
-			slog.ErrorContext(ctx, "preview deploy failed",
-				attrs(slog.String("commit_sha", pr.HeadSHA), slog.String("err", err.Error()))...)
-			continue
-		}
-		if result.Unchanged {
-			slog.InfoContext(ctx, "preview deploy unchanged", attrs(slog.String("commit_sha", pr.HeadSHA))...)
-			continue
-		}
-		written = true
-		slog.InfoContext(ctx, "preview deploy",
-			attrs(slog.String("commit_sha", pr.HeadSHA), slog.String("gitops_commit_url", result.CommitURL))...)
-		if fanErr != nil {
-			slog.WarnContext(ctx, "preview deploy comment failed", attrs(slog.String("err", fanErr.Error()))...)
+			slog.ErrorContext(ctx, "preview deploy failed", append(attrs, slog.String("err", d.err.Error()))...)
+		case d.result.Unchanged:
+			slog.InfoContext(ctx, "preview deploy unchanged", attrs...)
+		default:
+			created = created || d.result.Created
+			slog.InfoContext(ctx, "preview deploy", append(attrs, slog.String("gitops_commit_url", res.URL))...)
 		}
 	}
+	if created {
+		api.Recorder.PreviewCreated()
+	}
 	switch {
-	case written:
+	case len(written) > 0:
+		last := written[len(written)-1].result
+		summary := preview.BuildSummary(
+			p.t.Slug, last.Values, p.catalog.URLs, p.catalog.ArgoCDURL, last.Excluded, res.Subject, res.URL,
+		)
+		if fanErr := api.FanOut(ctx, api.Forge, last.Values, summary); fanErr != nil {
+			slog.WarnContext(ctx, "preview deploy comment failed",
+				slog.String("slug", p.t.Slug),
+				slog.String("repo", p.ev.FullName),
+				slog.Int("pr_number", p.ev.Number),
+				slog.String("err", fanErr.Error()),
+			)
+		}
 		return outcomeDeployed, ""
 	case failed:
 		return outcomeFailed, ""
 	}
-	return reconcileSkipped(ctx, ev, alreadyDeployedReason)
+	return reconcileSkipped(ctx, p.ev, alreadyDeployedReason)
 }
 
 // reconcileSkipped logs a skipped reconcile and returns the skipped outcome

@@ -19,6 +19,7 @@ Or set it up by hand:
 - Commit at the root a `badil.yaml`, starting from [`examples/argocd/badil.yaml`](../examples/argocd/badil.yaml): the service catalog, and optionally the image tag format, namespace metadata, dependencies, needs and the `preview` block. Every key is in the [Configuration reference](CONFIGURATION.md#badilyaml).
 - badil creates `previews/` itself; a missing directory reads as no previews.
 - badil commits straight to the default branch. Its protection must let the App push directly: no required pull request, or the App on the bypass list.
+- The default branch must not require signed commits: badil pushes unsigned commits, authored and committed by the App's bot.
 
 ## 3. Argo CD wiring
 

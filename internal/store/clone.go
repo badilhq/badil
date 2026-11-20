@@ -33,7 +33,7 @@ const maxPacks = 50
 const remoteName = "origin"
 
 // CredentialProvider returns the user and password of HTTPS basic auth to the
-// gitops remote. It is called before every clone, ls-remote and fetch.
+// gitops remote. It is called before every clone, ls-remote, fetch and push.
 type CredentialProvider func(ctx context.Context) (user, password string, err error)
 
 // CloneConfig is where and how the store clones the gitops repo.
@@ -61,6 +61,7 @@ type checkCall struct {
 // ensureFresh.
 type gitClone struct {
 	repo    *git.Repository
+	url     string
 	dir     string
 	tempDir bool
 	branch  string
@@ -85,7 +86,7 @@ type gitClone struct {
 func openClone(
 	ctx context.Context, cfg CloneConfig, observe func(string, time.Time, error),
 ) (_ *gitClone, err error) {
-	c := &gitClone{dir: cfg.Dir, creds: cfg.Credentials, observe: observe, now: time.Now}
+	c := &gitClone{url: cfg.URL, dir: cfg.Dir, creds: cfg.Credentials, observe: observe, now: time.Now}
 	if c.dir == "" {
 		if c.dir, err = os.MkdirTemp("", "badil-gitops-"); err != nil {
 			return nil, fmt.Errorf("gitops clone dir: %w", err)
@@ -101,7 +102,7 @@ func openClone(
 	}()
 
 	start := time.Now()
-	err = c.clone(ctx, cfg.URL)
+	err = c.clone(ctx)
 	c.observe("clone", start, err)
 	if err != nil {
 		return nil, fmt.Errorf("clone gitops repo: %w", err)
@@ -111,15 +112,15 @@ func openClone(
 	return c, nil
 }
 
-// clone makes the full clone of url's default branch into c.dir and keeps the
-// branch its HEAD names, for the process lifetime.
-func (c *gitClone) clone(ctx context.Context, url string) error {
+// clone makes the full clone of c.url's default branch into c.dir and keeps
+// the branch its HEAD names, for the process lifetime.
+func (c *gitClone) clone(ctx context.Context) error {
 	auth, err := c.auth(ctx)
 	if err != nil {
 		return err
 	}
 	repo, err := git.PlainCloneContext(ctx, c.dir, true, &git.CloneOptions{
-		URL:          url,
+		URL:          c.url,
 		Auth:         auth,
 		RemoteName:   remoteName,
 		SingleBranch: true,

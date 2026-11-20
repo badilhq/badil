@@ -26,7 +26,8 @@ import (
 var errUnexpected = errors.New("unexpected call")
 
 // loopFake is the store and forge of a lifecycle.SweepAPI (api) whose
-// previews are all gone by the time they are read. ListPreviews returns slugs or listErr and, while block is
+// previews are all gone by the time they are read: its Apply changes
+// nothing. ListPreviews returns slugs or listErr and, while block is
 // open, waits for it to close or for its context to end. It tracks how many
 // ListPreviews calls ran and the most that ran at once.
 type loopFake struct {
@@ -73,34 +74,12 @@ func (f *loopFake) GetPreview(context.Context, string) (*preview.PreviewValues, 
 	return nil, "", store.ErrNotFound
 }
 
-func (f *loopFake) FetchServiceCatalog(context.Context) (*store.ServiceCatalog, error) {
-	return &store.ServiceCatalog{Label: "preview"}, nil
-}
-
 func (f *loopFake) GetPullRequest(context.Context, string, string, int) (*forge.PullRequest, error) {
 	return nil, errUnexpected
 }
 
-func (f *loopFake) DeletePreviewWithRetry(
-	context.Context,
-	string, string,
-	func(preview.PreviewValues) bool,
-) (*store.DeleteResult, error) {
-	return nil, errUnexpected
-}
-
-func (f *loopFake) SyncPreviewWithRetry(context.Context, string, *store.ServiceCatalog) (*store.SyncResult, error) {
-	return nil, errUnexpected
-}
-
-func (f *loopFake) TeardownPreviewWithRetry(
-	context.Context,
-	string,
-	string,
-	string,
-	int,
-) (*store.TeardownResult, error) {
-	return nil, errUnexpected
+func (f *loopFake) Apply(context.Context, store.Op) (store.Result, error) {
+	return store.Result{NoOp: true}, nil
 }
 
 func (f *loopFake) UpsertComment(context.Context, string, string, int, string) error {

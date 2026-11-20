@@ -4,14 +4,16 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
-	"github.com/badilhq/badil/internal/store"
+	"github.com/badilhq/badil/internal/store/storetest"
 )
 
 // pathsBadil is a monorepo, acme/platform, whose services declare paths, and
@@ -46,6 +48,16 @@ func changed(names ...string) []forge.ChangedFile {
 		files = append(files, forge.ChangedFile{Filename: name})
 	}
 	return files
+}
+
+// deployedServices returns the services logged as deployed to capture.
+func deployedServices(capture *logCapture) []string {
+	var out []string
+	for _, d := range deployedLogged(capture) {
+		_, service, _ := strings.Cut(d, "/")
+		out = append(out, service)
+	}
+	return out
 }
 
 // platformFake is a reconcileFake of pathsBadil, for acme/platform#42 open
@@ -89,11 +101,11 @@ func TestReconcile_PathsSelectTouchedServices(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			captureLogs(t)
+			capture := captureLogs(t)
 			f := platformFake(tc.files...)
-			lifecycle.ReconcilePR(context.Background(), f.api(), labeledPlatform())
+			lifecycle.ReconcilePR(context.Background(), f.api(t), labeledPlatform())
 
-			if got := services(f.writes); !slices.Equal(got, tc.want) {
+			if got := deployedServices(capture); !slices.Equal(got, tc.want) {
 				t.Errorf("deployed = %v, want %v", got, tc.want)
 			}
 			if !slices.Contains(f.calls, "files") {
@@ -106,12 +118,12 @@ func TestReconcile_PathsSelectTouchedServices(t *testing.T) {
 }
 
 func TestReconcile_PathsOverListingLimitTouchesEveryService(t *testing.T) {
-	captureLogs(t)
+	capture := captureLogs(t)
 	f := platformFake(changed("docs/README.md")...)
 	f.pr.ChangedFiles = forge.MaxListedFiles + 1
-	lifecycle.ReconcilePR(context.Background(), f.api(), labeledPlatform())
+	lifecycle.ReconcilePR(context.Background(), f.api(t), labeledPlatform())
 
-	if got, want := services(f.writes), []string{"api", "web", "worker"}; !slices.Equal(got, want) {
+	if got, want := deployedServices(capture), []string{"api", "web", "worker"}; !slices.Equal(got, want) {
 		t.Errorf("deployed = %v, want %v", got, want)
 	}
 	if slices.Contains(f.calls, "files") {
@@ -120,11 +132,11 @@ func TestReconcile_PathsOverListingLimitTouchesEveryService(t *testing.T) {
 }
 
 func TestReconcile_NoPathsListsNoFiles(t *testing.T) {
-	captureLogs(t)
+	capture := captureLogs(t)
 	f := &reconcileFake{pr: fetchedPR("monorepo", true, "preview"), files: changed("docs/README.md")}
-	lifecycle.ReconcilePR(context.Background(), f.api(), event("labeled", "monorepo", "preview", "preview"))
+	lifecycle.ReconcilePR(context.Background(), f.api(t), event("labeled", "monorepo", "preview", "preview"))
 
-	if got, want := services(f.writes), []string{"api", "worker"}; !slices.Equal(got, want) {
+	if got, want := deployedServices(capture), []string{"api", "worker"}; !slices.Equal(got, want) {
 		t.Errorf("deployed = %v, want %v", got, want)
 	}
 	if slices.Contains(f.calls, "files") {
@@ -147,12 +159,12 @@ func TestReconcile_PathsMixedRepo(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			captureLogs(t)
+			capture := captureLogs(t)
 			f := platformFake(tc.files...)
 			f.badil = badil
-			lifecycle.ReconcilePR(context.Background(), f.api(), labeledPlatform())
+			lifecycle.ReconcilePR(context.Background(), f.api(t), labeledPlatform())
 
-			if got := services(f.writes); !slices.Equal(got, tc.want) {
+			if got := deployedServices(capture); !slices.Equal(got, tc.want) {
 				t.Errorf("deployed = %v, want %v", got, tc.want)
 			}
 		})
@@ -160,16 +172,18 @@ func TestReconcile_PathsMixedRepo(t *testing.T) {
 }
 
 func TestReconcile_PathsUnlabeledRedeploy(t *testing.T) {
-	captureLogs(t)
+	capture := captureLogs(t)
 	f := platformFake(changed("web/src/app.tsx")...)
-	lifecycle.ReconcilePR(context.Background(), f.api(), event("unlabeled", "platform", "preview:old", "preview"))
+	lifecycle.ReconcilePR(context.Background(), f.api(t), event("unlabeled", "platform", "preview:old", "preview"))
 
-	if got := services(f.writes); !slices.Equal(got, []string{"web"}) {
+	if got := deployedServices(capture); !slices.Equal(got, []string{"web"}) {
 		t.Errorf("deployed = %v, want [web]", got)
 	}
-	want := []string{"teardown:old", "files", "get:feature-pricing", "write:feature-pricing", "fanout"}
-	if !slices.Equal(f.calls, want) {
+	if want := []string{"files", "apply", "fanout"}; !slices.Equal(f.calls, want) {
 		t.Errorf("calls = %v, want %v", f.calls, want)
+	}
+	if got := teardownSlugs(teardownsLogged(capture)); !slices.Equal(got, []string{"old"}) {
+		t.Errorf("teardowns = %v, want old", got)
 	}
 }
 
@@ -187,12 +201,12 @@ func TestReconcile_PathsListingFails(t *testing.T) {
 			capture := captureLogs(t)
 			f := platformFake()
 			f.filesErr = errors.New("files boom")
-			lifecycle.ReconcilePR(context.Background(), f.api(), event(tc.action, "platform", tc.label, "preview"))
+			lifecycle.ReconcilePR(context.Background(), f.api(t), event(tc.action, "platform", tc.label, "preview"))
 
-			if len(f.writes) != 0 || len(f.teardowns) != 0 || len(f.upserts) != 0 || len(f.unpins) != 0 {
-				t.Errorf("writes = %v, teardowns = %v, upserts = %v, unpins = %v; want nothing",
-					f.writes, f.teardowns, f.upserts, f.unpins)
+			if want := []string{"files"}; !slices.Equal(f.calls, want) || len(teardownsLogged(capture)) != 0 {
+				t.Errorf("calls = %v, want only the files listing", f.calls)
 			}
+			f.assertNothingPushed(t)
 			logs := capture.find(slog.LevelError, "preview reconcile failed")
 			if len(logs) != 1 || logs[0]["err"].String() != "files boom" {
 				t.Errorf("reconcile failed logs = %v", logs)
@@ -219,21 +233,21 @@ func TestReconcile_PathsHolderCheckOnTouchedServices(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			captureLogs(t)
+			capture := captureLogs(t)
 			f := platformFake(tc.files...)
 			f.previews = map[string]*preview.PreviewValues{
 				"feature-pricing": values(pin("api", platformPR7, recent), preview.ServiceEntry{Name: "web"}),
 			}
-			lifecycle.ReconcilePR(context.Background(), f.api(), labeledPlatform())
+			lifecycle.ReconcilePR(context.Background(), f.api(t), labeledPlatform())
 
-			if got := services(f.writes); !slices.Equal(got, tc.deployed) {
+			if got := deployedServices(capture); !slices.Equal(got, tc.deployed) {
 				t.Errorf("deployed = %v, want %v", got, tc.deployed)
 			}
 			if held := len(f.upserts) == 1; held != tc.held || len(f.upserts) > 1 {
 				t.Errorf("upserts = %q, want held comment %v", f.upserts, tc.held)
 			}
-			if len(f.unpins) != 0 {
-				t.Errorf("unpins = %+v, want none", f.unpins)
+			if logs := capture.find(slog.LevelInfo, "preview teardown"); len(logs) != 0 {
+				t.Errorf("teardown logs = %v, want none", logs)
 			}
 		})
 	}
@@ -252,25 +266,19 @@ func TestReconcile_PathsUnpinUntouchedBeforeDeploy(t *testing.T) {
 			pin("billing", platformPR42, recent),
 		),
 	}
-	lifecycle.ReconcilePR(context.Background(), f.api(), labeledPlatform())
+	lifecycle.ReconcilePR(context.Background(), f.api(t), labeledPlatform())
 
-	wantUnpins := []unpinCall{{
-		slug: "feature-pricing", owner: "acme", repo: "platform", number: 42, services: []string{"api", "worker"},
-	}}
-	if !slices.EqualFunc(f.unpins, wantUnpins, equalUnpin) {
-		t.Errorf("unpins = %+v, want %+v", f.unpins, wantUnpins)
+	f.assertOneCommit(t, "chore(preview): deploy acme/platform#42 to feature-pricing",
+		"feature-pricing: unpin api", "feature-pricing: unpin worker", "feature-pricing: pin web@fe7c4ed")
+	if want := []string{"files", "apply", "fanout"}; !slices.Equal(f.calls, want) {
+		t.Errorf("calls = %v, want %v: one summary of the preview", f.calls, want)
 	}
-	wantCalls := []string{
-		"files", "get:feature-pricing", "unpin:feature-pricing", "fanout", "write:feature-pricing", "fanout",
+	want := map[string]string{"api": "", "web": fetchedSHA, "worker": "", "billing": "abc123"}
+	if pins := f.g.pins("feature-pricing"); !maps.Equal(pins, want) {
+		t.Errorf("pins = %v, want %v", pins, want)
 	}
-	if !slices.Equal(f.calls, wantCalls) {
-		t.Errorf("calls = %v, want %v", f.calls, wantCalls)
-	}
-	if len(f.writes) != 1 || f.writes[0].service != "web" || f.writes[0].skipUnchanged {
-		t.Errorf("writes = %+v, want web with skipUnchanged false", f.writes)
-	}
-	if len(f.teardowns) != 0 || len(f.upserts) != 0 {
-		t.Errorf("teardowns = %v, upserts = %q; want none", f.teardowns, f.upserts)
+	if len(f.upserts) != 0 {
+		t.Errorf("upserts = %q; want none", f.upserts)
 	}
 	logs := capture.find(slog.LevelInfo, "preview teardown")
 	if len(logs) != 1 || logs[0]["removed"].String() != "api, worker" || logs[0]["deleted"].Bool() {
@@ -282,26 +290,20 @@ func TestReconcile_PathsUnpinUntouchedBeforeDeploy(t *testing.T) {
 	}, "badil_reconciles_total", "badil_teardowns_total")
 }
 
-func equalUnpin(a, b unpinCall) bool {
-	return a.slug == b.slug && a.owner == b.owner && a.repo == b.repo && a.number == b.number &&
-		slices.Equal(a.services, b.services)
-}
-
 func TestReconcile_PathsUnpinKeepsLastPinFile(t *testing.T) {
-	captureLogs(t)
+	capture := captureLogs(t)
 	f := platformFake(changed("web/src/app.tsx")...)
 	f.previews = map[string]*preview.PreviewValues{
 		"feature-pricing": values(pin("api", platformPR42, recent), preview.ServiceEntry{Name: "web"}),
 	}
-	lifecycle.ReconcilePR(context.Background(), f.api(), labeledPlatform())
+	lifecycle.ReconcilePR(context.Background(), f.api(t), labeledPlatform())
 
-	// The PR's last pin is unpinned by UnpinServicesWithRetry, which never
-	// deletes the file, not by a teardown.
-	if len(f.unpins) != 1 || !slices.Equal(f.unpins[0].services, []string{"api"}) || len(f.teardowns) != 0 {
-		t.Errorf("unpins = %+v, teardowns = %v; want one unpin of api, no teardown", f.unpins, f.teardowns)
-	}
-	if got := services(f.writes); !slices.Equal(got, []string{"web"}) || f.writes[0].skipUnchanged {
-		t.Errorf("writes = %+v, want web with skipUnchanged false", f.writes)
+	// The PR's last pin is unpinned without deleting the file, then web is
+	// deployed.
+	f.assertOneCommit(t, "chore(preview): deploy acme/platform#42 to feature-pricing",
+		"feature-pricing: unpin api", "feature-pricing: pin web@fe7c4ed")
+	if got := deployedServices(capture); !slices.Equal(got, []string{"web"}) {
+		t.Errorf("deployed = %v, want web", got)
 	}
 }
 
@@ -323,17 +325,16 @@ func TestReconcile_PathsNoUnpin(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			captureLogs(t)
+			capture := captureLogs(t)
 			f := platformFake(changed("web/src/app.tsx")...)
 			f.previews = tc.previews
-			lifecycle.ReconcilePR(context.Background(), f.api(), labeledPlatform())
+			lifecycle.ReconcilePR(context.Background(), f.api(t), labeledPlatform())
 
-			if len(f.unpins) != 0 {
-				t.Errorf("unpins = %+v, want none", f.unpins)
+			if logs := capture.find(slog.LevelInfo, "preview teardown"); len(logs) != 0 {
+				t.Errorf("teardown logs = %v, want none", logs)
 			}
-			if len(f.writes) != 1 || f.writes[0].service != "web" || !f.writes[0].skipUnchanged {
-				t.Errorf("writes = %+v, want web with skipUnchanged", f.writes)
-			}
+			f.assertOneCommit(t, "chore(preview): deploy acme/platform#42 to feature-pricing",
+				"feature-pricing: pin web@fe7c4ed")
 			assertMetrics(t, f.Metrics, map[string]float64{`badil_reconciles_total{outcome="deployed"}`: 1},
 				"badil_reconciles_total", "badil_teardowns_total")
 		})
@@ -346,17 +347,18 @@ func TestReconcile_PathsUnpinFails(t *testing.T) {
 	f.previews = map[string]*preview.PreviewValues{
 		"feature-pricing": values(pin("api", platformPR42, recent), preview.ServiceEntry{Name: "web"}),
 	}
-	f.unpinErr = errors.New("unpin boom")
-	lifecycle.ReconcilePR(context.Background(), f.api(), labeledPlatform())
+	f.beforePush = func(*storetest.Remote) error { return errors.New("push boom") }
+	lifecycle.ReconcilePR(context.Background(), f.api(t), labeledPlatform())
 
-	if len(f.writes) != 0 || len(f.fanOuts) != 0 {
-		t.Errorf("writes = %+v, fanOuts = %v; want none", f.writes, f.fanOuts)
+	f.assertNothingPushed(t)
+	if len(f.fanOuts) != 0 {
+		t.Errorf("fanOuts = %v; want none", f.fanOuts)
 	}
 	if logs := capture.find(slog.LevelError, "preview teardown failed"); len(logs) != 1 {
 		t.Errorf("preview teardown failed logs = %v, want one", logs)
 	}
 	logs := capture.find(slog.LevelError, "preview reconcile failed")
-	if len(logs) != 1 || logs[0]["err"].String() != "unpin boom" {
+	if len(logs) != 1 || !strings.Contains(logs[0]["err"].String(), "push boom") {
 		t.Errorf("reconcile failed logs = %v", logs)
 	}
 	assertMetrics(t, f.Metrics, map[string]float64{
@@ -367,48 +369,50 @@ func TestReconcile_PathsUnpinFails(t *testing.T) {
 
 func TestReconcile_PathsNoServiceChanged(t *testing.T) {
 	cases := []struct {
-		name        string
-		previews    map[string]*preview.PreviewValues
-		teardown    *store.TeardownResult
-		teardownErr error
-		result      string
-		calls       []string
+		name     string
+		previews map[string]*preview.PreviewValues
+		push     error
+		result   string
+		calls    []string
 	}{
 		{
 			name:   "preview does not exist",
 			result: "noop",
-			calls:  []string{"files", "teardown:feature-pricing", "upsert"},
+			calls:  []string{"files", "apply", "upsert"},
 		},
 		{
 			name: "PR pinned in the preview",
-			teardown: &store.TeardownResult{
-				Removed:       []string{"web"},
-				Values:        *values(pin("api", platformPR7, recent), preview.ServiceEntry{Name: "web"}),
-				CommitURL:     sweepCommitURL,
-				CommitMessage: "chore(preview): remove web from feature-pricing",
+			previews: map[string]*preview.PreviewValues{
+				"feature-pricing": values(pin("api", platformPR7, recent), pin("web", platformPR42, recent)),
 			},
 			result: "unpinned",
-			calls:  []string{"files", "teardown:feature-pricing", "fanout", "upsert"},
+			calls:  []string{"files", "apply", "fanout", "upsert"},
 		},
 		{
-			name:        "teardown fails",
-			teardownErr: errors.New("teardown boom"),
-			result:      "error",
-			calls:       []string{"files", "teardown:feature-pricing", "upsert"},
+			name: "teardown fails",
+			previews: map[string]*preview.PreviewValues{
+				"feature-pricing": values(pin("api", platformPR7, recent), pin("web", platformPR42, recent)),
+			},
+			push:   errors.New("push boom"),
+			result: "error",
+			calls:  []string{"files", "apply", "upsert"},
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			capture := captureLogs(t)
 			f := platformFake(changed("docs/README.md")...)
-			f.teardown, f.teardownErr = tc.teardown, tc.teardownErr
 			// Neither the holder nor the limit check runs: api is held and
 			// the cap is reached.
-			f.previews = map[string]*preview.PreviewValues{
-				"feature-pricing": values(pin("api", platformPR7, recent)),
+			f.previews = tc.previews
+			if f.previews == nil {
+				f.previews = listedPreviews("checkout")
 			}
-			f.maxPreviews, f.listed = 1, []string{"checkout"}
-			lifecycle.ReconcilePR(context.Background(), f.api(), labeledPlatform())
+			f.maxPreviews = 1
+			if tc.push != nil {
+				f.beforePush = func(*storetest.Remote) error { return tc.push }
+			}
+			lifecycle.ReconcilePR(context.Background(), f.api(t), labeledPlatform())
 
 			if !slices.Equal(f.calls, tc.calls) {
 				t.Errorf("calls = %v, want %v", f.calls, tc.calls)
@@ -416,8 +420,8 @@ func TestReconcile_PathsNoServiceChanged(t *testing.T) {
 			if len(f.upserts) != 1 || f.upserts[0] != noServiceBody {
 				t.Errorf("upserts = %q, want one with body:\n%s", f.upserts, noServiceBody)
 			}
-			if len(f.writes) != 0 || len(f.unpins) != 0 {
-				t.Errorf("writes = %+v, unpins = %+v; want none", f.writes, f.unpins)
+			if logs := capture.find(slog.LevelInfo, "preview deploy"); len(logs) != 0 {
+				t.Errorf("preview deploy logs = %v, want none", logs)
 			}
 			logs := capture.find(slog.LevelInfo, "preview reconcile skipped")
 			if len(logs) != 1 || logs[0]["reason"].String() != "no service changed" {
@@ -436,7 +440,7 @@ func TestReconcile_PathsNoServiceCommentFails(t *testing.T) {
 	capture := captureLogs(t)
 	f := platformFake(changed("docs/README.md")...)
 	f.upsertErr = errors.New("upsert boom")
-	lifecycle.ReconcilePR(context.Background(), f.api(), labeledPlatform())
+	lifecycle.ReconcilePR(context.Background(), f.api(t), labeledPlatform())
 
 	logs := capture.find(slog.LevelWarn, "preview conflict comment failed")
 	if len(logs) != 1 || logs[0]["err"].String() != "upsert boom" {
@@ -446,4 +450,28 @@ func TestReconcile_PathsNoServiceCommentFails(t *testing.T) {
 		`badil_reconciles_total{outcome="skipped"}`:                1,
 		`badil_reconcile_skips_total{reason="no service changed"}`: 1,
 	}, "badil_reconciles_total", "badil_reconcile_skips_total")
+}
+
+// TestReconcile_PathsListingFailsKeepsCleanup fails the files listing of a
+// PR that left another preview: its teardown from there is still committed,
+// and the reconcile fails.
+func TestReconcile_PathsListingFailsKeepsCleanup(t *testing.T) {
+	capture := captureLogs(t)
+	f := platformFake()
+	f.filesErr = errors.New("files boom")
+	f.previews = map[string]*preview.PreviewValues{"old": values(pinnedBy("api", platformPR42))}
+	lifecycle.ReconcilePR(context.Background(), f.api(t), event("unlabeled", "platform", "preview:old", "preview"))
+
+	f.assertOneCommit(t, "chore(preview): unpin acme/platform#42 from old", "old: delete")
+	if got := teardownSlugs(teardownsLogged(capture)); !slices.Equal(got, []string{"old"}) {
+		t.Errorf("teardowns = %v, want old", got)
+	}
+	logs := capture.find(slog.LevelError, "preview reconcile failed")
+	if len(logs) != 1 || logs[0]["err"].String() != "files boom" {
+		t.Errorf("reconcile failed logs = %v", logs)
+	}
+	assertMetrics(t, f.Metrics, map[string]float64{
+		`badil_reconciles_total{outcome="failed"}`:                  1,
+		`badil_teardowns_total{result="deleted",trigger="webhook"}`: 1,
+	}, "badil_reconciles_total", "badil_teardowns_total")
 }

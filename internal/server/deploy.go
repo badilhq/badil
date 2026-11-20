@@ -15,14 +15,14 @@ import (
 	"github.com/badilhq/badil/internal/store"
 )
 
-// deployTimeout caps the upstream work for a single deploy. Catalog + read +
-// write + fan-out comments add up to ~4-8 GitHub round-trips; 30s is generous
-// without letting a stuck request pin a goroutine forever.
+// deployTimeout caps the upstream work for a single deploy. The catalog read,
+// the gitops fetch and push (with its retries) and the fan-out comments add
+// up to a few round-trips; 30s is generous without letting a stuck request
+// pin a goroutine forever.
 const deployTimeout = 30 * time.Second
 
 // storeAPI is the subset of store.GitHubStore used by the deploy, reconcile,
-// teardown, sync and push handlers. Defined here so tests can inject fakes
-// without spinning up an httptest server for every GitHub round-trip.
+// teardown, sync and push handlers. Defined here so tests can inject fakes.
 type storeAPI interface {
 	lifecycle.ReconcileStore
 	lifecycle.SyncStore
@@ -111,9 +111,6 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("service %q not in catalog", req.Service))
 		return
 	}
-	if s.refuseOverLimit(ctx, logger, w, services.MaxPreviews, slug) {
-		return
-	}
 
 	inputs := preview.DeployInputs{
 		GitopsRepo:     "", // not used downstream; carry-over from earlier shape
@@ -128,58 +125,33 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// A manual deploy always writes: it refreshes updated-at (the TTL clock)
-	// and always returns a gitops commit URL.
-	result, fanErr, err := lifecycle.DeployPR(ctx, s.deployAPI(), services, slug, inputs, false)
+	// and always returns a gitops commit URL. It is refused with 409 when the
+	// preview does not exist and preview.maxPreviews previews already do.
+	result, fanErr, err := lifecycle.DeployPR(ctx, s.deployAPI(), services, slug, inputs)
+	if errors.Is(err, lifecycle.ErrPreviewLimit) {
+		msg := fmt.Sprintf("preview limit (%d) reached", services.MaxPreviews)
+		logger.WarnContext(ctx, "deploy failed", slog.String("op", "preview limit"), slog.String("err", msg))
+		writeJSONError(ctx, w, http.StatusConflict, msg)
+		return
+	}
+	var checkErr *lifecycle.CapCheckError
+	if errors.As(err, &checkErr) {
+		writeUpstreamError(ctx, logger, w, checkErr.Op, checkErr.Err)
+		return
+	}
 	if err != nil {
 		writeUpstreamError(ctx, logger, w, "write preview", err)
 		return
 	}
 
-	resp := DeployResponse{PreviewSlug: slug, GitOpsCommitURL: result.CommitURL}
+	resp := DeployResponse{PreviewSlug: slug, GitOpsCommitURL: result.Commit.URL}
 	if fanErr != nil {
 		logger.WarnContext(ctx, "comment fan-out had failures", slog.String("err", fanErr.Error()))
 		resp.Warnings = splitJoinedErr(fanErr)
 	}
 
-	logger.InfoContext(ctx, "deploy succeeded", slog.String("gitops_commit_url", result.CommitURL))
+	logger.InfoContext(ctx, "deploy succeeded", slog.String("gitops_commit_url", result.Commit.URL))
 	writeJSON(ctx, w, http.StatusOK, resp)
-}
-
-// refuseOverLimit answers the deploy and reports true when it must not go on:
-// 409 when the preview slug does not exist and maxPreviews previews already
-// do, or the upstream error when the preview can't be read or the previews
-// can't be listed. It reads nothing when maxPreviews is 0 (no cap). The check
-// and the later write are not atomic, so the cap is soft.
-func (s *Server) refuseOverLimit(
-	ctx context.Context,
-	logger *slog.Logger,
-	w http.ResponseWriter,
-	maxPreviews int,
-	slug string,
-) bool {
-	if maxPreviews <= 0 {
-		return false
-	}
-	_, _, err := s.store.GetPreview(ctx, slug)
-	if err == nil {
-		return false
-	}
-	if !errors.Is(err, store.ErrNotFound) {
-		writeUpstreamError(ctx, logger, w, "read preview", err)
-		return true
-	}
-	slugs, err := s.store.ListPreviews(ctx)
-	if err != nil {
-		writeUpstreamError(ctx, logger, w, "list previews", err)
-		return true
-	}
-	if len(slugs) < maxPreviews {
-		return false
-	}
-	msg := fmt.Sprintf("preview limit (%d) reached", maxPreviews)
-	logger.WarnContext(ctx, "deploy failed", slog.String("op", "preview limit"), slog.String("err", msg))
-	writeJSONError(ctx, w, http.StatusConflict, msg)
-	return true
 }
 
 // splitJoinedErr renders an errors.Join-style multi-error as one string per

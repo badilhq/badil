@@ -1,7 +1,6 @@
 package store_test
 
 import (
-	"context"
 	"slices"
 	"testing"
 
@@ -17,7 +16,7 @@ func staleBranchFile() string {
 	)
 }
 
-func TestSyncPreviewWithRetry(t *testing.T) {
+func TestSync(t *testing.T) {
 	tests := []struct {
 		name         string
 		files        []string
@@ -122,7 +121,7 @@ func TestSyncPreviewWithRetry(t *testing.T) {
 			want: func(v *preview.PreviewValues) { v.APIVersion = preview.APIVersion },
 		},
 		{
-			name:      "changed after a 409 re-fetch",
+			name:      "changed after a lost push",
 			files:     []string{staleBranchFile(), pinnedFile("acme/backend-2.git", "acme/x.git")},
 			conflicts: 1, wantChanged: true, wantPuts: 2,
 			want: func(v *preview.PreviewValues) {
@@ -130,7 +129,7 @@ func TestSyncPreviewWithRetry(t *testing.T) {
 			},
 		},
 		{
-			name: "matches after a 409 re-fetch", files: []string{staleBranchFile(), pinnedFile()},
+			name: "matches after a lost push", files: []string{staleBranchFile(), pinnedFile()},
 			conflicts: 1, wantPuts: 1,
 		},
 		{name: "missing file", wantNotFound: true},
@@ -151,9 +150,14 @@ func TestSyncPreviewWithRetry(t *testing.T) {
 				tt.catalog(catalog)
 			}
 
-			result, err := c.SyncPreviewWithRetry(context.Background(), "slug", catalog)
+			var result *store.SyncResult
+			out, err := apply(c, store.OpSync, func(tree *store.Tree) (store.Summary, error) {
+				var syncErr error
+				result, syncErr = tree.Sync("slug", catalog)
+				return store.Summary{Subject: "sync"}, syncErr
+			})
 			if err != nil {
-				t.Fatalf("SyncPreviewWithRetry: %v", err)
+				t.Fatalf("Apply: %v", err)
 			}
 			if puts := s.puts(); puts != tt.wantPuts {
 				t.Errorf("puts = %d, want %d", puts, tt.wantPuts)
@@ -162,32 +166,34 @@ func TestSyncPreviewWithRetry(t *testing.T) {
 			if want := [3]bool{tt.wantChanged, tt.wantNotify, tt.wantNotFound}; got != want {
 				t.Errorf("Changed, Notify, NotFound = %v, want %v", got, want)
 			}
-			assertSyncWrite(t, s, result, tt.files, tt.want)
+			assertSyncWrite(t, s, result, out, tt.files, tt.want)
 		})
 	}
 }
 
-// assertSyncWrite checks that an unchanged result is empty, and that a
-// changed one describes the write s received, whose content parses to the
-// last of files turned by edit.
+// assertSyncWrite checks that an unchanged result is empty with no commit,
+// and that a changed one describes the commit s received, recorded as
+// "slug: sync", whose file parses to the last of files turned by edit.
 func assertSyncWrite(
-	t *testing.T, s *writeServer, result *store.SyncResult, files []string, edit func(*preview.PreviewValues),
+	t *testing.T,
+	s *writeServer,
+	result *store.SyncResult,
+	out store.Result,
+	files []string,
+	edit func(*preview.PreviewValues),
 ) {
 	t.Helper()
 	if !result.Changed {
-		if result.CommitURL != "" || result.CommitMessage != "" || len(result.Values.Services) != 0 {
-			t.Errorf("unchanged result = %+v, want empty", result)
+		if !out.NoOp || len(result.Values.Services) != 0 {
+			t.Errorf("unchanged result = %+v, %+v; want empty, no commit", result, out)
 		}
 		return
 	}
 	want := decode(t, files[len(files)-1])
 	edit(&want)
-	const wantMessage = "chore(preview): sync slug with badil.yaml"
-	if result.CommitMessage != wantMessage || result.CommitURL != fakeCommitURL {
-		t.Errorf("CommitMessage, CommitURL = %q, %q", result.CommitMessage, result.CommitURL)
-	}
-	if reqs := s.fake.requests(); reqs[len(reqs)-1].message != wantMessage {
-		t.Errorf("commit message = %q, want %q", reqs[len(reqs)-1].message, wantMessage)
+	if c := s.fake.remote.Commits()[0]; out.NoOp || c.Hash != out.Commit ||
+		!slices.Equal(c.Body(), []string{"slug: sync"}) {
+		t.Errorf("result %+v, head %s with body %q; want the head, with body slug: sync", out, c.Hash, c.Body())
 	}
 	if !preview.Equal(result.Values, want) {
 		t.Errorf("result Values = %+v, want %+v", result.Values, want)

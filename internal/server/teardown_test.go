@@ -10,13 +10,18 @@ import (
 
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/preview"
-	"github.com/badilhq/badil/internal/store"
 )
 
-const (
-	teardownSlug      = "feature-add-pricing"
-	teardownCommitURL = "https://github.com/acme/gitops/commit/c0ffee"
-)
+const teardownSlug = "feature-add-pricing"
+
+// teardownSubject is the commit subject of a teardown of acme/backend-1#42
+// from teardownSlug.
+const teardownSubject = "chore(preview): unpin acme/backend-1#42 from " + teardownSlug
+
+// pinnedAt returns the previews slug pinned by acme/backend-1#42 alone.
+func pinnedAt(slug string) map[string]*preview.PreviewValues {
+	return map[string]*preview.PreviewValues{slug: {Services: []preview.ServiceEntry{pinnedBy42()}}}
+}
 
 // newTeardownServer returns a server backed by fg and configured by opts,
 // with every log record captured.
@@ -26,6 +31,7 @@ func newTeardownServer(t *testing.T, fg *fakeGitops, opts ...Option) (*Server, *
 	prev := slog.Default()
 	slog.SetDefault(slog.New(capture))
 	t.Cleanup(func() { slog.SetDefault(prev) })
+	fg.open(t)
 	return NewServer(fg, fg, "t", append([]Option{withFanOut(fg)}, opts...)...), capture
 }
 
@@ -96,7 +102,7 @@ func assertTeardownAttrs(t *testing.T, attrs map[string]slog.Value) {
 }
 
 func TestTeardown_ClosedStartsTeardown(t *testing.T) {
-	fg := &fakeGitops{pr: closedPR()}
+	fg := &fakeGitops{pr: closedPR(), previews: pinnedAt(teardownSlug)}
 	s, _ := newTeardownServer(t, fg)
 	s.handlePullRequest(context.Background(), prEvent("closed"))
 	if err := s.WaitBackground(context.Background()); err != nil {
@@ -122,7 +128,7 @@ func TestTeardown_OpenedStartsNoTeardown(t *testing.T) {
 }
 
 func TestTeardown_RunsInBackground(t *testing.T) {
-	fg := &fakeGitops{teardownGate: make(chan struct{}), pr: closedPR()}
+	fg := &fakeGitops{applyGate: make(chan struct{}), pr: closedPR(), previews: pinnedAt(teardownSlug)}
 	s, _ := newTeardownServer(t, fg)
 
 	returned := make(chan struct{})
@@ -142,7 +148,7 @@ func TestTeardown_RunsInBackground(t *testing.T) {
 		t.Errorf("WaitBackground while blocked = %v, want context.Canceled", err)
 	}
 
-	close(fg.teardownGate)
+	close(fg.applyGate)
 	if err := s.WaitBackground(context.Background()); err != nil {
 		t.Fatalf("WaitBackground: %v", err)
 	}
@@ -152,25 +158,20 @@ func TestTeardown_RunsInBackground(t *testing.T) {
 }
 
 func TestTeardown_UpdateComments(t *testing.T) {
-	const msg = "chore(preview): remove backend-1 from feature-add-pricing"
 	fg := &fakeGitops{
 		pr:      closedPR(),
 		catalog: []string{"backend-1", "backend-2", "front"},
-		teardownResult: &store.TeardownResult{
-			Values: preview.PreviewValues{Services: []preview.ServiceEntry{
-				{Name: "backend-1", Branch: "main"},
-				{Name: "backend-2", CommitSha: "bbbbbbbbbb", Metadata: &preview.Metadata{
-					PRURL: "https://github.com/acme/backend-2/pull/7", PRNumber: "7",
-				}},
-				{Name: "front", Branch: "main"},
+		previews: map[string]*preview.PreviewValues{teardownSlug: {Services: []preview.ServiceEntry{
+			pinnedBy42(),
+			{Name: "backend-2", CommitSha: "bbbbbbbbbb", Metadata: &preview.Metadata{
+				PRURL: "https://github.com/acme/backend-2/pull/7", PRNumber: "7",
 			}},
-			Removed:       []string{"backend-1"},
-			CommitURL:     teardownCommitURL,
-			CommitMessage: msg,
-		},
+			{Name: "front"},
+		}}},
 	}
 	s, capture := newTeardownServer(t, fg)
 	closeAndWait(t, s)
+	commitURL := fg.headURL()
 
 	if len(fg.upserts) != 1 {
 		t.Fatalf("upserts = %+v, want one on the closed PR", fg.upserts)
@@ -182,7 +183,7 @@ func TestTeardown_UpdateComments(t *testing.T) {
 	wantComment := "## 🧹 Preview: `feature-add-pricing`\n\n" +
 		"Removed `backend-1` from this preview (PR closed).\n\n" +
 		"---\n" +
-		"🔗 [" + msg + "](" + teardownCommitURL + ")"
+		"🔗 [" + teardownSubject + "](" + commitURL + ")"
 	if up.body != wantComment {
 		t.Errorf("closed-PR comment mismatch\n got:\n%s\nwant:\n%s", up.body, wantComment)
 	}
@@ -195,7 +196,7 @@ func TestTeardown_UpdateComments(t *testing.T) {
 		"> ⏳ A pinned service starts once CI has pushed the image for its commit. " +
 		"Until then its link may not respond.\n\n" +
 		"---\n" +
-		"🔗 [" + msg + "](" + teardownCommitURL + ")"
+		"🔗 [" + teardownSubject + "](" + commitURL + ")"
 	if !fg.fanOutBodyCalled || fg.capturedSummary != wantSummary {
 		t.Errorf("fan-out summary mismatch (called=%v)\n got:\n%s\nwant:\n%s",
 			fg.fanOutBodyCalled, fg.capturedSummary, wantSummary)
@@ -212,7 +213,7 @@ func TestTeardown_UpdateComments(t *testing.T) {
 	if attrs["deleted"].Bool() {
 		t.Error("deleted = true, want false")
 	}
-	if got := attrs["gitops_commit_url"].String(); got != teardownCommitURL {
+	if got := attrs["gitops_commit_url"].String(); got != commitURL {
 		t.Errorf("gitops_commit_url = %q", got)
 	}
 }
@@ -224,14 +225,12 @@ func TestTeardown_UpdateCommentsLinkArgoCD(t *testing.T) {
 			"  backend-1: {repo: https://github.com/acme/backend-1.git}\n" +
 			"  front: {repo: https://github.com/acme/front.git}\n" +
 			"preview:\n  argocdURL: https://argocd.example.com\n",
-		teardownResult: &store.TeardownResult{
-			Values: preview.PreviewValues{
-				Services: []preview.ServiceEntry{{Name: "backend-1"}, {Name: "front"}},
-			},
-			Removed:       []string{"backend-1"},
-			CommitURL:     teardownCommitURL,
-			CommitMessage: "chore(preview): remove backend-1 from feature-add-pricing",
-		},
+		previews: map[string]*preview.PreviewValues{teardownSlug: {Services: []preview.ServiceEntry{
+			pinnedBy42(),
+			{Name: "front", CommitSha: "cccccccccc", Metadata: &preview.Metadata{
+				PRURL: "https://github.com/acme/front/pull/9",
+			}},
+		}}},
 	}
 	s, _ := newTeardownServer(t, fg)
 	closeAndWait(t, s)
@@ -246,23 +245,14 @@ func TestTeardown_UpdateCommentsLinkArgoCD(t *testing.T) {
 }
 
 func TestTeardown_DeleteComment(t *testing.T) {
-	const msg = "chore(preview): delete feature-add-pricing preview"
-	fg := &fakeGitops{
-		pr: closedPR(),
-		teardownResult: &store.TeardownResult{
-			Removed:       []string{"backend-1"},
-			Deleted:       true,
-			CommitURL:     teardownCommitURL,
-			CommitMessage: msg,
-		},
-	}
+	fg := &fakeGitops{pr: closedPR(), previews: pinnedAt(teardownSlug)}
 	s, capture := newTeardownServer(t, fg)
 	closeAndWait(t, s)
 
 	wantComment := "## 🧹 Preview: `feature-add-pricing`\n\n" +
 		"Preview deleted (PR closed): no other PR is pinned.\n\n" +
 		"---\n" +
-		"🔗 [" + msg + "](" + teardownCommitURL + ")"
+		"🔗 [" + teardownSubject + "](" + fg.headURL() + ")"
 	if len(fg.upserts) != 1 || fg.upserts[0].body != wantComment {
 		t.Errorf("upserts = %+v, want one with body:\n%s", fg.upserts, wantComment)
 	}
@@ -276,7 +266,7 @@ func TestTeardown_DeleteComment(t *testing.T) {
 }
 
 func TestTeardown_Failure(t *testing.T) {
-	fg := &fakeGitops{teardownErr: errors.New("boom"), pr: closedPR()}
+	fg := &fakeGitops{applyErr: errors.New("boom"), pr: closedPR()}
 	s, capture := newTeardownServer(t, fg)
 	closeAndWait(t, s)
 
@@ -312,7 +302,7 @@ func TestTeardown_NothingRemoved(t *testing.T) {
 }
 
 func TestTeardown_PanicRecovered(t *testing.T) {
-	fg := &fakeGitops{teardownPanic: true, pr: closedPR()}
+	fg := &fakeGitops{applyPanic: true, pr: closedPR()}
 	s, capture := newTeardownServer(t, fg)
 	closeAndWait(t, s)
 
@@ -321,7 +311,7 @@ func TestTeardown_PanicRecovered(t *testing.T) {
 		t.Errorf("level = %v, want ERROR", r.Level)
 	}
 	assertTeardownAttrs(t, attrs)
-	if got := attrs["panic"].String(); got != "fake teardown panic" {
+	if got := attrs["panic"].String(); got != "fake apply panic" {
 		t.Errorf("panic = %q", got)
 	}
 }
@@ -329,7 +319,7 @@ func TestTeardown_PanicRecovered(t *testing.T) {
 func TestTeardown_ClosedEmptyBranchSlugWithNamedLabel(t *testing.T) {
 	pr := fetchedPR(false, "preview:pricing")
 	pr.HeadRef = "---"
-	fg := &fakeGitops{badilYAML: servicesWithPreview, pr: pr}
+	fg := &fakeGitops{badilYAML: servicesWithPreview, pr: pr, previews: pinnedAt("pricing")}
 	s, _ := newTeardownServer(t, fg)
 	ev := prEvent("closed")
 	ev.PullRequest.HeadRef = "---"

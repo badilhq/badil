@@ -19,31 +19,44 @@ import (
 // quiet is how long a test waits to conclude that nothing happens.
 const quiet = 100 * time.Millisecond
 
-// syncFake is a concurrency-safe lifecycle.SyncAPI. FetchServiceCatalogSHA
-// returns sha with catalogErr; previews is what ListPreviews returns and the
-// set of slugs SyncPreviewWithRetry finds. SyncPreviewWithRetry rewrites the
-// slugs in changed and fails those in syncErr. When gate is set,
-// SyncPreviewWithRetry sends its slug on entered, then waits until gate is
-// closed.
+// syncFake is a concurrency-safe lifecycle.SyncAPI over a gitops repo of a
+// real store holding sweepBadil and the previews of files: a preview in
+// changed differs from its projection on the catalog, one in broken can't
+// be parsed, the others match it. FetchServiceCatalogSHA returns the
+// catalog with sha, or catalogErr. Apply fails with applyErr when set and
+// counts its calls; when gate is set, it first sends on entered, then waits
+// until gate is closed.
 type syncFake struct {
 	*metrics.Metrics
 
 	mu         sync.Mutex
 	sha        string
 	catalogErr error
-	previews   []string
-	listErr    error
-	changed    map[string]bool
-	syncErr    map[string]error
+	applyErr   error
 	gate       chan struct{}
-	entered    chan string
+	entered    chan struct{}
 
+	g            *gitops
 	catalogReads int
-	synced       []string
+	applies      int
 }
 
-func newSyncFake(previews ...string) *syncFake {
-	return &syncFake{Metrics: metrics.New(), sha: "sha-1", previews: previews}
+// newSyncFake returns a syncFake whose previews are unchanged, changed and
+// broken.
+func newSyncFake(t *testing.T, unchanged, changed, broken []string) *syncFake {
+	t.Helper()
+	previews := map[string]*preview.PreviewValues{}
+	for _, slug := range unchanged {
+		previews[slug] = values(pin("backend-1", pr42, recent))
+	}
+	raw := map[string]string{}
+	for _, slug := range changed {
+		raw["previews/"+slug+"/values.yaml"] = marshal(t, *values(pin("backend-1", pr42, recent)))
+	}
+	for _, slug := range broken {
+		raw["previews/"+slug+"/values.yaml"] = "services: [\n"
+	}
+	return &syncFake{Metrics: metrics.New(), sha: "sha-1", g: newGitops(t, sweepBadil, previews, raw)}
 }
 
 func (f *syncFake) setSHA(sha string) {
@@ -52,81 +65,72 @@ func (f *syncFake) setSHA(sha string) {
 	f.sha = sha
 }
 
+func (f *syncFake) setApplyErr(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.applyErr = err
+}
+
 func (f *syncFake) reads() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.catalogReads
 }
 
-func (f *syncFake) syncs() []string {
+func (f *syncFake) applied() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return slices.Clone(f.synced)
+	return f.applies
 }
 
-func (f *syncFake) FetchServiceCatalogSHA(context.Context) (*store.ServiceCatalog, string, error) {
+func (f *syncFake) FetchServiceCatalogSHA(ctx context.Context) (*store.ServiceCatalog, string, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.catalogReads++
-	if f.catalogErr != nil {
-		return nil, f.sha, f.catalogErr
+	sha, catalogErr := f.sha, f.catalogErr
+	f.mu.Unlock()
+	if catalogErr != nil {
+		return nil, sha, catalogErr
 	}
-	return &store.ServiceCatalog{}, f.sha, nil
+	catalog, err := f.g.st.FetchServiceCatalog(ctx)
+	return catalog, sha, err
 }
 
-func (f *syncFake) ListPreviews(context.Context) ([]string, error) {
-	return f.previews, f.listErr
-}
-
-func (f *syncFake) SyncPreviewWithRetry(
-	_ context.Context,
-	slug string,
-	_ *store.ServiceCatalog,
-) (*store.SyncResult, error) {
+func (f *syncFake) Apply(ctx context.Context, op store.Op) (store.Result, error) {
 	if f.gate != nil {
-		f.entered <- slug
+		f.entered <- struct{}{}
 		<-f.gate
 	}
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.synced = append(f.synced, slug)
-	if err := f.syncErr[slug]; err != nil {
-		return nil, err
+	f.applies++
+	applyErr := f.applyErr
+	f.mu.Unlock()
+	if applyErr != nil {
+		return store.Result{}, applyErr
 	}
-	if !slices.Contains(f.previews, slug) {
-		return &store.SyncResult{NotFound: true}, nil
-	}
-	if f.changed[slug] {
-		return &store.SyncResult{Changed: true, CommitURL: syncCommitURL}, nil
-	}
-	return &store.SyncResult{}, nil
+	return f.g.st.Apply(ctx, op)
 }
 
-func (f *syncFake) FanOutPRComments(context.Context, preview.PreviewValues, string) error {
-	return nil
-}
-
-// api is the lifecycle.SyncAPI over f: its store and recorder, with its
-// FanOutPRComments as the fan-out. It has no forge.
+// api is the lifecycle.SyncAPI over f: its store and recorder, with a
+// fan-out that posts nothing. It has no forge.
 func (f *syncFake) api() lifecycle.SyncAPI {
 	return lifecycle.SyncAPI{
 		Store:    f,
 		Recorder: f,
-		FanOut: func(ctx context.Context, _ forge.Forge, vals preview.PreviewValues, body string) error {
-			return f.FanOutPRComments(ctx, vals, body)
+		FanOut: func(context.Context, forge.Forge, preview.PreviewValues, string) error {
+			return nil
 		},
 	}
 }
 
-// gated makes f's syncs wait for the returned release.
+// gated makes f's Apply wait for the returned release.
 func (f *syncFake) gated() func() {
 	f.gate = make(chan struct{})
-	f.entered = make(chan string, 64)
+	f.entered = make(chan struct{}, 64)
 	var once sync.Once
 	return func() { once.Do(func() { close(f.gate) }) }
 }
 
-// waitEntered waits for a sync to enter f's gate.
+// waitEntered waits for an Apply to enter f's gate.
 func waitEntered(t *testing.T, f *syncFake) {
 	t.Helper()
 	select {
@@ -136,62 +140,69 @@ func waitEntered(t *testing.T, f *syncFake) {
 	}
 }
 
-func TestSyncer_SyncAll(t *testing.T) {
-	captureLogs(t)
-	f := newSyncFake("a", "b", "c")
-	f.changed = map[string]bool{"a": true}
-	f.syncErr = map[string]error{"c": errors.New("sync boom")}
-	report, err := lifecycle.NewSyncer(f.api(), time.Minute).Sync(context.Background(), "")
-	if err != nil {
-		t.Fatalf("Sync: %v", err)
-	}
-	want := lifecycle.SyncReport{Synced: []string{"a"}, Unchanged: 1, Failed: []string{"c"}}
+// assertReport fails t unless report is want.
+func assertReport(t *testing.T, report, want lifecycle.SyncReport) {
+	t.Helper()
 	if !slices.Equal(report.Synced, want.Synced) || report.Unchanged != want.Unchanged ||
 		!slices.Equal(report.Failed, want.Failed) {
 		t.Errorf("report = %+v, want %+v", report, want)
 	}
-	if got := f.syncs(); !slices.Equal(got, []string{"a", "b", "c"}) {
-		t.Errorf("syncs = %v, want every preview", got)
+}
+
+func TestSyncer_SyncAll(t *testing.T) {
+	captureLogs(t)
+	f := newSyncFake(t, []string{"b"}, []string{"a"}, []string{"c"})
+	report, err := lifecycle.NewSyncer(f.api(), time.Minute).Sync(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	assertReport(t, report, lifecycle.SyncReport{Synced: []string{"a"}, Unchanged: 1, Failed: []string{"c"}})
+	pushed := f.g.pushed()
+	if len(pushed) != 1 || pushed[0].Subject() != "chore(preview): sync a with badil.yaml" ||
+		!slices.Equal(pushed[0].Body(), []string{"a: sync"}) {
+		t.Errorf("pushed = %q, want one sync of a", f.g.subjects())
 	}
 	assertMetrics(t, f.Metrics, map[string]float64{"badil_previews_synced_total": 1}, "badil_previews_synced_total")
+}
+
+func TestSyncer_SyncAllSeveralPreviews(t *testing.T) {
+	captureLogs(t)
+	f := newSyncFake(t, nil, []string{"a", "b"}, nil)
+	report, err := lifecycle.NewSyncer(f.api(), time.Minute).Sync(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	assertReport(t, report, lifecycle.SyncReport{Synced: []string{"a", "b"}})
+	pushed := f.g.pushed()
+	if len(pushed) != 1 || pushed[0].Subject() != "chore(preview): sync 2 previews with badil.yaml" ||
+		!slices.Equal(pushed[0].Body(), []string{"a: sync", "b: sync"}) {
+		t.Errorf("pushed = %q, want one sync of both", f.g.subjects())
+	}
 }
 
 func TestSyncer_SyncOne(t *testing.T) {
 	cases := []struct {
 		name       string
 		slug       string
-		syncErr    error
 		wantErr    error
 		wantReport lifecycle.SyncReport
-		wantSyncs  []string
+		pushed     int
 	}{
-		{
-			name: "rewritten", slug: "b", wantReport: lifecycle.SyncReport{Synced: []string{"b"}},
-			wantSyncs: []string{"b"},
-		},
-		{name: "unknown", slug: "zz", wantErr: lifecycle.ErrPreviewNotFound, wantSyncs: []string{"zz"}},
-		{
-			name: "unreadable", slug: "b", syncErr: errors.New("read boom"),
-			wantReport: lifecycle.SyncReport{Failed: []string{"b"}}, wantSyncs: []string{"b"},
-		},
+		{name: "rewritten", slug: "b", wantReport: lifecycle.SyncReport{Synced: []string{"b"}}, pushed: 1},
+		{name: "unknown", slug: "zz", wantErr: lifecycle.ErrPreviewNotFound},
+		{name: "unreadable", slug: "c", wantReport: lifecycle.SyncReport{Failed: []string{"c"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			captureLogs(t)
-			f := newSyncFake("a", "b")
-			f.changed = map[string]bool{"b": true}
-			f.syncErr = map[string]error{"b": tc.syncErr}
+			f := newSyncFake(t, []string{"a"}, []string{"b"}, []string{"c"})
 			report, err := lifecycle.NewSyncer(f.api(), time.Minute).Sync(context.Background(), tc.slug)
 			if !errors.Is(err, tc.wantErr) || (tc.wantErr == nil && err != nil) {
 				t.Fatalf("err = %v, want %v", err, tc.wantErr)
 			}
-			if !slices.Equal(report.Synced, tc.wantReport.Synced) ||
-				!slices.Equal(report.Failed, tc.wantReport.Failed) ||
-				report.Unchanged != tc.wantReport.Unchanged {
-				t.Errorf("report = %+v, want %+v", report, tc.wantReport)
-			}
-			if got := f.syncs(); !slices.Equal(got, tc.wantSyncs) {
-				t.Errorf("syncs = %v, want %v", got, tc.wantSyncs)
+			assertReport(t, report, tc.wantReport)
+			if got := len(f.g.pushed()); got != tc.pushed {
+				t.Errorf("pushed = %q, want %d commits", f.g.subjects(), tc.pushed)
 			}
 		})
 	}
@@ -201,23 +212,27 @@ func TestSyncer_SyncErrors(t *testing.T) {
 	cases := []struct {
 		name       string
 		catalogErr error
-		listErr    error
+		applyErr   error
 		wantConfig bool
+		wantApply  int
 	}{
 		{name: "badil.yaml unavailable", catalogErr: errors.New("parse boom"), wantConfig: true},
-		{name: "list failure", listErr: errors.New("list boom")},
+		{name: "operation failure", applyErr: store.ErrUnauthorized, wantApply: 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			captureLogs(t)
-			f := newSyncFake("a")
-			f.catalogErr, f.listErr = tc.catalogErr, tc.listErr
+			f := newSyncFake(t, nil, []string{"a"}, nil)
+			f.catalogErr, f.applyErr = tc.catalogErr, tc.applyErr
 			_, err := lifecycle.NewSyncer(f.api(), time.Minute).Sync(context.Background(), "")
 			if err == nil || errors.Is(err, lifecycle.ErrConfigUnavailable) != tc.wantConfig {
 				t.Fatalf("err = %v, want ErrConfigUnavailable %v", err, tc.wantConfig)
 			}
-			if got := f.syncs(); len(got) != 0 {
-				t.Errorf("syncs = %v, want none", got)
+			if tc.applyErr != nil && !errors.Is(err, tc.applyErr) {
+				t.Errorf("err = %v, want %v", err, tc.applyErr)
+			}
+			if got := f.applied(); got != tc.wantApply {
+				t.Errorf("applies = %d, want %d", got, tc.wantApply)
 			}
 		})
 	}
@@ -225,20 +240,19 @@ func TestSyncer_SyncErrors(t *testing.T) {
 
 func TestSyncer_PushSyncsOnlyANewSHA(t *testing.T) {
 	captureLogs(t)
-	f := newSyncFake("a", "b")
-	f.syncErr = map[string]error{"b": errors.New("sync boom")}
+	f := newSyncFake(t, nil, []string{"a"}, []string{"b"})
 	s := lifecycle.NewSyncer(f.api(), time.Minute)
 	ctx := context.Background()
 
 	s.Push(ctx) // sha-1, first push since start: syncs, b fails.
 	s.Push(ctx) // sha-1 again (e.g. badil's own commit): nothing.
-	if got := f.syncs(); !slices.Equal(got, []string{"a", "b"}) {
-		t.Fatalf("syncs = %v, want one run over a and b", got)
+	if got := f.applied(); got != 1 {
+		t.Fatalf("runs = %d, want one", got)
 	}
 	f.setSHA("sha-2")
 	s.Push(ctx)
-	if got := f.syncs(); !slices.Equal(got, []string{"a", "b", "a", "b"}) {
-		t.Errorf("syncs = %v, want a second run for sha-2", got)
+	if got := f.applied(); got != 2 {
+		t.Errorf("runs = %d, want a second run for sha-2", got)
 	}
 }
 
@@ -256,7 +270,7 @@ func TestSyncer_PushConfigErrors(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			logs := captureLogs(t)
-			f := newSyncFake("a")
+			f := newSyncFake(t, nil, []string{"a"}, nil)
 			f.sha, f.catalogErr = tc.sha, errors.New("catalog boom")
 			s := lifecycle.NewSyncer(f.api(), time.Minute)
 			s.Push(context.Background())
@@ -264,8 +278,8 @@ func TestSyncer_PushConfigErrors(t *testing.T) {
 			if f.reads() != 2 {
 				t.Errorf("catalog reads = %d, want 2", f.reads())
 			}
-			if got := f.syncs(); len(got) != 0 {
-				t.Errorf("syncs = %v, want none", got)
+			if got := f.applied(); got != 0 {
+				t.Errorf("runs = %d, want none", got)
 			}
 			if got := len(logs.find(slog.LevelError, "config sync failed")); got != tc.wantFailures {
 				t.Errorf("failed runs = %d, want %d", got, tc.wantFailures)
@@ -274,39 +288,45 @@ func TestSyncer_PushConfigErrors(t *testing.T) {
 	}
 }
 
-func TestSyncer_PushListErrorRecordsNoSHA(t *testing.T) {
-	captureLogs(t)
-	f := newSyncFake("a")
-	f.listErr = errors.New("list boom")
+func TestSyncer_PushOperationErrorRecordsNoSHA(t *testing.T) {
+	logs := captureLogs(t)
+	f := newSyncFake(t, nil, []string{"a"}, nil)
+	f.applyErr = errors.New("push boom")
 	s := lifecycle.NewSyncer(f.api(), time.Minute)
 	ctx := context.Background()
 
-	s.Push(ctx) // sha-1, previews can't be listed: nothing synced, no SHA kept.
-	f.listErr = nil
+	s.Push(ctx) // sha-1, the operation fails: nothing synced, no SHA kept.
+	f.setApplyErr(nil)
 	s.Push(ctx) // sha-1 again: retried, syncs a.
 	s.Push(ctx) // sha-1 now recorded: nothing.
-	if got := f.syncs(); !slices.Equal(got, []string{"a"}) {
-		t.Errorf("syncs = %v, want one run over a after the list failure", got)
+	if got := f.applied(); got != 2 {
+		t.Errorf("runs = %d, want the failed run and its retry", got)
+	}
+	if got := f.g.subjects(); !slices.Equal(got, []string{"chore(preview): sync a with badil.yaml"}) {
+		t.Errorf("pushed = %q, want one sync of a", got)
+	}
+	failed := logs.find(slog.LevelError, "config sync failed")
+	if len(failed) != 1 || failed[0]["op"].String() != "sync previews" || failed[0]["err"].String() != "push boom" {
+		t.Errorf("config sync failed logs = %v", failed)
 	}
 }
 
 func TestSyncer_PushDoesNotTouchAPISHA(t *testing.T) {
 	captureLogs(t)
-	f := newSyncFake("a")
+	f := newSyncFake(t, nil, []string{"a"}, nil)
 	s := lifecycle.NewSyncer(f.api(), time.Minute)
 	if _, err := s.Sync(context.Background(), ""); err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
 	s.Push(context.Background()) // The API run recorded no SHA: the push syncs.
-	if got := f.syncs(); !slices.Equal(got, []string{"a", "a"}) {
-		t.Errorf("syncs = %v, want a run per trigger", got)
+	if got := f.applied(); got != 2 {
+		t.Errorf("runs = %d, want a run per trigger", got)
 	}
 }
 
 func TestSyncer_OneRunAtATime(t *testing.T) {
 	captureLogs(t)
-	f := newSyncFake("a")
-	f.changed = map[string]bool{"a": true}
+	f := newSyncFake(t, nil, []string{"a"}, nil)
 	release := f.gated()
 	defer release()
 	s := lifecycle.NewSyncer(f.api(), time.Minute)
@@ -334,9 +354,8 @@ func TestSyncer_OneRunAtATime(t *testing.T) {
 	n := 0
 	for r := range reports {
 		n++
-		if !slices.Equal(r.Synced, []string{"a"}) {
-			t.Errorf("report = %+v, want a synced", r)
-		}
+		// The push run synced a: each later run finds it unchanged.
+		assertReport(t, r, lifecycle.SyncReport{Unchanged: 1})
 	}
 	if n != 3 || f.reads() != 4 {
 		t.Errorf("answered API calls, catalog reads = %d, %d; want 3, 4: each caller runs and gets its own report",
@@ -346,7 +365,7 @@ func TestSyncer_OneRunAtATime(t *testing.T) {
 
 func TestSyncer_SyncWaitStopsWithContext(t *testing.T) {
 	captureLogs(t)
-	f := newSyncFake("a")
+	f := newSyncFake(t, nil, []string{"a"}, nil)
 	release := f.gated()
 	defer release()
 	s := lifecycle.NewSyncer(f.api(), time.Minute)

@@ -1,7 +1,6 @@
 package store_test
 
 import (
-	"context"
 	"slices"
 	"testing"
 
@@ -21,29 +20,27 @@ func partNames(vals preview.PreviewValues) []string {
 	return out
 }
 
-// TestWritePreviewWithRetry_Needs checks that a deploy of front on needsBadil
+// TestDeploy_Needs checks that a deploy of front on needsBadil
 // writes front and what it needs, and that a deploy of payments to the same
 // preview adds payments and kafka.
-func TestWritePreviewWithRetry_Needs(t *testing.T) {
+func TestDeploy_Needs(t *testing.T) {
 	catalog, err := store.ParseCatalog([]byte(needsBadil))
 	if err != nil {
 		t.Fatalf("ParseCatalog: %v", err)
 	}
-	deploy := func(files []string, service string) (*store.WriteResult, string) {
+	deployOn := func(files []string, service string) (*store.WriteResult, string) {
 		t.Helper()
 		s := &writeServer{files: files}
 		in := sampleInputs()
 		in.ServiceName = service
-		res, writeErr := s.start(t).WritePreviewWithRetry(
-			context.Background(), "slug", catalog, service, "abc1234567890", in, "create", "update", false,
-		)
+		res, _, writeErr := deploy(s.start(t), "slug", catalog, service, "abc1234567890", in, false)
 		if writeErr != nil {
-			t.Fatalf("WritePreviewWithRetry %s: %v", service, writeErr)
+			t.Fatalf("Apply %s: %v", service, writeErr)
 		}
 		return res, s.written()
 	}
 
-	first, written := deploy([]string{""}, "front")
+	first, written := deployOn([]string{""}, "front")
 	want := []string{"front", "backend", "postgres", "redis"}
 	if got := partNames(first.Values); !slices.Equal(got, want) {
 		t.Errorf("front preview = %v, want %v", got, want)
@@ -53,7 +50,7 @@ func TestWritePreviewWithRetry_Needs(t *testing.T) {
 		t.Errorf("front Excluded = %v, want %v", first.Excluded, want)
 	}
 
-	second, _ := deploy([]string{written}, "payments")
+	second, _ := deployOn([]string{written}, "payments")
 	want = []string{"front", "backend", "payments", "postgres", "redis", "kafka"}
 	if got := partNames(second.Values); !slices.Equal(got, want) {
 		t.Errorf("front and payments preview = %v, want %v", got, want)

@@ -16,11 +16,9 @@ import (
 	"testing"
 	"time"
 
-	gh "github.com/google/go-github/v71/github"
-
 	"github.com/badilhq/badil/internal/metrics"
-	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
+	"github.com/badilhq/badil/internal/store/storetest"
 )
 
 // checkTTL is how long a successful remote check is trusted.
@@ -48,7 +46,7 @@ func (c *fakeClock) advance(d time.Duration) {
 // *Metrics, whose freshness checks read the returned clock.
 func clockedStore(
 	t *testing.T, files map[string]string,
-) (*store.GitHubStore, *remoteRepo, *fakeClock, *metrics.Metrics) {
+) (*store.GitHubStore, *storetest.Remote, *fakeClock, *metrics.Metrics) {
 	t.Helper()
 	m := metrics.New()
 	st, remote := readStore(t, files, store.WithMetrics(m))
@@ -116,8 +114,8 @@ func serviceName(t *testing.T, st *store.GitHubStore) string {
 func TestOpen_TempDirPerStore(t *testing.T) {
 	remote := newRemote(t, map[string]string{"previews/a/values.yaml": previewFile("first")})
 	open := func() *store.GitHubStore {
-		st, err := store.Open(context.Background(), gh.NewClient(nil), "acme", "gitops",
-			store.CloneConfig{URL: remote.url()})
+		st, err := store.Open(context.Background(), "acme", "gitops",
+			store.CloneConfig{URL: remote.URL()}, testIdentity)
 		if err != nil {
 			t.Fatalf("Open: %v", err)
 		}
@@ -155,8 +153,8 @@ func TestOpen_CloneDirClonedAgain(t *testing.T) {
 	remote := newRemote(t, map[string]string{"previews/a/values.yaml": previewFile("first")})
 	dir := filepath.Join(t.TempDir(), "gitops")
 	open := func() *store.GitHubStore {
-		st, err := store.Open(context.Background(), gh.NewClient(nil), "acme", "gitops",
-			store.CloneConfig{URL: remote.url(), Dir: dir})
+		st, err := store.Open(context.Background(), "acme", "gitops",
+			store.CloneConfig{URL: remote.URL(), Dir: dir}, testIdentity)
 		if err != nil {
 			t.Fatalf("Open: %v", err)
 		}
@@ -183,7 +181,7 @@ func TestOpen_CloneDirClonedAgain(t *testing.T) {
 		t.Fatalf("stat %s after Close = %v, want the given directory kept", dir, err)
 	}
 
-	remote.set("previews/a/values.yaml", previewFile("second"))
+	remote.Set("previews/a/values.yaml", previewFile("second"))
 	if got := serviceName(t, open()); got != "second" {
 		t.Errorf("service after a new start = %q, want second, cloned again", got)
 	}
@@ -201,7 +199,7 @@ func TestFreshness_TTL(t *testing.T) {
 	}
 	assertChecks(t, m, 1, 0)
 
-	remote.set("previews/a/values.yaml", previewFile("second"))
+	remote.Set("previews/a/values.yaml", previewFile("second"))
 	clock.advance(checkTTL - time.Millisecond)
 	if got := serviceName(t, st); got != "first" {
 		t.Errorf("service within the TTL = %q, want first, with no check", got)
@@ -219,7 +217,7 @@ func TestFreshness_TTL(t *testing.T) {
 
 func TestFreshness_ConcurrentReadsShareOneCheck(t *testing.T) {
 	st, remote, clock, m := clockedStore(t, map[string]string{"previews/a/values.yaml": previewFile("first")})
-	remote.set("previews/a/values.yaml", previewFile("second"))
+	remote.Set("previews/a/values.yaml", previewFile("second"))
 	clock.advance(checkTTL)
 
 	const readers = 16
@@ -255,7 +253,7 @@ func TestFreshness_ReadsDuringFetches(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		for i := 1; i <= 20; i++ {
-			remote.set("previews/a/values.yaml", previewFile(fmt.Sprintf("v%d", i)))
+			remote.Set("previews/a/values.yaml", previewFile(fmt.Sprintf("v%d", i)))
 			st.Invalidate()
 		}
 	})
@@ -281,7 +279,7 @@ func TestFreshness_ReadsDuringFetches(t *testing.T) {
 func TestFreshness_InvalidateChecksAtOnce(t *testing.T) {
 	st, remote, _, m := clockedStore(t, map[string]string{"previews/a/values.yaml": previewFile("first")})
 	serviceName(t, st)
-	remote.set("previews/a/values.yaml", previewFile("second"))
+	remote.Set("previews/a/values.yaml", previewFile("second"))
 	st.Invalidate()
 	if got := serviceName(t, st); got != "second" {
 		t.Errorf("service after Invalidate = %q, want second", got)
@@ -289,35 +287,41 @@ func TestFreshness_InvalidateChecksAtOnce(t *testing.T) {
 	assertChecks(t, m, 1, 1)
 }
 
-// TestFreshness_WriteChecksAtOnce writes through the contents API, then
-// reads the written file back within the TTL.
-func TestFreshness_WriteChecksAtOnce(t *testing.T) {
-	first := previewFile("first")
-	f := newGitopsFake(t, map[string]string{slugPath: first})
+// TestFreshness_ApplyReadsBackAtOnce pushes a commit, then reads the pushed
+// file back within the TTL, with no remote check but Apply's own fetch.
+func TestFreshness_ApplyReadsBackAtOnce(t *testing.T) {
+	f := newGitopsFake(t, map[string]string{"previews/a/values.yaml": previewFile("first")})
 	m := metrics.New()
 	st := f.open(t, store.WithMetrics(m))
 	clock := &fakeClock{t: time.Now()}
 	store.SetNow(st, clock.now)
 
-	vals := preview.PreviewValues{Services: []preview.ServiceEntry{{Name: "second"}}}
-	if _, err := st.WritePreview(context.Background(), "slug", vals, blobSHA(first), "update"); err != nil {
-		t.Fatalf("WritePreview: %v", err)
+	_, err := apply(st, store.OpDeploy, func(tree *store.Tree) (store.Summary, error) {
+		vals, getErr := tree.GetPreview("a")
+		if getErr != nil {
+			return store.Summary{}, getErr
+		}
+		vals.Services[0].Name = "second"
+		return store.Summary{Subject: "rename"}, store.PutPreview(tree, "a", *vals)
+	})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
 	}
-	got, sha, err := st.GetPreview(context.Background(), "slug")
+	got, sha, err := st.GetPreview(context.Background(), "a")
 	if err != nil {
 		t.Fatalf("GetPreview: %v", err)
 	}
-	reqs := f.requests()
-	if got.Services[0].Name != "second" || sha != blobSHA(reqs[0].content) {
-		t.Errorf("read back %+v at %s, want the written file at %s", got, sha, blobSHA(reqs[0].content))
+	written := f.remote.Files()["previews/a/values.yaml"]
+	if got.Services[0].Name != "second" || sha != blobSHA(written) {
+		t.Errorf("read back %+v at %s, want the pushed file at %s", got, sha, blobSHA(written))
 	}
-	assertChecks(t, m, 1, 1)
+	assertChecks(t, m, 0, 1)
 }
 
 func TestFreshness_LsRemoteErrorFailsRead(t *testing.T) {
 	st, remote, clock, m := clockedStore(t, map[string]string{"previews/a/values.yaml": previewFile("first")})
 	serviceName(t, st)
-	if err := os.RemoveAll(remote.dir); err != nil {
+	if err := os.RemoveAll(remote.Dir()); err != nil {
 		t.Fatal(err)
 	}
 	clock.advance(checkTTL)
@@ -343,8 +347,8 @@ func TestOpen_RemoteRefusesCredentials(t *testing.T) {
 			}))
 			t.Cleanup(srv.Close)
 			creds := func(context.Context) (string, string, error) { return "x-access-token", "revoked", nil }
-			_, err := store.Open(context.Background(), gh.NewClient(nil), "acme", "gitops",
-				store.CloneConfig{URL: srv.URL + "/acme/gitops.git", Credentials: creds})
+			_, err := store.Open(context.Background(), "acme", "gitops",
+				store.CloneConfig{URL: srv.URL + "/acme/gitops.git", Credentials: creds}, testIdentity)
 			if !errors.Is(err, store.ErrUnauthorized) {
 				t.Errorf("Open = %v, want ErrUnauthorized", err)
 			}
@@ -360,8 +364,8 @@ func TestOpen_CredentialProviderError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	creds := func(context.Context) (string, string, error) { return "", "", errors.New("token mint failed") }
-	_, err := store.Open(context.Background(), gh.NewClient(nil), "acme", "gitops",
-		store.CloneConfig{URL: srv.URL + "/acme/gitops.git", Credentials: creds})
+	_, err := store.Open(context.Background(), "acme", "gitops",
+		store.CloneConfig{URL: srv.URL + "/acme/gitops.git", Credentials: creds}, testIdentity)
 	if !errors.Is(err, store.ErrUnauthorized) || !strings.Contains(err.Error(), "token mint failed") {
 		t.Errorf("Open = %v, want ErrUnauthorized with the provider's error", err)
 	}
@@ -384,8 +388,8 @@ func TestCredentials_BeforeEachGitCall(t *testing.T) {
 		}
 		return "x-access-token", "token", nil
 	}
-	st, err := store.Open(context.Background(), gh.NewClient(nil), "acme", "gitops",
-		store.CloneConfig{URL: remote.url(), Credentials: creds})
+	st, err := store.Open(context.Background(), "acme", "gitops",
+		store.CloneConfig{URL: remote.URL(), Credentials: creds}, testIdentity)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -399,7 +403,7 @@ func TestCredentials_BeforeEachGitCall(t *testing.T) {
 	if n := calls.Load(); n != 2 {
 		t.Errorf("provider calls after an ls-remote = %d, want 2", n)
 	}
-	remote.set("previews/a/values.yaml", previewFile("second"))
+	remote.Set("previews/a/values.yaml", previewFile("second"))
 	st.Invalidate()
 	serviceName(t, st)
 	if n := calls.Load(); n != 4 {
@@ -441,8 +445,8 @@ func TestFreshness_CancelledRefreshRetriedByWaiter(t *testing.T) {
 		}
 		return "x-access-token", "token", nil
 	}
-	st, err := store.Open(context.Background(), gh.NewClient(nil), "acme", "gitops",
-		store.CloneConfig{URL: remote.url(), Credentials: creds})
+	st, err := store.Open(context.Background(), "acme", "gitops",
+		store.CloneConfig{URL: remote.URL(), Credentials: creds}, testIdentity)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -481,7 +485,7 @@ func TestFetch_RepacksPastPackLimit(t *testing.T) {
 	packDir := filepath.Join(store.CloneDir(st), "objects", "pack")
 	for i := 1; i <= store.MaxPacks+10; i++ {
 		want := fmt.Sprintf("v%d", i)
-		remote.set("previews/a/values.yaml", previewFile(want))
+		remote.Set("previews/a/values.yaml", previewFile(want))
 		st.Invalidate()
 		if got := serviceName(t, st); got != want {
 			t.Fatalf("service after fetch %d = %q, want %s", i, got, want)

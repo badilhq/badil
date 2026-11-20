@@ -57,10 +57,8 @@ func TestSync_All(t *testing.T) {
 	for _, body := range []string{"", "{}", `{"slug":null}`} {
 		t.Run(body, func(t *testing.T) {
 			fg := syncFake()
-			fg.listed = []string{"a", "b", "c"}
-			fg.previews = previewFiles("a", "b", "c")
-			fg.syncResult = map[string]*store.SyncResult{"a": {Changed: true}}
-			fg.syncErr = map[string]error{"c": errors.New("sync boom")}
+			fg.stale = map[string]bool{"a": true}
+			fg.raw = map[string]string{"previews/c/values.yaml": "services: [\n"}
 			s, m, _ := newPushServer(t, fg)
 			resp := decodeSync(t, postSync(t, s, body, "t"))
 			if !slices.Equal(resp.Synced, []string{"a"}) || resp.Unchanged != 1 ||
@@ -82,7 +80,7 @@ func TestSync_EmptyListsAreArrays(t *testing.T) {
 
 func TestSync_OneSlug(t *testing.T) {
 	fg := syncFake()
-	fg.syncResult = map[string]*store.SyncResult{"b": {Changed: true}}
+	fg.stale = map[string]bool{"a": true, "b": true}
 	s, m, _ := newPushServer(t, fg)
 	resp := decodeSync(t, postSync(t, s, `{"slug":"b"}`, "t"))
 	if !slices.Equal(resp.Synced, []string{"b"}) || resp.Unchanged != 0 || len(resp.Failed) != 0 {
@@ -100,7 +98,7 @@ func TestSync_Refused(t *testing.T) {
 		status     int
 		wantErr    string
 		catalogErr error
-		listErr    error
+		applyErr   error
 	}{
 		{name: "path slug", body: `{"slug":"../x"}`, status: http.StatusBadRequest, wantErr: "invalid slug"},
 		{name: "empty slug", body: `{"slug":""}`, status: http.StatusBadRequest, wantErr: "invalid slug"},
@@ -119,13 +117,15 @@ func TestSync_Refused(t *testing.T) {
 			name: "gitops unauthorized", body: `{}`, status: http.StatusBadGateway,
 			wantErr: "gitops: unauthorized",
 			// As the store wraps a git call the remote refused.
-			listErr: fmt.Errorf("%w: %v", store.ErrUnauthorized, transport.ErrAuthenticationRequired),
+			//nolint:errorlint // as the store wraps it
+			applyErr: fmt.Errorf("%w: %v", store.ErrUnauthorized, transport.ErrAuthenticationRequired),
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			fg := syncFake()
-			fg.catalogErr, fg.listErr = tc.catalogErr, tc.listErr
+			fg.stale = map[string]bool{"a": true}
+			fg.catalogErr, fg.applyErr = tc.catalogErr, tc.applyErr
 			fg.started = make(chan string, 4)
 			s, _, _ := newPushServer(t, fg)
 			rec := postSync(t, s, tc.body, "t")

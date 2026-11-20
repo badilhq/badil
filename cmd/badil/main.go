@@ -288,8 +288,9 @@ func shutdownServers(ctx context.Context, servers ...*http.Server) error {
 // newStoreAndForge builds the gitops repo store and the GitHub forge from
 // cfg. One installation transport of the GitHub App backs both the API client
 // and the store's git credentials, so its cached installation token is shared.
-// The store clones the gitops repo into cfg.GitOpsCloneDir and is configured
-// by opts; a failed clone is an error.
+// The store commits as the App's bot (commitIdentity), clones the gitops repo
+// into cfg.GitOpsCloneDir and is configured by opts; an identity that can't
+// be resolved or a failed clone is an error.
 func newStoreAndForge(
 	ctx context.Context, app *github.App, cfg *config.Config, opts ...store.Option,
 ) (*store.GitHubStore, *forgegithub.Forge, error) {
@@ -299,15 +300,47 @@ func newStoreAndForge(
 	}
 	itr := app.InstallationTransport(cfg.InstallationID)
 	client := gh.NewClient(&http.Client{Transport: itr})
-	st, err := store.Open(ctx, client, owner, repo, store.CloneConfig{
+	appClient := gh.NewClient(&http.Client{Transport: app.AppsTransport()})
+	identity, err := commitIdentity(ctx, appClient, client)
+	if err != nil {
+		return nil, nil, fmt.Errorf("gitops commit identity: %w", err)
+	}
+	st, err := store.Open(ctx, owner, repo, store.CloneConfig{
 		URL:         store.RepoURL(owner, repo),
 		Dir:         cfg.GitOpsCloneDir,
 		Credentials: gitCredentials(itr),
-	}, opts...)
+	}, identity, opts...)
 	if err != nil {
 		return nil, nil, err
 	}
 	return st, forgegithub.New(client, app, cfg.InstallationID), nil
+}
+
+// commitIdentity returns the GitHub App's bot as the author and committer of
+// the gitops commits: name <slug>[bot] and email
+// <id>+<slug>[bot]@users.noreply.github.com, where the slug comes from GET
+// /app with appClient (the App JWT) and the bot user id from GET
+// /users/<slug>[bot] with installClient (the installation).
+func commitIdentity(ctx context.Context, appClient, installClient *gh.Client) (store.CommitIdentity, error) {
+	app, _, err := appClient.Apps.Get(ctx, "")
+	if err != nil {
+		return store.CommitIdentity{}, fmt.Errorf("GET /app: %w", err)
+	}
+	if app.GetSlug() == "" {
+		return store.CommitIdentity{}, errors.New("GET /app: no slug")
+	}
+	login := app.GetSlug() + "[bot]"
+	user, _, err := installClient.Users.Get(ctx, login)
+	if err != nil {
+		return store.CommitIdentity{}, fmt.Errorf("GET /users/%s: %w", login, err)
+	}
+	if user.GetID() == 0 {
+		return store.CommitIdentity{}, fmt.Errorf("GET /users/%s: no id", login)
+	}
+	return store.CommitIdentity{
+		Name:  login,
+		Email: fmt.Sprintf("%d+%s@users.noreply.github.com", user.GetID(), login),
+	}, nil
 }
 
 // gitCredentials authenticates the store's git calls as the installation of

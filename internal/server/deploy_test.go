@@ -1,17 +1,18 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"strings"
 	"testing"
 
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
+	"github.com/badilhq/badil/internal/store/storetest"
 )
 
 func validBody() string {
@@ -28,6 +29,7 @@ func validBody() string {
 
 func newTestServer(t *testing.T, fg *fakeGitops) *Server {
 	t.Helper()
+	fg.open(t)
 	return NewServer(fg, fg, "test-token", withFanOut(fg))
 }
 
@@ -43,18 +45,7 @@ func postDeploy(t *testing.T, srv *Server, body, bearer string) *httptest.Respon
 }
 
 func TestDeploy_HappyPath(t *testing.T) {
-	fg := &fakeGitops{
-		catalog: []string{"backend-1", "backend-2", "front"},
-		writeResult: &store.WriteResult{
-			Values: preview.PreviewValues{Services: []preview.ServiceEntry{
-				{Name: "backend-1", CommitSha: "abc1234567890"},
-				{Name: "backend-2"},
-				{Name: "front"},
-			}},
-			CommitURL:     "https://github.com/acme/gitops/commit/deadbeef",
-			CommitMessage: "chore(preview): update backend-1 in feature-add-pricing",
-		},
-	}
+	fg := &fakeGitops{catalog: []string{"backend-1", "backend-2", "front"}}
 	rec := postDeploy(t, newTestServer(t, fg), validBody(), "test-token")
 
 	if rec.Code != http.StatusOK {
@@ -67,8 +58,11 @@ func TestDeploy_HappyPath(t *testing.T) {
 	if resp.PreviewSlug != "feature-add-pricing" {
 		t.Errorf("PreviewSlug = %q, want feature-add-pricing", resp.PreviewSlug)
 	}
-	if !strings.HasSuffix(resp.GitOpsCommitURL, "/deadbeef") {
-		t.Errorf("GitOpsCommitURL = %q", resp.GitOpsCommitURL)
+	if resp.GitOpsCommitURL != fg.headURL() {
+		t.Errorf("GitOpsCommitURL = %q, want the pushed commit %q", resp.GitOpsCommitURL, fg.headURL())
+	}
+	if c := fg.remote.Commits()[0]; c.Subject() != "chore(preview): deploy backend-1@abc1234 to feature-add-pricing" {
+		t.Errorf("commit subject = %q", c.Subject())
 	}
 	if len(resp.Warnings) != 0 {
 		t.Errorf("Warnings = %v, want empty", resp.Warnings)
@@ -86,20 +80,12 @@ func TestDeploy_HappyPath(t *testing.T) {
 	}
 }
 
-// TestDeploy_UnchangedCommitStillWrites deploys the same commit twice: a
-// manual deploy never asks to skip an unchanged write, so each one writes and
-// returns its gitops commit URL.
-func TestDeploy_UnchangedCommitStillWrites(t *testing.T) {
-	fg := &fakeGitops{
-		catalog: []string{"backend-1"},
-		writeResult: &store.WriteResult{
-			Values: preview.PreviewValues{
-				Services: []preview.ServiceEntry{{Name: "backend-1", CommitSha: "abc1234567890"}},
-			},
-			CommitURL:     "https://github.com/acme/gitops/commit/deadbeef",
-			CommitMessage: "chore(preview): update backend-1 in feature-add-pricing",
-		},
-	}
+// TestDeploy_RedeployAnswersTheHeadCommit deploys the same commit twice: a
+// manual deploy never skips an unchanged service, so each one answers the
+// commit the preview is at and comments, whether the second one changed the
+// file or, within the same second, changed nothing.
+func TestDeploy_RedeployAnswersTheHeadCommit(t *testing.T) {
+	fg := &fakeGitops{catalog: []string{"backend-1"}}
 	srv := newTestServer(t, fg)
 	for i := range 2 {
 		fg.fanOutBodyCalled = false
@@ -111,15 +97,12 @@ func TestDeploy_UnchangedCommitStillWrites(t *testing.T) {
 		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 			t.Fatalf("decode response: %v", err)
 		}
-		if resp.GitOpsCommitURL != "https://github.com/acme/gitops/commit/deadbeef" {
-			t.Errorf("deploy %d: GitOpsCommitURL = %q", i, resp.GitOpsCommitURL)
+		if resp.GitOpsCommitURL != fg.headURL() {
+			t.Errorf("deploy %d: GitOpsCommitURL = %q, want the head %q", i, resp.GitOpsCommitURL, fg.headURL())
 		}
 		if !fg.fanOutBodyCalled {
 			t.Errorf("deploy %d: FanOutPRComments was not called", i)
 		}
-	}
-	if want := []bool{false, false}; !slices.Equal(fg.capturedSkipUnchanged, want) {
-		t.Errorf("skipUnchanged = %v, want %v", fg.capturedSkipUnchanged, want)
 	}
 }
 
@@ -159,7 +142,7 @@ func TestDeploy_ServiceNotInCatalog(t *testing.T) {
 func TestDeploy_WriteUnauthorized(t *testing.T) {
 	fg := &fakeGitops{
 		catalog:  []string{"backend-1"},
-		writeErr: fmt.Errorf("%w: token revoked", store.ErrUnauthorized),
+		applyErr: fmt.Errorf("%w: token revoked", store.ErrUnauthorized),
 	}
 	rec := postDeploy(t, newTestServer(t, fg), validBody(), "test-token")
 
@@ -173,15 +156,7 @@ func TestDeploy_FanOutPartialFailureSurfacesAsWarnings(t *testing.T) {
 		errors.New("service backend-2 (acme/backend-2#7): rate limited"),
 		errors.New("service front (acme/front#11): not found"),
 	)
-	fg := &fakeGitops{
-		catalog: []string{"backend-1", "backend-2", "front"},
-		writeResult: &store.WriteResult{
-			Values:        preview.PreviewValues{Services: []preview.ServiceEntry{{Name: "backend-1"}}},
-			CommitURL:     "https://github.com/acme/gitops/commit/abc",
-			CommitMessage: "chore(preview): update backend-1 in feature-add-pricing",
-		},
-		fanOutErr: joined,
-	}
+	fg := &fakeGitops{catalog: []string{"backend-1", "backend-2", "front"}, fanOutErr: joined}
 	rec := postDeploy(t, newTestServer(t, fg), validBody(), "test-token")
 
 	if rec.Code != http.StatusOK {
@@ -253,24 +228,12 @@ preview:
       path: /docs
 `
 
-func previewWriteResult() *store.WriteResult {
-	return &store.WriteResult{
-		Values: preview.PreviewValues{Services: []preview.ServiceEntry{
-			{Name: "backend-1", Branch: "main", CommitSha: "abc1234567890"},
-			{Name: "backend-2", Branch: "main"},
-			{Name: "front", Branch: "main"},
-		}},
-		CommitURL:     "https://github.com/acme/gitops/commit/deadbeef",
-		CommitMessage: "chore(preview): update backend-1 in feature-pricing",
-	}
-}
-
 func previewBody() string {
 	return strings.Replace(validBody(), "feature/add-pricing", "feature/pricing", 1)
 }
 
 func TestDeploy_PreviewURLsInSummary(t *testing.T) {
-	fg := &fakeGitops{badilYAML: servicesWithPreview, writeResult: previewWriteResult()}
+	fg := &fakeGitops{badilYAML: servicesWithPreview}
 	rec := postDeploy(t, newTestServer(t, fg), previewBody(), "test-token")
 
 	if rec.Code != http.StatusOK {
@@ -295,7 +258,7 @@ func TestDeploy_PreviewURLsInSummary(t *testing.T) {
 
 func TestDeploy_ArgoCDLinkInSummary(t *testing.T) {
 	yml := servicesWithPreview + "  argocdURL: https://argocd.example.com/\n"
-	fg := &fakeGitops{badilYAML: yml, writeResult: previewWriteResult()}
+	fg := &fakeGitops{badilYAML: yml}
 	rec := postDeploy(t, newTestServer(t, fg), previewBody(), "test-token")
 
 	if rec.Code != http.StatusOK {
@@ -309,7 +272,7 @@ func TestDeploy_ArgoCDLinkInSummary(t *testing.T) {
 
 func TestDeploy_PreviewURLsDefaultToHTTPS(t *testing.T) {
 	yml := strings.Replace(servicesWithPreview, "  tls: false\n", "", 1)
-	fg := &fakeGitops{badilYAML: yml, writeResult: previewWriteResult()}
+	fg := &fakeGitops{badilYAML: yml}
 	rec := postDeploy(t, newTestServer(t, fg), previewBody(), "test-token")
 
 	if rec.Code != http.StatusOK {
@@ -322,7 +285,7 @@ func TestDeploy_PreviewURLsDefaultToHTTPS(t *testing.T) {
 
 func TestDeploy_MalformedPreviewFails(t *testing.T) {
 	yml := strings.Replace(servicesWithPreview, "path: /docs", "path: docs", 1)
-	fg := &fakeGitops{badilYAML: yml, writeResult: previewWriteResult()}
+	fg := &fakeGitops{badilYAML: yml}
 	rec := postDeploy(t, newTestServer(t, fg), previewBody(), "test-token")
 
 	if rec.Code < http.StatusBadRequest {
@@ -345,11 +308,7 @@ preview:
 `
 
 func TestDeploy_PreviewLimitRefusesNewSlug(t *testing.T) {
-	fg := &fakeGitops{
-		badilYAML:   servicesWithCap,
-		writeResult: previewWriteResult(),
-		listed:      []string{"checkout", "search"},
-	}
+	fg := &fakeGitops{badilYAML: servicesWithCap, previews: capPreviews("checkout", "search")}
 	rec := postDeploy(t, newTestServer(t, fg), previewBody(), "test-token")
 
 	if rec.Code != http.StatusConflict {
@@ -363,39 +322,41 @@ func TestDeploy_PreviewLimitRefusesNewSlug(t *testing.T) {
 	}
 }
 
+// capPreviews returns a preview, pinned by acme/backend-1#42, for each of
+// slugs.
+func capPreviews(slugs ...string) map[string]*preview.PreviewValues {
+	out := map[string]*preview.PreviewValues{}
+	for _, slug := range slugs {
+		out[slug] = &preview.PreviewValues{Services: []preview.ServiceEntry{pinnedBy42()}}
+	}
+	return out
+}
+
 func TestDeploy_PreviewLimitDeploys(t *testing.T) {
 	cases := []struct {
-		name      string
-		yaml      string
-		previews  map[string]*preview.PreviewValues
-		listCalls int
+		name     string
+		yaml     string
+		previews map[string]*preview.PreviewValues
 	}{
 		{
 			name:     "existing slug at the cap",
 			yaml:     servicesWithCap,
-			previews: map[string]*preview.PreviewValues{"feature-pricing": {}},
+			previews: capPreviews("checkout", "feature-pricing"),
 		},
 		{
-			name:      "new slug below the cap",
-			yaml:      strings.Replace(servicesWithCap, "maxPreviews: 2", "maxPreviews: 3", 1),
-			listCalls: 1,
+			name:     "new slug below the cap",
+			yaml:     strings.Replace(servicesWithCap, "maxPreviews: 2", "maxPreviews: 3", 1),
+			previews: capPreviews("checkout", "search"),
 		},
 		{
-			name: "cap unset",
-			yaml: strings.Replace(servicesWithCap, "preview:\n  maxPreviews: 2\n", "", 1),
+			name:     "cap unset",
+			yaml:     strings.Replace(servicesWithCap, "preview:\n  maxPreviews: 2\n", "", 1),
+			previews: capPreviews("checkout", "search"),
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			fg := &fakeGitops{
-				badilYAML:   tc.yaml,
-				writeResult: previewWriteResult(),
-				previews:    tc.previews,
-				listed:      []string{"checkout", "feature-pricing"},
-			}
-			if tc.previews == nil {
-				fg.listed = []string{"checkout", "search"}
-			}
+			fg := &fakeGitops{badilYAML: tc.yaml, previews: tc.previews}
 			rec := postDeploy(t, newTestServer(t, fg), previewBody(), "test-token")
 
 			if rec.Code != http.StatusOK {
@@ -404,10 +365,46 @@ func TestDeploy_PreviewLimitDeploys(t *testing.T) {
 			if fg.capturedSlug != "feature-pricing" {
 				t.Errorf("capturedSlug = %q, want feature-pricing", fg.capturedSlug)
 			}
-			if fg.listCalls != tc.listCalls {
-				t.Errorf("listCalls = %d, want %d", fg.listCalls, tc.listCalls)
-			}
 		})
+	}
+}
+
+// TestDeploy_PushUnauthorized pushes to a remote that refuses the push with
+// 403: the deploy answers 502.
+func TestDeploy_PushUnauthorized(t *testing.T) {
+	remote := storetest.NewRemote(t, map[string]string{"badil.yaml": servicesWithCap})
+	srv := httptest.NewServer(remote.HTTPHandler(http.StatusForbidden))
+	t.Cleanup(srv.Close)
+	st, err := store.Open(context.Background(), "acme", "gitops",
+		store.CloneConfig{URL: srv.URL + "/acme/gitops.git"}, testIdentity)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	fg := &fakeGitops{badilYAML: servicesWithCap}
+	fg.open(t)
+	fg.st = st
+	rec := postDeploy(t, NewServer(fg, fg, "test-token", withFanOut(fg)), previewBody(), "test-token")
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if !strings.HasPrefix(rec.Body.String(), `{"error":"write preview: push gitops repo: gitops: unauthorized`) {
+		t.Errorf("body = %s, want the unauthorized write", rec.Body.String())
+	}
+	if fg.fanOutBodyCalled {
+		t.Error("a refused push must not comment")
+	}
+}
+
+// previewWriteResult is the write of backend-1 in a three-service preview.
+func previewWriteResult() *store.WriteResult {
+	return &store.WriteResult{
+		Values: preview.PreviewValues{Services: []preview.ServiceEntry{
+			{Name: "backend-1", Branch: "main", CommitSha: "abc1234567890"},
+			{Name: "backend-2", Branch: "main"},
+			{Name: "front", Branch: "main"},
+		}},
 	}
 }
 

@@ -52,6 +52,7 @@ func newPushServer(t *testing.T, fg *fakeGitops) (*Server, *metrics.Metrics, *Lo
 	slog.SetDefault(slog.New(capture))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 	m := metrics.New()
+	fg.open(t)
 	return NewServer(&pushForge{}, fg, "t", WithMetrics(m), withFanOut(fg)), m, capture
 }
 
@@ -104,15 +105,17 @@ func previewFiles(slugs ...string) map[string]*preview.PreviewValues {
 	return files
 }
 
-// syncFake is a fakeGitops listing a and b, with a badil.yaml blob SHA.
+// syncFake is a fakeGitops with the previews a and b, both matching
+// badil.yaml, and a badil.yaml blob SHA.
 func syncFake() *fakeGitops {
-	return &fakeGitops{listed: []string{"a", "b"}, previews: previewFiles("a", "b"), catalogSHA: "sha-1"}
+	return &fakeGitops{previews: previewFiles("a", "b"), catalogSHA: "sha-1"}
 }
 
 func TestPush_DefaultBranchSyncsEveryPreview(t *testing.T) {
 	for _, repo := range []string{"acme/gitops", "ACME/GitOps"} {
 		t.Run(repo, func(t *testing.T) {
 			fg := syncFake()
+			fg.stale = map[string]bool{"a": true, "b": true}
 			s, m, _ := newPushServer(t, fg)
 			if code := pushAndWait(t, s, pushPayload(repo, "refs/heads/main", false)); code != http.StatusOK {
 				t.Fatalf("status = %d, want 200", code)
@@ -165,7 +168,8 @@ func TestPush_OtherPushesIgnored(t *testing.T) {
 
 func TestPush_WaitBackgroundWaitsForSync(t *testing.T) {
 	fg := syncFake()
-	fg.syncGate = make(chan struct{})
+	fg.stale = map[string]bool{"a": true, "b": true}
+	fg.applyGate = make(chan struct{})
 	s, _, _ := newPushServer(t, fg)
 	if code := push(t, s, pushPayload("acme/gitops", "refs/heads/main", false)); code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 before the sync finished", code)
@@ -175,7 +179,7 @@ func TestPush_WaitBackgroundWaitsForSync(t *testing.T) {
 	if err := s.WaitBackground(ctx); err == nil {
 		t.Fatal("WaitBackground returned while the sync was running")
 	}
-	close(fg.syncGate)
+	close(fg.applyGate)
 	if err := s.WaitBackground(context.Background()); err != nil {
 		t.Fatalf("WaitBackground: %v", err)
 	}

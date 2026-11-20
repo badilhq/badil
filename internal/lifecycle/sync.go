@@ -25,24 +25,9 @@ var (
 	ErrPreviewNotFound = errors.New("preview not found")
 )
 
-// PreviewSyncStore is the subset of store.GitHubStore used by syncPreview.
-type PreviewSyncStore interface {
-	SyncPreviewWithRetry(ctx context.Context, slug string, catalog *store.ServiceCatalog) (*store.SyncResult, error)
-}
-
-// PreviewSyncAPI is what syncPreview uses: the store sync, the forge and the
-// comment fan-out, and the Recorder of the rewrites.
-type PreviewSyncAPI struct {
-	Store    PreviewSyncStore
-	Forge    forge.Forge
-	Recorder Recorder
-	FanOut   FanOutFunc
-}
-
 // SyncStore is the subset of store.GitHubStore used by Syncer.
 type SyncStore interface {
-	PreviewSyncStore
-	ListPreviews(ctx context.Context) ([]string, error)
+	Applier
 	FetchServiceCatalogSHA(ctx context.Context) (*store.ServiceCatalog, string, error)
 }
 
@@ -55,11 +40,6 @@ type SyncAPI struct {
 	FanOut   FanOutFunc
 }
 
-// previewSyncAPI narrows a to what syncPreview uses.
-func (a SyncAPI) previewSyncAPI() PreviewSyncAPI {
-	return PreviewSyncAPI{Store: a.Store, Forge: a.Forge, Recorder: a.Recorder, FanOut: a.FanOut}
-}
-
 // SyncReport is the outcome of a run: the slugs rewritten, the number of
 // previews left unchanged and the slugs that failed, in listing order.
 type SyncReport struct {
@@ -68,8 +48,8 @@ type SyncReport struct {
 	Failed    []string
 }
 
-// Syncer runs the sweep's sync step (syncPreview) over every preview, or one,
-// outside the sweep. One guarded run happens at a time in the process: a
+// Syncer runs the sweep's sync step (store.Tree.Sync) over every preview, or
+// one, outside the sweep, as one sync operation. One guarded run happens at a time in the process: a
 // push run (Push) or an API run (Sync), each waiting for the guard in turn.
 // Waiters acquire the guard in no particular order. Each run is capped at
 // timeout from when it holds the guard.
@@ -109,7 +89,7 @@ func (s *Syncer) release() {
 // does nothing more. Otherwise every preview is synced with the catalog of
 // that content and the SHA recorded, also when a preview failed (the sweep
 // retries it) or the content can't be parsed (the same content would fail
-// again). A badil.yaml that can't be read, or previews that can't be listed,
+// again). A badil.yaml that can't be read, or a failed sync operation,
 // record nothing, so the next push retries.
 func (s *Syncer) Push(ctx context.Context) {
 	if err := s.acquire(ctx); err != nil {
@@ -146,9 +126,9 @@ func (s *Syncer) Push(ctx context.Context) {
 // slug, which the caller has validated. It waits for the guard until ctx is
 // done. It returns an error wrapping ErrConfigUnavailable when badil.yaml can't
 // be read or parsed, ErrPreviewNotFound when slug has no preview file, the
-// listing error when the previews can't be listed, or ctx's error when it was
-// done before the guard was free. A failed preview is in the report, not an
-// error. It never reads nor changes the SHA of the push runs.
+// operation's error when the sync operation fails, or ctx's error when it was
+// done before the guard was free. A preview that can't be synced is in the
+// report, not an error. It never reads nor changes the SHA of the push runs.
 func (s *Syncer) Sync(ctx context.Context, slug string) (SyncReport, error) {
 	if err := s.acquire(ctx); err != nil {
 		return SyncReport{}, err
@@ -167,12 +147,12 @@ func (s *Syncer) Sync(ctx context.Context, slug string) (SyncReport, error) {
 		finish(ctx, TriggerAPI, report, listErr)
 		return report, listErr
 	}
-	report, found := s.syncOne(ctx, catalog, slug)
-	if !found {
+	report, found, err := s.syncOne(ctx, catalog, slug)
+	if err == nil && !found {
 		return report, fmt.Errorf("%w: %s", ErrPreviewNotFound, slug)
 	}
-	finish(ctx, TriggerAPI, report, nil)
-	return report, nil
+	finish(ctx, TriggerAPI, report, err)
+	return report, err
 }
 
 // configFailed logs a run stopped by an unreadable badil.yaml.
@@ -184,13 +164,13 @@ func configFailed(ctx context.Context, trigger string, err error) {
 	)
 }
 
-// finish logs a run that read badil.yaml: an error when err (a ListPreviews
-// error) is set, its counts otherwise.
+// finish logs a run that read badil.yaml: an error when err (the sync
+// operation's error) is set, its counts otherwise.
 func finish(ctx context.Context, trigger string, report SyncReport, err error) {
 	if err != nil {
 		slog.ErrorContext(ctx, "config sync failed",
 			slog.String("trigger", trigger),
-			slog.String("op", "list previews"),
+			slog.String("op", "sync previews"),
 			slog.String("err", err.Error()),
 		)
 		return
@@ -203,45 +183,90 @@ func finish(ctx context.Context, trigger string, report SyncReport, err error) {
 	)
 }
 
-// syncAll lists the previews and syncs each with catalog. A ListPreviews
-// error is returned at once.
+// syncAll syncs every preview with catalog in one sync operation, and
+// returns the operation's error.
 func (s *Syncer) syncAll(ctx context.Context, catalog *store.ServiceCatalog) (SyncReport, error) {
-	slugs, err := s.api.Store.ListPreviews(ctx)
-	if err != nil {
-		return SyncReport{}, err
-	}
-	var report SyncReport
-	for _, slug := range slugs {
-		res, syncErr := syncPreview(ctx, s.api.previewSyncAPI(), slug, catalog)
-		report.add(ctx, slug, res, syncErr)
-	}
-	return report, nil
+	report, _, err := s.sync(ctx, catalog, func(tree *store.Tree) ([]string, error) {
+		return tree.ListPreviews()
+	})
+	return report, err
 }
 
 // syncOne syncs the preview slug with catalog. It reports false, syncing
 // nothing, when the file of slug does not exist.
-func (s *Syncer) syncOne(ctx context.Context, catalog *store.ServiceCatalog, slug string) (SyncReport, bool) {
-	var report SyncReport
-	res, err := syncPreview(ctx, s.api.previewSyncAPI(), slug, catalog)
-	if err == nil && res.NotFound {
-		return report, false
-	}
-	report.add(ctx, slug, res, err)
-	return report, true
+func (s *Syncer) syncOne(ctx context.Context, catalog *store.ServiceCatalog, slug string) (SyncReport, bool, error) {
+	return s.sync(ctx, catalog, func(*store.Tree) ([]string, error) {
+		return []string{slug}, nil
+	})
 }
 
-// add adds to r the outcome of syncPreview for slug: res, or err, which is
-// logged.
-func (r *SyncReport) add(ctx context.Context, slug string, res *store.SyncResult, err error) {
-	switch {
-	case err != nil:
-		previewSyncFailed(ctx, slug, err)
-		r.Failed = append(r.Failed, slug)
-	case res.Changed:
-		r.Synced = append(r.Synced, slug)
-	default:
-		r.Unchanged++
+// previewSync is the sync of one preview in the last attempt: its result,
+// or its error.
+type previewSync struct {
+	slug   string
+	result *store.SyncResult
+	err    error
+}
+
+// sync syncs with catalog, in one sync operation, the previews slugs returns
+// for the tree, then records and logs each rewrite and refreshes the open
+// PRs' comments of a preview whose rewrite changed its service list or a
+// host (afterSync). A preview that can't be synced is logged and reported as
+// failed. It reports false when none of the previews has a file.
+func (s *Syncer) sync(
+	ctx context.Context, catalog *store.ServiceCatalog, slugs func(*store.Tree) ([]string, error),
+) (SyncReport, bool, error) {
+	var syncs []previewSync
+	res, err := s.api.Store.Apply(ctx, store.Op{
+		Kind: store.OpSync,
+		Change: func(tree *store.Tree) (store.Summary, error) {
+			syncs = nil
+			names, err := slugs(tree)
+			if err != nil {
+				return store.Summary{}, err
+			}
+			var changed []string
+			for _, slug := range names {
+				r, syncErr := tree.Sync(slug, catalog)
+				syncs = append(syncs, previewSync{slug: slug, result: r, err: syncErr})
+				if syncErr == nil && r.Changed {
+					changed = append(changed, slug)
+				}
+			}
+			return syncSummary(changed), nil
+		},
+	})
+	if err != nil {
+		return SyncReport{}, true, err
 	}
+	var report SyncReport
+	found := false
+	for _, p := range syncs {
+		switch {
+		case p.err != nil:
+			found = true
+			previewSyncFailed(ctx, p.slug, p.err)
+			report.Failed = append(report.Failed, p.slug)
+		case p.result.NotFound:
+		case p.result.Changed:
+			found = true
+			afterSync(ctx, s.api.Recorder, s.api.Forge, s.api.FanOut, p.slug, p.result, catalog, res, false)
+			report.Synced = append(report.Synced, p.slug)
+		default:
+			found = true
+			report.Unchanged++
+		}
+	}
+	return report, found, nil
+}
+
+// syncSummary returns the commit subject of a sync that rewrote the
+// previews changed.
+func syncSummary(changed []string) store.Summary {
+	if len(changed) == 1 {
+		return store.Summary{Subject: fmt.Sprintf("chore(preview): sync %s with badil.yaml", changed[0])}
+	}
+	return store.Summary{Subject: fmt.Sprintf("chore(preview): sync %d previews with badil.yaml", len(changed))}
 }
 
 // previewSyncFailed logs a preview a run failed to sync.

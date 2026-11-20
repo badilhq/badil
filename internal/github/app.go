@@ -46,3 +46,9 @@ func NewAppFromTransport(tr *ghinstallation.AppsTransport, webhookSecret string)
 func (a *App) InstallationTransport(installationID int64) *ghinstallation.Transport {
 	return ghinstallation.NewFromAppsTransport(a.transport, installationID)
 }
+
+// AppsTransport returns the transport authenticated as the App itself, with
+// the App JWT, for the App's own endpoints such as GET /app.
+func (a *App) AppsTransport() *ghinstallation.AppsTransport {
+	return a.transport
+}

@@ -62,17 +62,15 @@ func withDependenciesFile() string {
 	return pinnedFile("dependencies: []\n", "dependencies:\n"+dependenciesYAML)
 }
 
-func TestWritePreviewWithRetry_Dependencies(t *testing.T) {
+func TestDeploy_Dependencies(t *testing.T) {
 	s := &writeServer{}
 	c := s.start(t)
 	catalog := testCatalog("backend-1", "backend-2")
 	withDependencies(catalog)
 
-	result, err := c.WritePreviewWithRetry(
-		context.Background(), "slug", catalog, "backend-1", "abc1234567890", sampleInputs(), "create", "update", false,
-	)
+	result, _, err := deploy(c, "slug", catalog, "backend-1", "abc1234567890", sampleInputs(), false)
 	if err != nil {
-		t.Fatalf("WritePreviewWithRetry: %v", err)
+		t.Fatalf("Apply: %v", err)
 	}
 	got := decode(t, s.written())
 	want := got
@@ -102,10 +100,10 @@ func (h *recordHandler) Handle(_ context.Context, r slog.Record) error {
 func (h *recordHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
 func (h *recordHandler) WithGroup(string) slog.Handler      { return h }
 
-// TestSyncPreviewWithRetry_ShadowedDependency checks that a dependency named
+// TestSync_ShadowedDependency checks that a dependency named
 // like a kept pinned entry of a removed service is left out with a warning,
 // and written once that entry is unpinned.
-func TestSyncPreviewWithRetry_ShadowedDependency(t *testing.T) {
+func TestSync_ShadowedDependency(t *testing.T) {
 	logs := &recordHandler{}
 	prev := slog.Default()
 	slog.SetDefault(slog.New(logs))
@@ -127,9 +125,9 @@ func TestSyncPreviewWithRetry_ShadowedDependency(t *testing.T) {
 		{Name: "backend-2", Chart: preview.DependencyChart{RepoURL: "oci://r/backend-2", Version: "1.0.0"}},
 	}
 
-	result, err := c.SyncPreviewWithRetry(context.Background(), "slug", catalog)
+	result, err := syncSlug(c, catalog)
 	if err != nil {
-		t.Fatalf("SyncPreviewWithRetry: %v", err)
+		t.Fatalf("Apply: %v", err)
 	}
 	if result.Changed {
 		t.Errorf("Changed = true, want the file kept without the dependency:\n%s", s.written())
@@ -152,9 +150,9 @@ func TestSyncPreviewWithRetry_ShadowedDependency(t *testing.T) {
 	// and writes the dependency.
 	s2 := &writeServer{files: []string{pinnedFile()}}
 	c2 := s2.start(t)
-	result, err = c2.SyncPreviewWithRetry(context.Background(), "slug", catalog)
+	result, err = syncSlug(c2, catalog)
 	if err != nil {
-		t.Fatalf("SyncPreviewWithRetry: %v", err)
+		t.Fatalf("Apply: %v", err)
 	}
 	if len(result.Values.Dependencies) != 1 || result.Values.Dependencies[0].Name != "backend-2" {
 		t.Errorf("dependencies = %+v, want backend-2 once the pinned entry is gone", result.Values.Dependencies)
@@ -162,4 +160,16 @@ func TestSyncPreviewWithRetry_ShadowedDependency(t *testing.T) {
 	if !result.Notify {
 		t.Error("Notify = false, want true: a dependency was added")
 	}
+}
+
+// syncSlug syncs the preview slug with catalog (Tree.Sync) as one sync
+// operation.
+func syncSlug(c *store.GitHubStore, catalog *store.ServiceCatalog) (*store.SyncResult, error) {
+	var res *store.SyncResult
+	_, err := apply(c, store.OpSync, func(tree *store.Tree) (store.Summary, error) {
+		var syncErr error
+		res, syncErr = tree.Sync("slug", catalog)
+		return store.Summary{Subject: "sync"}, syncErr
+	})
+	return res, err
 }

@@ -140,12 +140,26 @@ func TestMetrics_PreviewsNeverNegative(t *testing.T) {
 
 func TestMetrics_GitopsOp(t *testing.T) {
 	m := metrics.New()
-	m.GitopsOp("write", "ok", 30*time.Millisecond)
+	m.GitopsOp("deploy", "ok", 30*time.Millisecond)
 	m.GitopsOp("teardown", "error", 2*time.Second)
 
 	assertGathered(t, m, `
-# HELP badil_gitops_operation_duration_seconds Duration of gitops repo writes, teardowns and syncs, retries included, and of the gitops clone's git clone, ls-remote and fetch.
+# HELP badil_gitops_operation_duration_seconds Duration of gitops repo operations (deploy, teardown, sweep, sync), push retries included, and of the gitops clone's git clone, ls-remote and fetch.
 # TYPE badil_gitops_operation_duration_seconds histogram
+badil_gitops_operation_duration_seconds_bucket{op="deploy",result="ok",le="0.005"} 0
+badil_gitops_operation_duration_seconds_bucket{op="deploy",result="ok",le="0.01"} 0
+badil_gitops_operation_duration_seconds_bucket{op="deploy",result="ok",le="0.025"} 0
+badil_gitops_operation_duration_seconds_bucket{op="deploy",result="ok",le="0.05"} 1
+badil_gitops_operation_duration_seconds_bucket{op="deploy",result="ok",le="0.1"} 1
+badil_gitops_operation_duration_seconds_bucket{op="deploy",result="ok",le="0.25"} 1
+badil_gitops_operation_duration_seconds_bucket{op="deploy",result="ok",le="0.5"} 1
+badil_gitops_operation_duration_seconds_bucket{op="deploy",result="ok",le="1"} 1
+badil_gitops_operation_duration_seconds_bucket{op="deploy",result="ok",le="2.5"} 1
+badil_gitops_operation_duration_seconds_bucket{op="deploy",result="ok",le="5"} 1
+badil_gitops_operation_duration_seconds_bucket{op="deploy",result="ok",le="10"} 1
+badil_gitops_operation_duration_seconds_bucket{op="deploy",result="ok",le="+Inf"} 1
+badil_gitops_operation_duration_seconds_sum{op="deploy",result="ok"} 0.03
+badil_gitops_operation_duration_seconds_count{op="deploy",result="ok"} 1
 badil_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="0.005"} 0
 badil_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="0.01"} 0
 badil_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="0.025"} 0
@@ -160,21 +174,21 @@ badil_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="
 badil_gitops_operation_duration_seconds_bucket{op="teardown",result="error",le="+Inf"} 1
 badil_gitops_operation_duration_seconds_sum{op="teardown",result="error"} 2
 badil_gitops_operation_duration_seconds_count{op="teardown",result="error"} 1
-badil_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="0.005"} 0
-badil_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="0.01"} 0
-badil_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="0.025"} 0
-badil_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="0.05"} 1
-badil_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="0.1"} 1
-badil_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="0.25"} 1
-badil_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="0.5"} 1
-badil_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="1"} 1
-badil_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="2.5"} 1
-badil_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="5"} 1
-badil_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="10"} 1
-badil_gitops_operation_duration_seconds_bucket{op="write",result="ok",le="+Inf"} 1
-badil_gitops_operation_duration_seconds_sum{op="write",result="ok"} 0.03
-badil_gitops_operation_duration_seconds_count{op="write",result="ok"} 1
 `, "badil_gitops_operation_duration_seconds")
+}
+
+func TestMetrics_PushConflict(t *testing.T) {
+	m := metrics.New()
+	m.PushConflict("sweep")
+	m.PushConflict("sweep")
+	m.PushConflict("deploy")
+
+	assertGathered(t, m, `
+# HELP badil_gitops_push_conflicts_total Gitops repo pushes rejected because the remote head moved, by operation.
+# TYPE badil_gitops_push_conflicts_total counter
+badil_gitops_push_conflicts_total{op="deploy"} 1
+badil_gitops_push_conflicts_total{op="sweep"} 2
+`, "badil_gitops_push_conflicts_total")
 }
 
 func TestMetrics_SpinUp(t *testing.T) {
