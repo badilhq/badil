@@ -68,8 +68,8 @@ func TestStatusHooks(t *testing.T) {
 	})
 	client := fake.NewClientset(statusCM("applied"), statusCM("external"), statusCM("kept"))
 	ctx := context.Background()
-	previewStatus, err := loadStatus(ctx, status.New(client, statusNamespace))
-	if err != nil {
+	previewStatus := status.New(client, statusNamespace)
+	if err := loadStatus(ctx, previewStatus); err != nil {
 		t.Fatal(err)
 	}
 	st, err := store.Open(ctx, "acme", "gitops", store.CloneConfig{URL: remote.URL()}, storetest.Identity,
