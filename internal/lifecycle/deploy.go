@@ -35,11 +35,9 @@ type DeployAPI struct {
 	FanOut   FanOutFunc
 }
 
-// DeployResult is the outcome of DeployPR: the deploy's write and the
-// operation's commit, the remote head when the deploy changed nothing.
+// DeployResult is the outcome of DeployPR: the operation's commit, the
+// remote head when the deploy changed nothing.
 type DeployResult struct {
-	store.WriteResult
-
 	Commit store.Result
 }
 
@@ -88,7 +86,7 @@ func DeployPR(
 	if write.Created {
 		api.Recorder.PreviewCreated()
 	}
-	result := &DeployResult{WriteResult: *write, Commit: res}
+	result := &DeployResult{Commit: res}
 	summary := preview.BuildSummary(
 		slug, write.Values, catalog.URLs, catalog.ArgoCDURL, write.Excluded, res.Subject, res.URL,
 	)
