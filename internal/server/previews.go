@@ -90,16 +90,6 @@ func (s *Server) readCatalog(ctx context.Context) (*store.ServiceCatalog, error)
 	return catalog, err
 }
 
-// readPreviews reads the catalog and every preview file of the gitops clone
-// (listPreviews).
-func (s *Server) readPreviews(ctx context.Context) ([]previewView, error) {
-	catalog, err := s.readCatalog(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return s.listPreviews(ctx, catalog)
-}
-
 // listPreviews reads every preview file of the gitops clone, sorted by slug,
 // each with catalog. A preview whose file is gone by the time it is read is
 // left out.
@@ -158,7 +148,12 @@ func readFailed(ctx context.Context, w http.ResponseWriter, route string, err er
 // gitops clone, sorted by slug.
 func (s *Server) handleListPreviews(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	views, err := s.readPreviews(ctx)
+	catalog, err := s.readCatalog(ctx)
+	if err != nil {
+		readFailed(ctx, w, routePattern(r), err)
+		return
+	}
+	views, err := s.listPreviews(ctx, catalog)
 	if err != nil {
 		readFailed(ctx, w, routePattern(r), err)
 		return
@@ -186,12 +181,7 @@ func (s *Server) handleGetPreview(w http.ResponseWriter, r *http.Request) {
 
 // routePattern returns the route pattern r matched, as chi records it.
 func routePattern(r *http.Request) string {
-	if rc := chi.RouteContext(r.Context()); rc != nil {
-		if p := rc.RoutePattern(); p != "" {
-			return p
-		}
-	}
-	return r.URL.Path
+	return chi.RouteContext(r.Context()).RoutePattern()
 }
 
 // previewStatus returns the status of the preview slug's entries, by name.
