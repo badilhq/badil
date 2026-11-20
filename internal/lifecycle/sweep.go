@@ -296,8 +296,8 @@ func (p *sweepPlan) summary() store.Summary {
 // each deletion and tells an expired preview's open PRs, handles each
 // teardown (afterTeardown), records and logs each sync and refreshes the open
 // PRs' comments of a preview whose sync changed its service list or a host,
-// or that a teardown unpinned. It logs each failed preview and returns their
-// count.
+// or that a teardown unpinned, once per preview. It logs each failed preview
+// and returns their count.
 func (p *sweepPlan) finish(ctx context.Context, api SweepAPI, res store.Result) int {
 	if p.catalogErr != nil {
 		slog.WarnContext(ctx, "cleanup catalog unavailable", slog.String("err", p.catalogErr.Error()))
@@ -309,9 +309,19 @@ func (p *sweepPlan) finish(ctx context.Context, api SweepAPI, res store.Result) 
 	for _, s := range p.synced {
 		synced[s.slug] = true
 	}
+	// A preview's summary is refreshed once, by its last step that removed a
+	// PR, whose values are the preview's as committed, unless step 4 rewrote
+	// it, or that step deleted it.
+	last := map[string]*teardownStep{}
+	for _, s := range p.steps {
+		if s.removed() {
+			last[s.tt.Slug] = s
+		}
+	}
 	unpinned := map[string]bool{}
 	for _, s := range p.steps {
-		if afterTeardown(ctx, api.teardownAPI(), s, res, nil, !synced[s.tt.Slug]) && !s.result.Deleted {
+		fanOut := last[s.tt.Slug] == s && !synced[s.tt.Slug]
+		if afterTeardown(ctx, api.teardownAPI(), s, res, nil, fanOut) && !s.result.Deleted {
 			unpinned[s.tt.Slug] = true
 		}
 	}

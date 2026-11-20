@@ -405,3 +405,61 @@ func TestReconcile_HolderCheckOnRetriedTree(t *testing.T) {
 		t.Errorf("pricing pins = %v, want the holder's", pins)
 	}
 }
+
+// TestReconcile_ConflictingLabelsPushFailure fails the commit of a PR whose
+// named labels conflict: its teardown is an error, and it is still told to
+// keep one label and skipped.
+func TestReconcile_ConflictingLabelsPushFailure(t *testing.T) {
+	capture := captureLogs(t)
+	f := &reconcileFake{
+		Metrics:    metrics.New(),
+		pr:         fetchedPR("front", true, "preview:a", "preview:b"),
+		previews:   map[string]*preview.PreviewValues{"a": onlyFront42()},
+		beforePush: func(*storetest.Remote) error { return errors.New("push boom") },
+	}
+	lifecycle.ReconcilePR(context.Background(), f.api(t), event("labeled", "front", "preview:b", "preview:b"))
+
+	f.assertNothingPushed(t)
+	wantConflict := "## ⚠️ Preview: conflicting labels\n\n" +
+		"Keep one `preview:` label. This PR has `preview:a`, `preview:b`."
+	if len(f.upserts) != 1 || f.upserts[0] != wantConflict {
+		t.Errorf("upserts = %q, want only the conflict comment", f.upserts)
+	}
+	logs := capture.find(slog.LevelInfo, "preview reconcile skipped")
+	if len(logs) != 1 || logs[0]["reason"].String() != "conflicting preview labels" {
+		t.Errorf("skip logs = %v", logs)
+	}
+	assertMetrics(t, f.Metrics, map[string]float64{
+		`badil_reconciles_total{outcome="skipped"}`:               1,
+		`badil_teardowns_total{result="error",trigger="webhook"}`: 1,
+		`badil_teardowns_total{result="noop",trigger="webhook"}`:  2,
+	}, "badil_reconciles_total", "badil_teardowns_total")
+}
+
+// TestReconcile_TargetReadErrorKeepsCleanup reads an unreadable target
+// preview: the PR's teardown from its other preview is still committed, and
+// the reconcile fails.
+func TestReconcile_TargetReadErrorKeepsCleanup(t *testing.T) {
+	capture := captureLogs(t)
+	f := &reconcileFake{
+		Metrics:  metrics.New(),
+		pr:       fetchedPR("front", true, "preview:pricing"),
+		previews: map[string]*preview.PreviewValues{"a": onlyFront42()},
+		raw:      map[string]string{"previews/pricing/values.yaml": "services: [\n"},
+	}
+	lifecycle.ReconcilePR(context.Background(), f.api(t), event("unlabeled", "front", "preview:a", "preview:pricing"))
+
+	c := f.assertOneCommit(t, "chore(preview): unpin acme/front#42 from a", "a: delete")
+	if len(f.upserts) != 1 || f.upserts[0] != deletedBody("a", "label `preview:a` removed", c) {
+		t.Errorf("upserts = %q, want the teardown comment of a", f.upserts)
+	}
+	logs := capture.find(slog.LevelError, "preview reconcile failed")
+	if len(logs) != 1 || !strings.HasPrefix(logs[0]["err"].String(), "parse previews/pricing/values.yaml") {
+		t.Errorf("reconcile failed logs = %v", logs)
+	}
+	assertMetrics(t, f.Metrics, map[string]float64{
+		`badil_reconciles_total{outcome="failed"}`:                  1,
+		`badil_teardowns_total{result="deleted",trigger="webhook"}`: 1,
+		`badil_teardowns_total{result="noop",trigger="webhook"}`:    1,
+	}, "badil_reconciles_total", "badil_teardowns_total")
+}

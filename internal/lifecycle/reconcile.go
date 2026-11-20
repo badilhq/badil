@@ -107,8 +107,9 @@ type Event struct {
 //
 // Each call records exactly one outcome through the Recorder: failed when the
 // catalog or the PR can't be read on a non-closed event, when the PR's files
-// can't be listed, or when the operation of a PR open with a target fails
-// (the target preview can't be read, or the commit can't be pushed);
+// can't be listed, the target preview can't be read or the previews can't be
+// listed (the teardowns from the PR's other previews are still committed),
+// or when the commit of a PR open with a target can't be pushed;
 // otherwise skipped (with its reason) when the reconcile was skipped;
 // otherwise deployed when a service was written; otherwise torn_down.
 func ReconcilePR(ctx context.Context, api ReconcileAPI, ev Event) {
@@ -161,8 +162,9 @@ func reconcile(ctx context.Context, api ReconcileAPI, ev Event) (string, string)
 		timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 	if deploy {
-		if p.services, err = touchedServices(ctx, api, catalog, ev, pr, services); err != nil {
-			return reconcileFailed(ctx, ev, err)
+		p.services, p.listErr = touchedServices(ctx, api, catalog, ev, pr, services)
+		if p.listErr != nil && len(p.cleanupSlugs) == 0 {
+			return reconcileFailed(ctx, ev, p.listErr)
 		}
 	}
 	kind := store.OpTeardown
@@ -189,8 +191,15 @@ type reconcilePlan struct {
 	cleanupSlugs  []string
 	cleanupReason string
 	timestamp     string
+	// listErr is the error of the PR's file listing: the change only tears
+	// the PR down from cleanupSlugs, and the reconcile fails.
+	listErr error
 
-	ran       bool
+	ran bool
+	// readErr is the error of reading the target preview or listing the
+	// previews in the last attempt: the change only tears the PR down from
+	// cleanupSlugs, and the reconcile fails.
+	readErr   error
 	cleanup   []*teardownStep
 	noService *teardownStep
 	held      *heldPin
@@ -228,31 +237,35 @@ func (p *reconcilePlan) target(slug string) Target {
 // are unpinned there, then each service it touches is deployed. A service
 // already deployed as it would be written is left alone unless the PR left
 // another preview. Teardowns and deploys that fail are recorded, not
-// returned; only a target preview that can't be read fails the change.
+// returned. When the PR's files could not be listed, or the target preview
+// can't be read or the previews listed, only the teardowns from cleanupSlugs
+// are kept, and the error is recorded in listErr or readErr.
 func (p *reconcilePlan) change(tree *store.Tree) (store.Summary, error) {
-	p.ran, p.noService, p.held, p.limited, p.unpin, p.deploys = true, nil, nil, false, nil, nil
+	p.ran, p.readErr, p.noService, p.held, p.limited, p.unpin, p.deploys = true, nil, nil, nil, false, nil, nil
 	p.cleanup = newSteps(p.ev.Target, p.cleanupSlugs, p.cleanupReason)
 	for _, s := range p.cleanup {
 		s.run(tree)
 	}
 	removed := len(removedSlugs(p.cleanup)) > 0
 	switch {
-	case !p.deploy:
+	case !p.deploy, p.listErr != nil:
 	case len(p.services) == 0:
 		p.noService = &teardownStep{tt: p.target(p.t.Slug), reason: noServiceReason, trigger: triggerWebhook}
 		p.noService.run(tree)
 	default:
 		vals, err := tree.GetPreview(p.t.Slug)
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
-			return store.Summary{}, err
+			p.readErr = err
+			break
 		}
 		if vals != nil {
 			if service, holder, held := heldBy(vals, p.services, p.ev.Target); held {
 				p.held = &heldPin{service: service, holder: holder}
 				break
 			}
-		} else if p.limited, err = limitReached(tree, p.catalog.MaxPreviews); err != nil || p.limited {
-			return p.summary(), err
+		} else if limited, listErr := limitReached(tree, p.catalog.MaxPreviews); listErr != nil || limited {
+			p.limited, p.readErr = limited && listErr == nil, listErr
+			break
 		}
 		if p.unpin = p.untouchedUnpin(vals); p.unpin != nil {
 			p.unpin.run(tree)
@@ -346,8 +359,11 @@ func (p *reconcilePlan) summary() store.Summary {
 
 // finish handles the reconcile's operation, which ended with res or
 // applyErr: it records and comments each teardown (afterTeardown), then
-// returns the outcome. A failed operation fails a deploy, and leaves the
-// torn_down outcome of a reconcile that only tears down. Otherwise a PR that
+// returns the outcome. A PR whose files or target preview could not be read
+// fails, as does a deploy whose operation failed. A reconcile that only
+// tears down keeps the torn_down outcome when its operation failed, unless
+// its open PR's named labels conflict: it is then told to keep one, and
+// skipped. Otherwise a PR that
 // touches no service is told so and skipped; a refused one is told why and
 // skipped; deployed services are logged and their preview's summary posted
 // once on its open PRs; an open PR whose named labels conflict is told to
@@ -370,12 +386,21 @@ func (p *reconcilePlan) finish(
 		}
 		return reconcileSkipped(ctx, p.ev, noServiceReason)
 	}
+	if p.listErr != nil {
+		return reconcileFailed(ctx, p.ev, p.listErr)
+	}
+	if p.readErr != nil {
+		return reconcileFailed(ctx, p.ev, p.readErr)
+	}
 	if applyErr != nil {
 		if p.unpin != nil {
 			afterTeardown(ctx, tapi, p.unpin, res, applyErr, false)
 		}
 		if p.deploy {
 			return reconcileFailed(ctx, p.ev, applyErr)
+		}
+		if o, r := postLabelConflict(ctx, tapi, p.ev, p.pr, p.catalog.Label, p.t); o != "" {
+			return o, r
 		}
 		return outcomeTornDown, ""
 	}

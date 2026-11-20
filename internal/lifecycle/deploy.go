@@ -36,10 +36,11 @@ type DeployResult struct {
 // of the preview. The deploy always writes the service, refreshing its
 // updated-at; it is refused with ErrPreviewLimit when the preview does not
 // exist and catalog.MaxPreviews previews already do, a check made on the
-// tree the deploy writes. It returns the result, the fan-out error (possibly
+// tree the deploy writes. A deploy that changes nothing (the same inputs
+// within the same second) commits nothing: its result and comments carry the
+// remote head's commit. It returns the result, the fan-out error (possibly
 // joined, nil when every comment landed) and the operation's error; on an
-// error, or a deploy that changed nothing, nothing is commented. It does not
-// log.
+// error nothing is commented. It does not log.
 func DeployPR(
 	ctx context.Context,
 	api DeployAPI,
@@ -77,9 +78,6 @@ func DeployPR(
 		api.Recorder.PreviewCreated()
 	}
 	result := &DeployResult{WriteResult: *write, Commit: res}
-	if res.NoOp {
-		return result, nil, nil
-	}
 	summary := preview.BuildSummary(
 		slug, write.Values, catalog.URLs, catalog.ArgoCDURL, write.Excluded, res.Subject, res.URL,
 	)

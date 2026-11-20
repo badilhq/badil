@@ -82,11 +82,13 @@ func TestDeploy_HappyPath(t *testing.T) {
 
 // TestDeploy_RedeployAnswersTheHeadCommit deploys the same commit twice: a
 // manual deploy never skips an unchanged service, so each one answers the
-// commit the preview is at.
+// commit the preview is at and comments, whether the second one changed the
+// file or, within the same second, changed nothing.
 func TestDeploy_RedeployAnswersTheHeadCommit(t *testing.T) {
 	fg := &fakeGitops{catalog: []string{"backend-1"}}
 	srv := newTestServer(t, fg)
 	for i := range 2 {
+		fg.fanOutBodyCalled = false
 		rec := postDeploy(t, srv, validBody(), "test-token")
 		if rec.Code != http.StatusOK {
 			t.Fatalf("deploy %d: status = %d, body = %s", i, rec.Code, rec.Body.String())
@@ -97,6 +99,9 @@ func TestDeploy_RedeployAnswersTheHeadCommit(t *testing.T) {
 		}
 		if resp.GitOpsCommitURL != fg.headURL() {
 			t.Errorf("deploy %d: GitOpsCommitURL = %q, want the head %q", i, resp.GitOpsCommitURL, fg.headURL())
+		}
+		if !fg.fanOutBodyCalled {
+			t.Errorf("deploy %d: FanOutPRComments was not called", i)
 		}
 	}
 }

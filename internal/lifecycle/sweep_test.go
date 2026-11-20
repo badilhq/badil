@@ -562,3 +562,38 @@ func TestSweep_ListError(t *testing.T) {
 		t.Fatalf("err = %v, want %v", err, listErr)
 	}
 }
+
+// TestSweep_OneSummaryPerPreview checks that a preview two rule-3 teardowns
+// unpin and keep has its summary refreshed once, with the values committed:
+// neither torn-down PR is still pinned in it.
+func TestSweep_OneSummaryPerPreview(t *testing.T) {
+	captureLogs(t)
+	const front9 = "https://github.com/acme/front/pull/9"
+	f := &fakeAPI{
+		previews: map[string]*preview.PreviewValues{"feature-x": values(
+			pin("backend-1", pr42, recent),
+			pin("backend-2", pr7, recent),
+			pin("front", front9, recent),
+		)},
+		prOpen:    map[string]bool{"acme/backend-2#7": true, "acme/front#9": true},
+		prLabels:  map[string][]string{"acme/backend-2#7": {"preview:other"}},
+		prHeadRef: map[string]string{"acme/backend-2#7": "feature/y", "acme/front#9": "feature/x"},
+	}
+	if err := f.sweep(t, ttl); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	c := f.assertOneCommit(t, "chore(preview): sweep: delete 0, unpin 1, sync 0",
+		"feature-x: unpin backend-1", "feature-x: unpin backend-2")
+	if len(f.fanOuts) != 1 || !strings.HasSuffix(f.fanOuts[0].body, link(c)) {
+		t.Fatalf("fanOuts = %d, want one linking %s", len(f.fanOuts), link(c))
+	}
+	var pinned []string
+	for _, svc := range f.fanOuts[0].vals.Services {
+		if svc.CommitSha != "" {
+			pinned = append(pinned, svc.Name)
+		}
+	}
+	if !slices.Equal(pinned, []string{"front"}) {
+		t.Errorf("pinned in the summary = %v, want [front]", pinned)
+	}
+}

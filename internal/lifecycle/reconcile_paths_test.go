@@ -451,3 +451,27 @@ func TestReconcile_PathsNoServiceCommentFails(t *testing.T) {
 		`badil_reconcile_skips_total{reason="no service changed"}`: 1,
 	}, "badil_reconciles_total", "badil_reconcile_skips_total")
 }
+
+// TestReconcile_PathsListingFailsKeepsCleanup fails the files listing of a
+// PR that left another preview: its teardown from there is still committed,
+// and the reconcile fails.
+func TestReconcile_PathsListingFailsKeepsCleanup(t *testing.T) {
+	capture := captureLogs(t)
+	f := platformFake()
+	f.filesErr = errors.New("files boom")
+	f.previews = map[string]*preview.PreviewValues{"old": values(pinnedBy("api", platformPR42))}
+	lifecycle.ReconcilePR(context.Background(), f.api(t), event("unlabeled", "platform", "preview:old", "preview"))
+
+	f.assertOneCommit(t, "chore(preview): unpin acme/platform#42 from old", "old: delete")
+	if got := teardownSlugs(teardownsLogged(capture)); !slices.Equal(got, []string{"old"}) {
+		t.Errorf("teardowns = %v, want old", got)
+	}
+	logs := capture.find(slog.LevelError, "preview reconcile failed")
+	if len(logs) != 1 || logs[0]["err"].String() != "files boom" {
+		t.Errorf("reconcile failed logs = %v", logs)
+	}
+	assertMetrics(t, f.Metrics, map[string]float64{
+		`badil_reconciles_total{outcome="failed"}`:                  1,
+		`badil_teardowns_total{result="deleted",trigger="webhook"}`: 1,
+	}, "badil_reconciles_total", "badil_teardowns_total")
+}
