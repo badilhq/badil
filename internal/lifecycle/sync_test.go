@@ -9,10 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store"
 )
 
 // quiet is how long a test waits to conclude that nothing happens.
@@ -63,14 +64,14 @@ func (f *syncFake) syncs() []string {
 	return slices.Clone(f.synced)
 }
 
-func (f *syncFake) FetchServiceCatalogSHA(context.Context) (*gitops.ServiceCatalog, string, error) {
+func (f *syncFake) FetchServiceCatalogSHA(context.Context) (*store.ServiceCatalog, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.catalogReads++
 	if f.catalogErr != nil {
 		return nil, f.sha, f.catalogErr
 	}
-	return &gitops.ServiceCatalog{}, f.sha, nil
+	return &store.ServiceCatalog{}, f.sha, nil
 }
 
 func (f *syncFake) ListPreviews(context.Context) ([]string, error) {
@@ -80,8 +81,8 @@ func (f *syncFake) ListPreviews(context.Context) ([]string, error) {
 func (f *syncFake) SyncPreviewWithRetry(
 	_ context.Context,
 	slug string,
-	_ *gitops.ServiceCatalog,
-) (*gitops.SyncResult, error) {
+	_ *store.ServiceCatalog,
+) (*store.SyncResult, error) {
 	if f.gate != nil {
 		f.entered <- slug
 		<-f.gate
@@ -93,16 +94,28 @@ func (f *syncFake) SyncPreviewWithRetry(
 		return nil, err
 	}
 	if !slices.Contains(f.previews, slug) {
-		return &gitops.SyncResult{NotFound: true}, nil
+		return &store.SyncResult{NotFound: true}, nil
 	}
 	if f.changed[slug] {
-		return &gitops.SyncResult{Changed: true, CommitURL: syncCommitURL}, nil
+		return &store.SyncResult{Changed: true, CommitURL: syncCommitURL}, nil
 	}
-	return &gitops.SyncResult{}, nil
+	return &store.SyncResult{}, nil
 }
 
 func (f *syncFake) FanOutPRComments(context.Context, preview.PreviewValues, string) error {
 	return nil
+}
+
+// api is the lifecycle.SyncAPI over f: its store and recorder, with its
+// FanOutPRComments as the fan-out. It has no forge.
+func (f *syncFake) api() lifecycle.SyncAPI {
+	return lifecycle.SyncAPI{
+		Store:    f,
+		Recorder: f,
+		FanOut: func(ctx context.Context, _ forge.Forge, vals preview.PreviewValues, body string) error {
+			return f.FanOutPRComments(ctx, vals, body)
+		},
+	}
 }
 
 // gated makes f's syncs wait for the returned release.
@@ -128,7 +141,7 @@ func TestSyncer_SyncAll(t *testing.T) {
 	f := newSyncFake("a", "b", "c")
 	f.changed = map[string]bool{"a": true}
 	f.syncErr = map[string]error{"c": errors.New("sync boom")}
-	report, err := lifecycle.NewSyncer(f, time.Minute).Sync(context.Background(), "")
+	report, err := lifecycle.NewSyncer(f.api(), time.Minute).Sync(context.Background(), "")
 	if err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
@@ -168,7 +181,7 @@ func TestSyncer_SyncOne(t *testing.T) {
 			f := newSyncFake("a", "b")
 			f.changed = map[string]bool{"b": true}
 			f.syncErr = map[string]error{"b": tc.syncErr}
-			report, err := lifecycle.NewSyncer(f, time.Minute).Sync(context.Background(), tc.slug)
+			report, err := lifecycle.NewSyncer(f.api(), time.Minute).Sync(context.Background(), tc.slug)
 			if !errors.Is(err, tc.wantErr) || (tc.wantErr == nil && err != nil) {
 				t.Fatalf("err = %v, want %v", err, tc.wantErr)
 			}
@@ -199,7 +212,7 @@ func TestSyncer_SyncErrors(t *testing.T) {
 			captureLogs(t)
 			f := newSyncFake("a")
 			f.catalogErr, f.listErr = tc.catalogErr, tc.listErr
-			_, err := lifecycle.NewSyncer(f, time.Minute).Sync(context.Background(), "")
+			_, err := lifecycle.NewSyncer(f.api(), time.Minute).Sync(context.Background(), "")
 			if err == nil || errors.Is(err, lifecycle.ErrConfigUnavailable) != tc.wantConfig {
 				t.Fatalf("err = %v, want ErrConfigUnavailable %v", err, tc.wantConfig)
 			}
@@ -214,7 +227,7 @@ func TestSyncer_PushSyncsOnlyANewSHA(t *testing.T) {
 	captureLogs(t)
 	f := newSyncFake("a", "b")
 	f.syncErr = map[string]error{"b": errors.New("sync boom")}
-	s := lifecycle.NewSyncer(f, time.Minute)
+	s := lifecycle.NewSyncer(f.api(), time.Minute)
 	ctx := context.Background()
 
 	s.Push(ctx) // sha-1, first push since start: syncs, b fails.
@@ -245,7 +258,7 @@ func TestSyncer_PushConfigErrors(t *testing.T) {
 			logs := captureLogs(t)
 			f := newSyncFake("a")
 			f.sha, f.catalogErr = tc.sha, errors.New("catalog boom")
-			s := lifecycle.NewSyncer(f, time.Minute)
+			s := lifecycle.NewSyncer(f.api(), time.Minute)
 			s.Push(context.Background())
 			s.Push(context.Background())
 			if f.reads() != 2 {
@@ -265,7 +278,7 @@ func TestSyncer_PushListErrorRecordsNoSHA(t *testing.T) {
 	captureLogs(t)
 	f := newSyncFake("a")
 	f.listErr = errors.New("list boom")
-	s := lifecycle.NewSyncer(f, time.Minute)
+	s := lifecycle.NewSyncer(f.api(), time.Minute)
 	ctx := context.Background()
 
 	s.Push(ctx) // sha-1, previews can't be listed: nothing synced, no SHA kept.
@@ -280,7 +293,7 @@ func TestSyncer_PushListErrorRecordsNoSHA(t *testing.T) {
 func TestSyncer_PushDoesNotTouchAPISHA(t *testing.T) {
 	captureLogs(t)
 	f := newSyncFake("a")
-	s := lifecycle.NewSyncer(f, time.Minute)
+	s := lifecycle.NewSyncer(f.api(), time.Minute)
 	if _, err := s.Sync(context.Background(), ""); err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
@@ -296,7 +309,7 @@ func TestSyncer_OneRunAtATime(t *testing.T) {
 	f.changed = map[string]bool{"a": true}
 	release := f.gated()
 	defer release()
-	s := lifecycle.NewSyncer(f, time.Minute)
+	s := lifecycle.NewSyncer(f.api(), time.Minute)
 
 	var wg sync.WaitGroup
 	wg.Go(func() { s.Push(context.Background()) })
@@ -336,7 +349,7 @@ func TestSyncer_SyncWaitStopsWithContext(t *testing.T) {
 	f := newSyncFake("a")
 	release := f.gated()
 	defer release()
-	s := lifecycle.NewSyncer(f, time.Minute)
+	s := lifecycle.NewSyncer(f.api(), time.Minute)
 
 	var wg sync.WaitGroup
 	defer wg.Wait()

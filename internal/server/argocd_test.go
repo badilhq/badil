@@ -30,7 +30,7 @@ func newArgoCDServer(t *testing.T, token string) (*server.Server, *metrics.Metri
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
 	m := metrics.New()
-	srv := server.NewServer(nil, nil, "test-deploy-token", testInstallationID,
+	srv := server.NewServer(nil, nil, "test-deploy-token",
 		server.WithMetrics(m), server.WithArgoCDToken(token))
 	srv.SetNow(argoCDNow)
 	return srv, m, capture

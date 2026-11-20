@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,16 +15,18 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/forge"
+	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/server"
+	"github.com/badilhq/badil/internal/store"
 )
 
 var errUnexpected = errors.New("unexpected call")
 
-// loopFake is a lifecycle.SweepAPI whose previews are all gone by the time
-// they are read. ListPreviews returns slugs or listErr and, while block is
+// loopFake is the store and forge of a lifecycle.SweepAPI (api) whose
+// previews are all gone by the time they are read. ListPreviews returns slugs or listErr and, while block is
 // open, waits for it to close or for its context to end. It tracks how many
 // ListPreviews calls ran and the most that ran at once.
 type loopFake struct {
@@ -67,14 +70,14 @@ func (f *loopFake) counts() (int, int) {
 }
 
 func (f *loopFake) GetPreview(context.Context, string) (*preview.PreviewValues, string, error) {
-	return nil, "", gitops.ErrNotFound
+	return nil, "", store.ErrNotFound
 }
 
-func (f *loopFake) FetchServiceCatalog(context.Context) (*gitops.ServiceCatalog, error) {
-	return &gitops.ServiceCatalog{Label: "preview"}, nil
+func (f *loopFake) FetchServiceCatalog(context.Context) (*store.ServiceCatalog, error) {
+	return &store.ServiceCatalog{Label: "preview"}, nil
 }
 
-func (f *loopFake) GetPullRequest(context.Context, string, string, int) (*gitops.PullRequest, error) {
+func (f *loopFake) GetPullRequest(context.Context, string, string, int) (*forge.PullRequest, error) {
 	return nil, errUnexpected
 }
 
@@ -82,11 +85,11 @@ func (f *loopFake) DeletePreviewWithRetry(
 	context.Context,
 	string, string,
 	func(preview.PreviewValues) bool,
-) (*gitops.DeleteResult, error) {
+) (*store.DeleteResult, error) {
 	return nil, errUnexpected
 }
 
-func (f *loopFake) SyncPreviewWithRetry(context.Context, string, *gitops.ServiceCatalog) (*gitops.SyncResult, error) {
+func (f *loopFake) SyncPreviewWithRetry(context.Context, string, *store.ServiceCatalog) (*store.SyncResult, error) {
 	return nil, errUnexpected
 }
 
@@ -96,16 +99,37 @@ func (f *loopFake) TeardownPreviewWithRetry(
 	string,
 	string,
 	int,
-) (*gitops.TeardownResult, error) {
+) (*store.TeardownResult, error) {
 	return nil, errUnexpected
 }
 
-func (f *loopFake) UpsertPRComment(context.Context, string, string, int, string) error {
+func (f *loopFake) UpsertComment(context.Context, string, string, int, string) error {
 	return errUnexpected
 }
 
 func (f *loopFake) FanOutPRComments(context.Context, preview.PreviewValues, string) error {
 	return errUnexpected
+}
+
+func (f *loopFake) ListChangedFiles(context.Context, string, string, int) ([]forge.ChangedFile, error) {
+	return nil, errUnexpected
+}
+
+func (f *loopFake) ParseWebhook(*http.Request) (forge.Event, error) {
+	return forge.Event{}, errUnexpected
+}
+
+// api is the lifecycle.SweepAPI over f: its store, forge and recorder, with
+// its FanOutPRComments as the fan-out.
+func (f *loopFake) api() lifecycle.SweepAPI {
+	return lifecycle.SweepAPI{
+		Store:    f,
+		Forge:    f,
+		Recorder: f,
+		FanOut: func(ctx context.Context, _ forge.Forge, vals preview.PreviewValues, body string) error {
+			return f.FanOutPRComments(ctx, vals, body)
+		},
+	}
 }
 
 // assertSweepMetrics fails t unless m's sweep runs and last success are
@@ -127,7 +151,7 @@ func startLoop(f *loopFake, interval time.Duration, now func() time.Time) func()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		runSweepLoop(ctx, f, f.Metrics, interval, 0, now)
+		runSweepLoop(ctx, f.api(), f.Metrics, interval, 0, now)
 	}()
 	return func() {
 		cancel()
@@ -245,9 +269,9 @@ func TestRunSweepLoop_CancelStopsAnInFlightSweepUnrecorded(t *testing.T) {
 
 func TestStartSweepLoop_TrackedByServer(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		srv := server.NewServer(nil, nil, "t", 0)
+		srv := server.NewServer(nil, nil, "t")
 		ctx, cancel := context.WithCancel(context.Background())
-		startSweepLoop(ctx, srv, &loopFake{}, nil, time.Hour, 0)
+		startSweepLoop(ctx, srv, (&loopFake{}).api(), nil, time.Hour, 0)
 
 		short, cancelShort := context.WithTimeout(context.Background(), time.Second)
 		defer cancelShort()
@@ -263,8 +287,8 @@ func TestStartSweepLoop_TrackedByServer(t *testing.T) {
 
 func TestStartSweepLoop_OffStartsNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		srv := server.NewServer(nil, nil, "t", 0)
-		startSweepLoop(context.Background(), srv, &loopFake{}, nil, 0, 0)
+		srv := server.NewServer(nil, nil, "t")
+		startSweepLoop(context.Background(), srv, (&loopFake{}).api(), nil, 0, 0)
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()

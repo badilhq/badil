@@ -5,8 +5,9 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store"
 )
 
 // PRClosedReason is the teardown reason for a closed (or merged) PR.
@@ -41,17 +42,22 @@ type Recorder interface {
 	PreviewSynced()
 }
 
-// TeardownAPI is the subset of gitops.Client used by TeardownPR, plus the
-// Recorder.
-type TeardownAPI interface {
-	Recorder
+// TeardownStore is the subset of store.GitHubStore used by TeardownPR.
+type TeardownStore interface {
 	TeardownPreviewWithRetry(
 		ctx context.Context,
 		slug, owner, repo string,
 		prNumber int,
-	) (*gitops.TeardownResult, error)
-	UpsertPRComment(ctx context.Context, owner, repo string, prNumber int, body string) error
-	FanOutPRComments(ctx context.Context, vals preview.PreviewValues, body string) error
+	) (*store.TeardownResult, error)
+}
+
+// TeardownAPI is what TeardownPR uses: the store, the forge, the Recorder
+// and the comment fan-out.
+type TeardownAPI struct {
+	Store    TeardownStore
+	Forge    forge.Forge
+	Recorder Recorder
+	FanOut   FanOutFunc
 }
 
 // Target identifies a preview and the PR to tear down or reconcile.
@@ -82,18 +88,18 @@ func unpinOnly(ctx context.Context, api TeardownAPI, tt Target, reason string) {
 // true. It reports whether it removed the PR from the preview (unpinned a
 // service or deleted the preview); a failed or no-op teardown removed nothing.
 func teardown(ctx context.Context, api TeardownAPI, tt Target, reason, trigger string, commentPR bool) bool {
-	result, err := api.TeardownPreviewWithRetry(ctx, tt.Slug, tt.Owner, tt.Repo, tt.Number)
+	result, err := api.Store.TeardownPreviewWithRetry(ctx, tt.Slug, tt.Owner, tt.Repo, tt.Number)
 	return afterTeardown(ctx, api, tt, result, err, reason, trigger, commentPR)
 }
 
 // unpinServices unpins, in the preview tt.Slug, the entries of the PR tt for
-// services (gitops.Client.UnpinServicesWithRetry), which never deletes the
+// services (store.GitHubStore.UnpinServicesWithRetry), which never deletes the
 // file, then handles the write as teardown does, with trigger webhook and
 // the PR's comment left alone. It reports whether it unpinned an entry, and
 // the write's error.
 func unpinServices(ctx context.Context, api ReconcileAPI, tt Target, services []string) (bool, error) {
-	result, err := api.UnpinServicesWithRetry(ctx, tt.Slug, tt.Owner, tt.Repo, tt.Number, services)
-	return afterTeardown(ctx, api, tt, result, err, "", triggerWebhook, false), err
+	result, err := api.Store.UnpinServicesWithRetry(ctx, tt.Slug, tt.Owner, tt.Repo, tt.Number, services)
+	return afterTeardown(ctx, api.teardownAPI(), tt, result, err, "", triggerWebhook, false), err
 }
 
 // afterTeardown handles the outcome of a write removing the PR tt from its
@@ -105,13 +111,13 @@ func afterTeardown(
 	ctx context.Context,
 	api TeardownAPI,
 	tt Target,
-	result *gitops.TeardownResult,
+	result *store.TeardownResult,
 	err error,
 	reason, trigger string,
 	commentPR bool,
 ) bool {
 	if err != nil {
-		api.Teardown(trigger, teardownError)
+		api.Recorder.Teardown(trigger, teardownError)
 		slog.ErrorContext(ctx, "preview teardown failed",
 			slog.String("slug", tt.Slug),
 			slog.String("repo", tt.FullName),
@@ -121,7 +127,7 @@ func afterTeardown(
 		return false
 	}
 	if len(result.Removed) == 0 {
-		api.Teardown(trigger, teardownNoop)
+		api.Recorder.Teardown(trigger, teardownNoop)
 		slog.InfoContext(ctx, "preview teardown skipped",
 			slog.String("slug", tt.Slug),
 			slog.String("repo", tt.FullName),
@@ -131,9 +137,9 @@ func afterTeardown(
 		return false
 	}
 	if result.Deleted {
-		api.Teardown(trigger, teardownDeleted)
+		api.Recorder.Teardown(trigger, teardownDeleted)
 	} else {
-		api.Teardown(trigger, teardownUnpinned)
+		api.Recorder.Teardown(trigger, teardownUnpinned)
 	}
 	slog.InfoContext(ctx, "preview teardown",
 		slog.String("slug", tt.Slug),
@@ -148,7 +154,7 @@ func afterTeardown(
 		body := preview.BuildTeardownSummary(
 			tt.Slug, result.Removed, result.Deleted, reason, result.CommitMessage, result.CommitURL,
 		)
-		if upsertErr := api.UpsertPRComment(ctx, tt.Owner, tt.Repo, tt.Number, body); upsertErr != nil {
+		if upsertErr := api.Forge.UpsertComment(ctx, tt.Owner, tt.Repo, tt.Number, body); upsertErr != nil {
 			teardownCommentFailed(ctx, tt, upsertErr)
 		}
 	}
@@ -160,7 +166,7 @@ func afterTeardown(
 		tt.Slug, result.Values, result.Catalog.URLs, result.Catalog.ArgoCDURL, result.Excluded,
 		result.CommitMessage, result.CommitURL,
 	)
-	if fanErr := api.FanOutPRComments(ctx, result.Values, summary); fanErr != nil {
+	if fanErr := api.FanOut(ctx, api.Forge, result.Values, summary); fanErr != nil {
 		teardownCommentFailed(ctx, tt, fanErr)
 	}
 	return true

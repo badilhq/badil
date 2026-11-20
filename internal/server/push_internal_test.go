@@ -1,10 +1,8 @@
 package server
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"io"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -13,25 +11,40 @@ import (
 	"testing"
 	"time"
 
-	gh "github.com/google/go-github/v71/github"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
+	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
 )
 
-// trustingValidator accepts every delivery and parses it with go-github, so
-// the push tests reach the handler without signing.
-type trustingValidator struct{}
+// errUnexpected is returned by the pushForge methods the push tests do not
+// call.
+var errUnexpected = errors.New("unexpected call")
 
-func (trustingValidator) ValidateWebhook(r *http.Request) ([]byte, error) { return io.ReadAll(r.Body) }
-
-func (trustingValidator) ParseEvent(eventType string, payload []byte) (any, error) {
-	return gh.ParseWebHook(eventType, payload)
+// pushForge is a forge.Forge whose ParseWebhook returns event, which the test
+// sets before each delivery, so the push tests reach the handler without
+// signing.
+type pushForge struct {
+	event forge.Event
 }
 
-// newPushServer returns a server over fg with the trusting validator, the
-// installation 123 allowed, and metrics recorded in a fresh *Metrics.
+func (f *pushForge) ParseWebhook(*http.Request) (forge.Event, error) { return f.event, nil }
+
+func (*pushForge) GetPullRequest(context.Context, string, string, int) (*forge.PullRequest, error) {
+	return nil, errUnexpected
+}
+
+func (*pushForge) ListChangedFiles(context.Context, string, string, int) ([]forge.ChangedFile, error) {
+	return nil, errUnexpected
+}
+
+func (*pushForge) UpsertComment(context.Context, string, string, int, string) error {
+	return errUnexpected
+}
+
+// newPushServer returns a server over fg with a pushForge, and metrics
+// recorded in a fresh *Metrics.
 func newPushServer(t *testing.T, fg *fakeGitops) (*Server, *metrics.Metrics, *LogCapture) {
 	t.Helper()
 	capture := &LogCapture{}
@@ -39,40 +52,43 @@ func newPushServer(t *testing.T, fg *fakeGitops) (*Server, *metrics.Metrics, *Lo
 	slog.SetDefault(slog.New(capture))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 	m := metrics.New()
-	return NewServer(trustingValidator{}, fg, "t", 123, WithMetrics(m)), m, capture
+	return NewServer(&pushForge{}, fg, "t", WithMetrics(m), withFanOut(fg)), m, capture
 }
 
 // pushPayload is a push of ref to repo, whose default branch is main.
-func pushPayload(t *testing.T, repo, ref string, deleted bool) []byte {
-	t.Helper()
-	body, err := json.Marshal(map[string]any{
-		"ref":          ref,
-		"after":        "0000000000000000000000000000000000000002",
-		"deleted":      deleted,
-		"repository":   map[string]any{"full_name": repo, "default_branch": "main"},
-		"installation": map[string]any{"id": 123},
-	})
-	if err != nil {
-		t.Fatal(err)
+func pushPayload(repo, ref string, deleted bool) forge.Event {
+	return forge.Event{
+		Name: "push",
+		Kind: forge.KindPush,
+		Push: forge.PushEvent{
+			FullName:      repo,
+			Ref:           ref,
+			DefaultBranch: "main",
+			After:         "0000000000000000000000000000000000000002",
+			Deleted:       deleted,
+		},
 	}
-	return body
 }
 
-// push delivers a push to s and returns the answered status, without
+// push delivers the push ev to s and returns the answered status, without
 // waiting for the background sync.
-func push(t *testing.T, s *Server, body []byte) int {
+func push(t *testing.T, s *Server, ev forge.Event) int {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/github", bytes.NewReader(body))
-	req.Header.Set("X-Github-Event", "push")
+	pf, ok := s.forge.(*pushForge)
+	if !ok {
+		t.Fatalf("forge = %T, want *pushForge", s.forge)
+	}
+	pf.event = ev
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/github", strings.NewReader("{}"))
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	return rec.Code
 }
 
 // pushAndWait is push, then waits for the background sync.
-func pushAndWait(t *testing.T, s *Server, body []byte) int {
+func pushAndWait(t *testing.T, s *Server, ev forge.Event) int {
 	t.Helper()
-	code := push(t, s, body)
+	code := push(t, s, ev)
 	if err := s.WaitBackground(context.Background()); err != nil {
 		t.Fatalf("WaitBackground: %v", err)
 	}
@@ -98,7 +114,7 @@ func TestPush_DefaultBranchSyncsEveryPreview(t *testing.T) {
 		t.Run(repo, func(t *testing.T) {
 			fg := syncFake()
 			s, m, _ := newPushServer(t, fg)
-			if code := pushAndWait(t, s, pushPayload(t, repo, "refs/heads/main", false)); code != http.StatusOK {
+			if code := pushAndWait(t, s, pushPayload(repo, "refs/heads/main", false)); code != http.StatusOK {
 				t.Fatalf("status = %d, want 200", code)
 			}
 			if got := fg.synced(); !slices.Equal(got, []string{"a", "b"}) {
@@ -125,7 +141,7 @@ func TestPush_OtherPushesIgnored(t *testing.T) {
 			fg := syncFake()
 			fg.started = make(chan string, 4)
 			s, m, capture := newPushServer(t, fg)
-			if code := pushAndWait(t, s, pushPayload(t, tc.repo, tc.ref, tc.deleted)); code != http.StatusOK {
+			if code := pushAndWait(t, s, pushPayload(tc.repo, tc.ref, tc.deleted)); code != http.StatusOK {
 				t.Fatalf("status = %d, want 200", code)
 			}
 			if got := drain(fg.started); len(got) != 0 || len(fg.synced()) != 0 {
@@ -143,7 +159,7 @@ func TestPush_WaitBackgroundWaitsForSync(t *testing.T) {
 	fg := syncFake()
 	fg.syncGate = make(chan struct{})
 	s, _, _ := newPushServer(t, fg)
-	if code := push(t, s, pushPayload(t, "acme/gitops", "refs/heads/main", false)); code != http.StatusOK {
+	if code := push(t, s, pushPayload("acme/gitops", "refs/heads/main", false)); code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 before the sync finished", code)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), quiet)
@@ -163,7 +179,7 @@ func TestPush_WaitBackgroundWaitsForSync(t *testing.T) {
 func TestPush_BoundedBySyncTimeout(t *testing.T) {
 	fg := syncFake()
 	s, _, _ := newPushServer(t, fg)
-	pushAndWait(t, s, pushPayload(t, "acme/gitops", "refs/heads/main", false))
+	pushAndWait(t, s, pushPayload("acme/gitops", "refs/heads/main", false))
 	if left := time.Until(fg.catalogDeadline); left < syncTimeout-time.Minute || left > syncTimeout {
 		t.Errorf("sync deadline in %v, want the %v syncTimeout bound", left, syncTimeout)
 	}

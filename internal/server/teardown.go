@@ -5,11 +5,10 @@ import (
 	"log/slog"
 	"time"
 
-	gh "github.com/google/go-github/v71/github"
-
-	"github.com/badilhq/badil/internal/gitops"
+	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store"
 )
 
 // reconcileTimeout caps the background work for a single reconcile, shared by
@@ -17,12 +16,12 @@ import (
 const reconcileTimeout = 20 * time.Second
 
 // prTarget builds the Target of a pull_request event, without its slug.
-func prTarget(e *gh.PullRequestEvent) lifecycle.Target {
+func prTarget(e forge.PullRequestEvent) lifecycle.Target {
 	return lifecycle.Target{
-		Owner:    e.GetRepo().GetOwner().GetLogin(),
-		Repo:     e.GetRepo().GetName(),
-		FullName: e.GetRepo().GetFullName(),
-		Number:   e.GetNumber(),
+		Owner:    e.Owner,
+		Repo:     e.Repo,
+		FullName: e.FullName,
+		Number:   e.Number,
 	}
 }
 
@@ -54,19 +53,13 @@ func (s *Server) runJob(ctx context.Context, onPanic func(rec any), job func(con
 // startReconcile reconciles the event's PR with its preview in a background
 // job. Events missing the fields needed to find the PR, and closed events
 // with neither a head branch slug nor a named label slug, start nothing. A closed event logs as a teardown.
-func (s *Server) startReconcile(ctx context.Context, e *gh.PullRequestEvent) {
-	var labels []string
-	if pr := e.GetPullRequest(); pr != nil {
-		for _, l := range pr.Labels {
-			labels = append(labels, l.GetName())
-		}
-	}
+func (s *Server) startReconcile(ctx context.Context, e forge.PullRequestEvent) {
 	ev := lifecycle.Event{
 		Target:  prTarget(e),
-		Action:  e.GetAction(),
-		HeadRef: e.GetPullRequest().GetHead().GetRef(),
-		Label:   e.GetLabel().GetName(),
-		Labels:  labels,
+		Action:  e.Action,
+		HeadRef: e.HeadRef,
+		Label:   e.Label,
+		Labels:  e.Labels,
 	}
 	if ev.Action == "closed" {
 		s.startClosed(ctx, ev)
@@ -90,7 +83,7 @@ func (s *Server) startReconcile(ctx context.Context, e *gh.PullRequestEvent) {
 			slog.Any("panic", rec),
 		)
 	}, func(jctx context.Context) {
-		lifecycle.ReconcilePR(jctx, s.lifecycle, ev)
+		lifecycle.ReconcilePR(jctx, s.reconcileAPI(), ev)
 	})
 }
 
@@ -125,7 +118,7 @@ func (s *Server) startClosed(ctx context.Context, ev lifecycle.Event) {
 			slog.Any("panic", rec),
 		)
 	}, func(jctx context.Context) {
-		lifecycle.ReconcilePR(jctx, s.lifecycle, ev)
+		lifecycle.ReconcilePR(jctx, s.reconcileAPI(), ev)
 	})
 }
 
@@ -133,7 +126,7 @@ func (s *Server) startClosed(ctx context.Context, ev lifecycle.Event) {
 // preview label with a non-empty slug.
 func hasNamedSlug(labels []string) bool {
 	for _, l := range labels {
-		if slug, named, _ := preview.ParseLabel(l, gitops.DefaultLabel); named && slug != "" {
+		if slug, named, _ := preview.ParseLabel(l, store.DefaultLabel); named && slug != "" {
 			return true
 		}
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 )
@@ -17,20 +18,6 @@ import (
 // syncTimeout caps each config sync run (a push to the gitops default branch,
 // or POST /v1/sync), counted from when the run holds the syncer's guard.
 const syncTimeout = 10 * time.Minute
-
-// WebhookValidator validates GitHub webhook signatures and parses payloads
-// into typed event structs.
-type WebhookValidator interface {
-	ValidateWebhook(r *http.Request) ([]byte, error)
-	ParseEvent(eventType string, payload []byte) (any, error)
-}
-
-// lifecycleAPI is gitopsAPI with the metrics recorder lifecycle expects. A
-// nil *metrics.Metrics records nothing.
-type lifecycleAPI struct {
-	gitopsAPI
-	*metrics.Metrics
-}
 
 // Option configures a Server built by NewServer.
 type Option func(*Server)
@@ -51,20 +38,19 @@ func WithArgoCDToken(token string) Option {
 }
 
 type Server struct {
-	webhook     WebhookValidator
-	gitops      gitopsAPI
+	forge forge.Forge
+	store storeAPI
+	// fanOut posts a preview's summary on its open PRs:
+	// lifecycle.FanOutPRComments.
+	fanOut      lifecycle.FanOutFunc
 	metrics     *metrics.Metrics
-	lifecycle   lifecycleAPI
 	deployToken string
 	// argoCDToken authenticates POST /webhooks/argocd, "" when it is
 	// disabled.
 	argoCDToken string
 	// now is the clock spin-up durations are measured against.
-	now func() time.Time
-	// allowedInstallationID is the only GitHub App installation whose webhook
-	// deliveries are dispatched.
-	allowedInstallationID int64
-	router                chi.Router
+	now    func() time.Time
+	router chi.Router
 	// bg tracks background jobs (reconciles), queued or running,
 	// for WaitBackground.
 	bg sync.WaitGroup
@@ -76,26 +62,27 @@ type Server struct {
 	syncer *lifecycle.Syncer
 }
 
+// NewServer returns the server of the webhooks of f, over the gitops repo
+// st, configured by opts. The deploy API is served only when deployToken is
+// set.
 func NewServer(
-	webhook WebhookValidator,
-	gitops gitopsAPI,
+	f forge.Forge,
+	st storeAPI,
 	deployToken string,
-	allowedInstallationID int64,
 	opts ...Option,
 ) *Server {
 	s := &Server{
-		webhook:               webhook,
-		gitops:                gitops,
-		deployToken:           deployToken,
-		allowedInstallationID: allowedInstallationID,
-		jobTimeout:            reconcileTimeout,
-		now:                   time.Now,
+		forge:       f,
+		store:       st,
+		fanOut:      lifecycle.FanOutPRComments,
+		deployToken: deployToken,
+		jobTimeout:  reconcileTimeout,
+		now:         time.Now,
 	}
 	for _, opt := range opts {
 		opt(s)
 	}
-	s.lifecycle = lifecycleAPI{gitopsAPI: gitops, Metrics: s.metrics}
-	s.syncer = lifecycle.NewSyncer(s.lifecycle, syncTimeout)
+	s.syncer = lifecycle.NewSyncer(s.syncAPI(), syncTimeout)
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -114,6 +101,24 @@ func NewServer(
 	}
 	s.router = r
 	return s
+}
+
+// reconcileAPI is the store, the forge, the metrics and the fan-out as
+// lifecycle.ReconcilePR expects them. A nil *metrics.Metrics records nothing.
+func (s *Server) reconcileAPI() lifecycle.ReconcileAPI {
+	return lifecycle.ReconcileAPI{Store: s.store, Forge: s.forge, Recorder: s.metrics, FanOut: s.fanOut}
+}
+
+// deployAPI is the store, the forge and the fan-out as lifecycle.DeployPR
+// expects them.
+func (s *Server) deployAPI() lifecycle.DeployAPI {
+	return lifecycle.DeployAPI{Store: s.store, Forge: s.forge, FanOut: s.fanOut}
+}
+
+// syncAPI is the store, the forge, the metrics and the fan-out as
+// lifecycle.Syncer expects them.
+func (s *Server) syncAPI() lifecycle.SyncAPI {
+	return lifecycle.SyncAPI{Store: s.store, Forge: s.forge, Recorder: s.metrics, FanOut: s.fanOut}
 }
 
 func (s *Server) Handler() http.Handler {

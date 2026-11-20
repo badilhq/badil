@@ -7,10 +7,10 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/badilhq/badil/internal/gitops"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store"
 )
 
 // limitBody is the refusal comment of a PR refused the preview pricing at a
@@ -27,7 +27,11 @@ func TestReconcile_PreviewLimitRefusesNewPreview(t *testing.T) {
 		maxPreviews: 2,
 		listed:      []string{"checkout", "search"},
 	}
-	lifecycle.ReconcilePR(context.Background(), f, event("labeled", "front", "preview:pricing", "preview:pricing"))
+	lifecycle.ReconcilePR(
+		context.Background(),
+		f.api(),
+		event("labeled", "front", "preview:pricing", "preview:pricing"),
+	)
 
 	want := []string{"teardown:feature-pricing", "get:pricing", "list", "upsert"}
 	if !slices.Equal(f.calls, want) {
@@ -88,7 +92,7 @@ func TestReconcile_PreviewLimitDeploys(t *testing.T) {
 			}
 			lifecycle.ReconcilePR(
 				context.Background(),
-				f,
+				f.api(),
 				event("labeled", "front", "preview:pricing", "preview:pricing"),
 			)
 
@@ -113,7 +117,11 @@ func TestReconcile_PreviewLimitListError(t *testing.T) {
 		maxPreviews: 2,
 		listErr:     errors.New("list boom"),
 	}
-	lifecycle.ReconcilePR(context.Background(), f, event("labeled", "front", "preview:pricing", "preview:pricing"))
+	lifecycle.ReconcilePR(
+		context.Background(),
+		f.api(),
+		event("labeled", "front", "preview:pricing", "preview:pricing"),
+	)
 
 	if len(f.writes) != 0 || len(f.upserts) != 0 {
 		t.Errorf("writes = %+v, upserts = %q; want none", f.writes, f.upserts)
@@ -153,8 +161,8 @@ func TestRefusedByHolder_Exists(t *testing.T) {
 			f := &reconcileFake{previews: tc.previews}
 			pr := fetchedPR("front", tc.open, "preview:pricing")
 			o, r, vals := lifecycle.RefusedByHolder(
-				context.Background(), f, event("labeled", "front", "preview:pricing"), pr,
-				preview.Resolution{Slug: tc.slug}, []string{"front"}, gitops.DefaultLabel,
+				context.Background(), f.api(), event("labeled", "front", "preview:pricing"), pr,
+				preview.Resolution{Slug: tc.slug}, []string{"front"}, store.DefaultLabel,
 			)
 
 			if exists := vals != nil; o != "" || r != "" || exists != tc.exists {

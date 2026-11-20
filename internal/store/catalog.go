@@ -1,4 +1,4 @@
-package gitops
+package store
 
 import (
 	"bytes"

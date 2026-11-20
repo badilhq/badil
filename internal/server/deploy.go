@@ -10,9 +10,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/badilhq/badil/internal/gitops"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store"
 )
 
 // deployTimeout caps the upstream work for a single deploy. Catalog + read +
@@ -20,39 +20,12 @@ import (
 // without letting a stuck request pin a goroutine forever.
 const deployTimeout = 30 * time.Second
 
-// gitopsAPI is the subset of gitops.Client used by the deploy, teardown and
-// sync handlers. Defined here so tests can inject fakes without spinning up an
-// httptest server for every GitHub round-trip.
-type gitopsAPI interface {
-	FetchServiceCatalog(ctx context.Context) (*gitops.ServiceCatalog, error)
-	WritePreviewWithRetry(
-		ctx context.Context,
-		slug string,
-		catalog *gitops.ServiceCatalog,
-		serviceName, commitSha string,
-		inputs preview.DeployInputs,
-		createMessage, updateMessage string,
-		skipUnchanged bool,
-	) (*gitops.WriteResult, error)
-	FanOutPRComments(ctx context.Context, vals preview.PreviewValues, body string) error
-	TeardownPreviewWithRetry(
-		ctx context.Context,
-		slug, owner, repo string,
-		prNumber int,
-	) (*gitops.TeardownResult, error)
-	UpsertPRComment(ctx context.Context, owner, repo string, prNumber int, body string) error
-	GetPreview(ctx context.Context, slug string) (*preview.PreviewValues, string, error)
-	ListPreviews(ctx context.Context) ([]string, error)
-	GetPullRequest(ctx context.Context, owner, repo string, number int) (*gitops.PullRequest, error)
-	ListPullRequestFiles(ctx context.Context, owner, repo string, number int) ([]gitops.ChangedFile, error)
-	UnpinServicesWithRetry(
-		ctx context.Context,
-		slug, owner, repo string,
-		prNumber int,
-		services []string,
-	) (*gitops.TeardownResult, error)
-	FetchServiceCatalogSHA(ctx context.Context) (*gitops.ServiceCatalog, string, error)
-	SyncPreviewWithRetry(ctx context.Context, slug string, catalog *gitops.ServiceCatalog) (*gitops.SyncResult, error)
+// storeAPI is the subset of store.GitHubStore used by the deploy, reconcile,
+// teardown and sync handlers. Defined here so tests can inject fakes without
+// spinning up an httptest server for every GitHub round-trip.
+type storeAPI interface {
+	lifecycle.ReconcileStore
+	lifecycle.SyncStore
 	FullName() string
 }
 
@@ -126,7 +99,7 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		slog.String("pr_number", req.PRNumber),
 	)
 
-	services, err := s.gitops.FetchServiceCatalog(ctx)
+	services, err := s.store.FetchServiceCatalog(ctx)
 	if err != nil {
 		writeUpstreamError(ctx, logger, w, "fetch catalog", err)
 		return
@@ -154,7 +127,7 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 
 	// A manual deploy always writes: it refreshes updated-at (the TTL clock)
 	// and always returns a gitops commit URL.
-	result, fanErr, err := lifecycle.DeployPR(ctx, s.gitops, services, slug, inputs, false)
+	result, fanErr, err := lifecycle.DeployPR(ctx, s.deployAPI(), services, slug, inputs, false)
 	if err != nil {
 		writeUpstreamError(ctx, logger, w, "write preview", err)
 		return
@@ -185,15 +158,15 @@ func (s *Server) refuseOverLimit(
 	if maxPreviews <= 0 {
 		return false
 	}
-	_, _, err := s.gitops.GetPreview(ctx, slug)
+	_, _, err := s.store.GetPreview(ctx, slug)
 	if err == nil {
 		return false
 	}
-	if !errors.Is(err, gitops.ErrNotFound) {
+	if !errors.Is(err, store.ErrNotFound) {
 		writeUpstreamError(ctx, logger, w, "read preview", err)
 		return true
 	}
-	slugs, err := s.gitops.ListPreviews(ctx)
+	slugs, err := s.store.ListPreviews(ctx)
 	if err != nil {
 		writeUpstreamError(ctx, logger, w, "list previews", err)
 		return true
@@ -222,15 +195,15 @@ func splitJoinedErr(err error) []string {
 	return []string{err.Error()}
 }
 
-// writeUpstreamError maps gitops sentinel errors to HTTP status codes and
+// writeUpstreamError maps store sentinel errors to HTTP status codes and
 // emits a structured log line. ErrUnauthorized surfaces as 502 because it
 // reflects upstream (GitHub) credentials, not the caller's.
 func writeUpstreamError(ctx context.Context, logger *slog.Logger, w http.ResponseWriter, op string, err error) {
 	status := http.StatusInternalServerError
 	switch {
-	case errors.Is(err, gitops.ErrNotFound):
+	case errors.Is(err, store.ErrNotFound):
 		status = http.StatusNotFound
-	case errors.Is(err, gitops.ErrUnauthorized):
+	case errors.Is(err, store.ErrUnauthorized):
 		status = http.StatusBadGateway
 	}
 	logger.ErrorContext(ctx, "deploy failed", slog.String("op", op), slog.String("err", err.Error()))

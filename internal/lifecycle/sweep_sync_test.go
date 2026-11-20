@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/badilhq/badil/internal/gitops"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store"
 )
 
 const (
@@ -19,8 +19,8 @@ const (
 )
 
 // syncedResult is a sync of feature-x that rewrote it to vals, with notify.
-func syncedResult(vals *preview.PreviewValues, notify bool) *gitops.SyncResult {
-	return &gitops.SyncResult{
+func syncedResult(vals *preview.PreviewValues, notify bool) *store.SyncResult {
+	return &store.SyncResult{
 		Values:        *vals,
 		CommitURL:     syncCommitURL,
 		CommitMessage: syncCommitMessage,
@@ -46,7 +46,7 @@ func TestSweep_SyncsAfterRule3(t *testing.T) {
 		prHeadRef: map[string]string{"acme/backend-2#7": "feature-x"},
 		prLabels:  map[string][]string{"acme/backend-2#7": {"preview"}},
 	}
-	if err := lifecycle.Sweep(context.Background(), f, now, ttl); err != nil {
+	if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
 	// Rules 1 and 2 deleted their previews: only feature-x is synced, after
@@ -64,7 +64,7 @@ func TestSweep_NoSyncWithoutCatalog(t *testing.T) {
 		files:      map[string]*preview.PreviewValues{"feature-x": values(pin("backend-1", pr42, recent))},
 		prOpen:     map[string]bool{"acme/backend-1#42": true},
 	}
-	if err := lifecycle.Sweep(context.Background(), f, now, ttl); err != nil {
+	if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
 	if len(f.syncs) != 0 {
@@ -85,7 +85,7 @@ func TestSweep_SyncErrorCounted(t *testing.T) {
 		prHeadRef: map[string]string{"acme/backend-1#42": "a", "acme/backend-2#7": "b"},
 		syncErr:   map[string]error{"a": errors.New("sync boom")},
 	}
-	err := lifecycle.Sweep(context.Background(), f, now, ttl)
+	err := lifecycle.Sweep(context.Background(), f.api(), now, ttl)
 	if err == nil || err.Error() != "cleanup: 1 preview(s) failed" {
 		t.Fatalf("err = %v, want cleanup: 1 preview(s) failed", err)
 	}
@@ -102,12 +102,12 @@ func TestSweep_SyncComments(t *testing.T) {
 	synced := values(pin("backend-1", pr42, recent), preview.ServiceEntry{Name: "front"})
 	cases := []struct {
 		name        string
-		sync        *gitops.SyncResult
+		sync        *store.SyncResult
 		fanErr      error
 		wantSynced  bool
 		wantFanOuts int
 	}{
-		{name: "unchanged", sync: &gitops.SyncResult{}},
+		{name: "unchanged", sync: &store.SyncResult{}},
 		{name: "changed without notify", sync: syncedResult(synced, false), wantSynced: true},
 		{name: "changed with notify", sync: syncedResult(synced, true), wantSynced: true, wantFanOuts: 1},
 		{
@@ -125,10 +125,10 @@ func TestSweep_SyncComments(t *testing.T) {
 				prOpen:    map[string]bool{"acme/backend-1#42": true},
 				prHeadRef: map[string]string{"acme/backend-1#42": "feature-x"},
 				prLabels:  map[string][]string{"acme/backend-1#42": {"preview"}},
-				sync:      map[string]*gitops.SyncResult{"feature-x": tc.sync},
+				sync:      map[string]*store.SyncResult{"feature-x": tc.sync},
 				fanErr:    tc.fanErr,
 			}
-			if err := lifecycle.Sweep(context.Background(), f, now, ttl); err != nil {
+			if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
 				t.Fatalf("Sweep: %v (a comment failure is not a failure)", err)
 			}
 			assertSyncLogged(t, capture, tc.wantSynced, tc.fanErr != nil)
@@ -176,9 +176,9 @@ func TestSweep_SyncCommentLinksArgoCD(t *testing.T) {
 		prOpen:    map[string]bool{"acme/backend-1#42": true},
 		prHeadRef: map[string]string{"acme/backend-1#42": "feature-x"},
 		prLabels:  map[string][]string{"acme/backend-1#42": {"preview"}},
-		sync:      map[string]*gitops.SyncResult{"feature-x": syncedResult(synced, true)},
+		sync:      map[string]*store.SyncResult{"feature-x": syncedResult(synced, true)},
 	}
-	if err := lifecycle.Sweep(context.Background(), f, now, ttl); err != nil {
+	if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
 	link := preview.ArgoCDAppsURL("https://argocd.example.com", "feature-x")

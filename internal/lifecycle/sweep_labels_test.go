@@ -37,7 +37,7 @@ func TestSweep_OpenPRUnpinnedWithoutComment(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			captureLogs(t)
 			f := openPRAt("pricing", tc.labels...)
-			if err := lifecycle.Sweep(context.Background(), f, now, ttl); err != nil {
+			if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
 				t.Fatalf("Sweep: %v", err)
 			}
 			want := []teardownCall{{slug: "pricing", owner: "acme", repo: "backend-1", number: 42}}
@@ -54,7 +54,7 @@ func TestSweep_OpenPRUnpinnedWithoutComment(t *testing.T) {
 func TestSweep_OpenPRLabelGoneTearsDown(t *testing.T) {
 	captureLogs(t)
 	f := openPRAt("pricing", "bug")
-	if err := lifecycle.Sweep(context.Background(), f, now, ttl); err != nil {
+	if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
 	if len(f.teardowns) != 1 || f.teardowns[0].slug != "pricing" {
@@ -83,7 +83,7 @@ func TestSweep_OpenPRLeftAlone(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			captureLogs(t)
 			f := openPRAt(tc.slug, tc.labels...)
-			if err := lifecycle.Sweep(context.Background(), f, now, ttl); err != nil {
+			if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
 				t.Fatalf("Sweep: %v", err)
 			}
 			if len(f.teardowns) != 0 || len(f.upserts) != 0 {
@@ -108,7 +108,7 @@ func TestSweep_NoLabelRunsOnlyTheClosedRule(t *testing.T) {
 			f := openPRAt("pricing", "preview:other")
 			f.label, f.catalogErr = tc.label, tc.catalogErr
 			f.files["pricing"] = values(pin("backend-1", pr42, recent), pin("backend-2", pr7, recent))
-			if err := lifecycle.Sweep(context.Background(), f, now, ttl); err != nil {
+			if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
 				t.Fatalf("Sweep: %v (a catalog error is not a failure)", err)
 			}
 			// backend-1#42 is open but moved: left alone. backend-2#7 is closed.

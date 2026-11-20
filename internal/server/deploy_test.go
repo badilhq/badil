@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/badilhq/badil/internal/gitops"
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store"
 )
 
 func validBody() string {
@@ -28,7 +28,7 @@ func validBody() string {
 
 func newTestServer(t *testing.T, fg *fakeGitops) *Server {
 	t.Helper()
-	return NewServer(nil, fg, "test-token", 0)
+	return NewServer(fg, fg, "test-token", withFanOut(fg))
 }
 
 func postDeploy(t *testing.T, srv *Server, body, bearer string) *httptest.ResponseRecorder {
@@ -45,7 +45,7 @@ func postDeploy(t *testing.T, srv *Server, body, bearer string) *httptest.Respon
 func TestDeploy_HappyPath(t *testing.T) {
 	fg := &fakeGitops{
 		catalog: []string{"backend-1", "backend-2", "front"},
-		writeResult: &gitops.WriteResult{
+		writeResult: &store.WriteResult{
 			Values: preview.PreviewValues{Services: []preview.ServiceEntry{
 				{Name: "backend-1", CommitSha: "abc1234567890"},
 				{Name: "backend-2"},
@@ -92,7 +92,7 @@ func TestDeploy_HappyPath(t *testing.T) {
 func TestDeploy_UnchangedCommitStillWrites(t *testing.T) {
 	fg := &fakeGitops{
 		catalog: []string{"backend-1"},
-		writeResult: &gitops.WriteResult{
+		writeResult: &store.WriteResult{
 			Values: preview.PreviewValues{
 				Services: []preview.ServiceEntry{{Name: "backend-1", CommitSha: "abc1234567890"}},
 			},
@@ -159,7 +159,7 @@ func TestDeploy_ServiceNotInCatalog(t *testing.T) {
 func TestDeploy_WriteUnauthorized(t *testing.T) {
 	fg := &fakeGitops{
 		catalog:  []string{"backend-1"},
-		writeErr: fmt.Errorf("%w: token revoked", gitops.ErrUnauthorized),
+		writeErr: fmt.Errorf("%w: token revoked", store.ErrUnauthorized),
 	}
 	rec := postDeploy(t, newTestServer(t, fg), validBody(), "test-token")
 
@@ -175,7 +175,7 @@ func TestDeploy_FanOutPartialFailureSurfacesAsWarnings(t *testing.T) {
 	)
 	fg := &fakeGitops{
 		catalog: []string{"backend-1", "backend-2", "front"},
-		writeResult: &gitops.WriteResult{
+		writeResult: &store.WriteResult{
 			Values:        preview.PreviewValues{Services: []preview.ServiceEntry{{Name: "backend-1"}}},
 			CommitURL:     "https://github.com/acme/gitops/commit/abc",
 			CommitMessage: "chore(preview): update backend-1 in feature-add-pricing",
@@ -253,8 +253,8 @@ preview:
       path: /docs
 `
 
-func previewWriteResult() *gitops.WriteResult {
-	return &gitops.WriteResult{
+func previewWriteResult() *store.WriteResult {
+	return &store.WriteResult{
 		Values: preview.PreviewValues{Services: []preview.ServiceEntry{
 			{Name: "backend-1", Branch: "main", CommitSha: "abc1234567890"},
 			{Name: "backend-2", Branch: "main"},
@@ -426,7 +426,7 @@ func TestDeploy_PreviewLimitReadErrors(t *testing.T) {
 		},
 		{
 			name:   "list previews",
-			fg:     &fakeGitops{listErr: errors.Join(gitops.ErrUnauthorized, errors.New("list boom"))},
+			fg:     &fakeGitops{listErr: errors.Join(store.ErrUnauthorized, errors.New("list boom"))},
 			status: http.StatusBadGateway,
 			op:     "list previews: ",
 		},

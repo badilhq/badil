@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/badilhq/badil/internal/gitops"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
+	"github.com/badilhq/badil/internal/store"
 )
 
 func TestReconcile_UnchangedDeployWritesNothing(t *testing.T) {
@@ -20,7 +20,7 @@ func TestReconcile_UnchangedDeployWritesNothing(t *testing.T) {
 		pr:        fetchedPR("front", true, "preview"),
 		unchanged: map[string]bool{"front": true},
 	}
-	lifecycle.ReconcilePR(context.Background(), f, event("labeled", "front", "preview", "preview"))
+	lifecycle.ReconcilePR(context.Background(), f.api(), event("labeled", "front", "preview", "preview"))
 
 	if len(f.writes) != 0 || len(f.fanOuts) != 0 || len(f.upserts) != 0 {
 		t.Errorf("writes = %v, fanOuts = %v, upserts = %v; want none", f.writes, f.fanOuts, f.upserts)
@@ -55,7 +55,7 @@ func TestReconcile_UnchangedDeployWritesNothing(t *testing.T) {
 func TestReconcile_ChangedDeployWritesWithSkipUnchanged(t *testing.T) {
 	captureLogs(t)
 	f := &reconcileFake{pr: fetchedPR("front", true, "preview")}
-	lifecycle.ReconcilePR(context.Background(), f, event("opened", "front", "", "preview"))
+	lifecycle.ReconcilePR(context.Background(), f.api(), event("opened", "front", "", "preview"))
 
 	if len(f.writes) != 1 || !f.writes[0].skipUnchanged || len(f.fanOuts) != 1 {
 		t.Errorf("writes = %+v, fanOuts = %d; want one write with skipUnchanged and one fan-out",
@@ -82,7 +82,7 @@ func TestReconcile_SomeServicesUnchanged(t *testing.T) {
 				unchanged: map[string]bool{"api": true},
 				writeErr:  tc.writeErr,
 			}
-			lifecycle.ReconcilePR(context.Background(), f, event("labeled", "monorepo", "preview", "preview"))
+			lifecycle.ReconcilePR(context.Background(), f.api(), event("labeled", "monorepo", "preview", "preview"))
 
 			if got := services(f.writes); !slices.Equal(got, tc.written) {
 				t.Errorf("written = %v, want %v", got, tc.written)
@@ -103,16 +103,16 @@ func TestReconcile_SomeServicesUnchanged(t *testing.T) {
 func TestReconcile_CleanupDecidesSkipUnchanged(t *testing.T) {
 	cases := []struct {
 		name          string
-		teardown      *gitops.TeardownResult
+		teardown      *store.TeardownResult
 		teardownErr   error
 		skipUnchanged bool
 	}{
 		{name: "removed from another preview", teardown: removedFront("feature-pricing")},
 		{
 			name:     "unpinned from another preview",
-			teardown: &gitops.TeardownResult{Removed: []string{"front"}, CommitURL: sweepCommitURL},
+			teardown: &store.TeardownResult{Removed: []string{"front"}, CommitURL: sweepCommitURL},
 		},
-		{name: "nothing removed", teardown: &gitops.TeardownResult{}, skipUnchanged: true},
+		{name: "nothing removed", teardown: &store.TeardownResult{}, skipUnchanged: true},
 		{name: "teardown failed", teardownErr: errors.New("boom"), skipUnchanged: true},
 	}
 	for _, tc := range cases {
@@ -127,7 +127,7 @@ func TestReconcile_CleanupDecidesSkipUnchanged(t *testing.T) {
 			}
 			lifecycle.ReconcilePR(
 				context.Background(),
-				f,
+				f.api(),
 				event("labeled", "front", "preview:pricing", "preview:pricing"),
 			)
 

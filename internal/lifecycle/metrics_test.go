@@ -9,10 +9,10 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"github.com/badilhq/badil/internal/gitops"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store"
 )
 
 // assertMetrics fails t unless the samples of m's metrics named names are
@@ -59,7 +59,7 @@ func assertMetrics(t *testing.T, m *metrics.Metrics, want map[string]float64, na
 }
 
 func TestReconcileMetrics_Outcomes(t *testing.T) {
-	deleted := &gitops.TeardownResult{Removed: []string{"front"}, Deleted: true, CommitURL: sweepCommitURL}
+	deleted := &store.TeardownResult{Removed: []string{"front"}, Deleted: true, CommitURL: sweepCommitURL}
 	held := values(pin("front", "https://github.com/acme/front/pull/7", recent))
 	fork := fetchedPR("front", true, "preview")
 	fork.HeadFullName = "octocat/front"
@@ -177,7 +177,7 @@ func TestReconcileMetrics_Outcomes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			captureLogs(t)
 			tc.f.Metrics = metrics.New()
-			lifecycle.ReconcilePR(context.Background(), tc.f, tc.ev)
+			lifecycle.ReconcilePR(context.Background(), tc.f.api(), tc.ev)
 
 			assertMetrics(t, tc.f.Metrics, tc.want,
 				"badil_reconciles_total", "badil_reconcile_skips_total", "badil_teardowns_total")
@@ -195,12 +195,12 @@ func TestTeardownMetrics_Results(t *testing.T) {
 		{name: "error", f: &reconcileFake{teardownErr: errors.New("boom")}, result: "error"},
 		{
 			name:   "deleted",
-			f:      &reconcileFake{teardown: &gitops.TeardownResult{Removed: []string{"front"}, Deleted: true}},
+			f:      &reconcileFake{teardown: &store.TeardownResult{Removed: []string{"front"}, Deleted: true}},
 			result: "deleted",
 		},
 		{
 			name:   "unpinned",
-			f:      &reconcileFake{teardown: &gitops.TeardownResult{Removed: []string{"front"}}},
+			f:      &reconcileFake{teardown: &store.TeardownResult{Removed: []string{"front"}}},
 			result: "unpinned",
 		},
 	}
@@ -210,7 +210,7 @@ func TestTeardownMetrics_Results(t *testing.T) {
 			tc.f.Metrics = metrics.New()
 			target := event("", "front", "").Target
 			target.Slug = "feature-x"
-			lifecycle.TeardownPR(context.Background(), tc.f, target, lifecycle.PRClosedReason, "webhook")
+			lifecycle.TeardownPR(context.Background(), tc.f.teardownAPI(), target, lifecycle.PRClosedReason, "webhook")
 
 			assertMetrics(t, tc.f.Metrics, map[string]float64{
 				`badil_teardowns_total{result="` + tc.result + `",trigger="webhook"}`: 1,
@@ -223,12 +223,12 @@ func TestTeardownMetrics_WebhookDeleteDecrementsPreviews(t *testing.T) {
 	captureLogs(t)
 	f := &reconcileFake{
 		Metrics:  metrics.New(),
-		teardown: &gitops.TeardownResult{Removed: []string{"front"}, Deleted: true},
+		teardown: &store.TeardownResult{Removed: []string{"front"}, Deleted: true},
 	}
 	f.PreviewsListed(2)
 	target := event("", "front", "").Target
 	target.Slug = "feature-x"
-	lifecycle.TeardownPR(context.Background(), f, target, lifecycle.PRClosedReason, "webhook")
+	lifecycle.TeardownPR(context.Background(), f.teardownAPI(), target, lifecycle.PRClosedReason, "webhook")
 
 	assertMetrics(t, f.Metrics, map[string]float64{`badil_previews`: 1}, "badil_previews")
 }
@@ -250,9 +250,9 @@ func TestSweepMetrics(t *testing.T) {
 		prHeadRef: map[string]string{"acme/backend-1#42": "open", "acme/front#3": "stale"},
 		prLabels:  map[string][]string{"acme/backend-1#42": {"preview"}, "acme/front#3": {"preview"}},
 		// "open" syncs unchanged, "stale" is rewritten.
-		sync: map[string]*gitops.SyncResult{"stale": {Changed: true}},
+		sync: map[string]*store.SyncResult{"stale": {Changed: true}},
 	}
-	if err := lifecycle.Sweep(context.Background(), f, now, ttl); err != nil {
+	if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
 
@@ -270,7 +270,7 @@ func TestSweepMetrics_UnpinOnlyIsASweepTeardown(t *testing.T) {
 	captureLogs(t)
 	f := openPRAt("feature-x", "preview:other")
 	f.Metrics = metrics.New()
-	if err := lifecycle.Sweep(context.Background(), f, now, ttl); err != nil {
+	if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
 

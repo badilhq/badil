@@ -1,4 +1,4 @@
-package gitops_test
+package store_test
 
 import (
 	"context"
@@ -13,8 +13,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/badilhq/badil/internal/gitops"
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store"
 )
 
 const teardownPath = "/repos/acme/gitops/contents/previews/feature-x/values.yaml"
@@ -124,7 +124,7 @@ func (g *teardownGitHub) catalogReads() int {
 	return g.badilGets
 }
 
-func runTeardown(t *testing.T, g *teardownGitHub) (*gitops.TeardownResult, error) {
+func runTeardown(t *testing.T, g *teardownGitHub) (*store.TeardownResult, error) {
 	t.Helper()
 	g.t = t
 	srv := httptest.NewServer(g)
@@ -301,8 +301,8 @@ func TestTeardown_ReadsBadilYAMLOnceAcrossConflicts(t *testing.T) {
 	if _, err := runTeardown(t, g); err != nil {
 		t.Fatalf("TeardownPreviewWithRetry: %v", err)
 	}
-	if reqs := g.requests(); len(reqs) != gitops.MaxWriteRetries || reqs[2].sha != "blob-2" {
-		t.Errorf("requests = %+v, want %d PUTs, the last at blob-2", reqs, gitops.MaxWriteRetries)
+	if reqs := g.requests(); len(reqs) != store.MaxWriteRetries || reqs[2].sha != "blob-2" {
+		t.Errorf("requests = %+v, want %d PUTs, the last at blob-2", reqs, store.MaxWriteRetries)
 	}
 	if n := g.catalogReads(); n != 1 {
 		t.Errorf("badil.yaml reads = %d, want 1", n)
@@ -514,47 +514,19 @@ func TestTeardown_DeleteConflictBecomesUpdate(t *testing.T) {
 func TestTeardown_ConflictsExhausted(t *testing.T) {
 	g := &teardownGitHub{
 		gets:   []fileState{{sha: "blob-1", body: onlyPR42}},
-		writes: slices.Repeat([]int{http.StatusConflict}, gitops.MaxWriteRetries),
+		writes: slices.Repeat([]int{http.StatusConflict}, store.MaxWriteRetries),
 	}
 	_, err := runTeardown(t, g)
 	const want = "teardown previews/feature-x/values.yaml: 3 attempts exhausted"
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %q", err, want)
 	}
-	if got := len(g.requests()); got != gitops.MaxWriteRetries {
-		t.Errorf("writes = %d, want %d", got, gitops.MaxWriteRetries)
+	if got := len(g.requests()); got != store.MaxWriteRetries {
+		t.Errorf("writes = %d, want %d", got, store.MaxWriteRetries)
 	}
 }
 
-func TestUpsertPRComment_CreatesWithMarker(t *testing.T) {
-	var body string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/backend-1/issues/42/comments":
-			_, _ = io.WriteString(w, `[]`)
-		case r.Method == http.MethodPost && r.URL.Path == "/repos/acme/backend-1/issues/42/comments":
-			var req struct {
-				Body string `json:"body"`
-			}
-			_ = json.NewDecoder(r.Body).Decode(&req)
-			body = req.Body
-			w.WriteHeader(http.StatusCreated)
-			_, _ = io.WriteString(w, `{"id":1}`)
-		default:
-			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
-		}
-	}))
-	defer srv.Close()
-
-	if err := newClient(t, srv).UpsertPRComment(context.Background(), "acme", "backend-1", 42, "## gone"); err != nil {
-		t.Fatalf("UpsertPRComment: %v", err)
-	}
-	if want := gitops.PRCommentMarker + "\n## gone"; body != want {
-		t.Errorf("comment body = %q, want %q", body, want)
-	}
-}
-
-func runUnpin(t *testing.T, g *teardownGitHub, services ...string) (*gitops.TeardownResult, error) {
+func runUnpin(t *testing.T, g *teardownGitHub, services ...string) (*store.TeardownResult, error) {
 	t.Helper()
 	g.t = t
 	srv := httptest.NewServer(g)

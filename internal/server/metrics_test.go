@@ -10,6 +10,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
+	forgegithub "github.com/badilhq/badil/internal/forge/github"
 	"github.com/badilhq/badil/internal/github"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/server"
@@ -32,7 +33,8 @@ func newMetricsServer(t *testing.T) (*server.Server, *metrics.Metrics) {
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
 	m := metrics.New()
-	return server.NewServer(app, nil, "test-deploy-token", testInstallationID, server.WithMetrics(m)), m
+	f := forgegithub.New(nil, app, testInstallationID)
+	return server.NewServer(f, nil, "test-deploy-token", server.WithMetrics(m)), m
 }
 
 func TestWebhookMetrics(t *testing.T) {
