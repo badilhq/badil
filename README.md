@@ -67,6 +67,8 @@ A manual deploy always targets the slug of `head_ref`, and skips the one-PR-per-
 
 From an empty cluster to a first preview: [docs/INSTALL.md](docs/INSTALL.md).
 
+The `badil` CLI (`badil list`, `badil wait`) for CI jobs and agents: [Install the badil CLI](docs/INSTALL.md#install-the-badil-cli).
+
 The gitops repo can start from the template [`badilhq/gitops-template`](https://github.com/badilhq/gitops-template).
 
 ## Status
