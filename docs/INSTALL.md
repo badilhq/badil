@@ -294,7 +294,10 @@ Both jobs pin a release, check its checksum, then run `badil wait`, which fails 
 GitHub Actions, with the repository variable `BADIL_SERVER` and the secret `BADIL_READ_TOKEN`. The step writes the preview URLs to its `urls` output:
 
 ```yaml
-on: pull_request
+on:
+  pull_request:
+    # labeled: a PR labeled after it was opened is waited for too.
+    types: [opened, synchronize, reopened, labeled]
 
 jobs:
   preview:
