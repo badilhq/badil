@@ -535,6 +535,33 @@ func TestReadAPI_CloneReadFailure(t *testing.T) {
 	}
 }
 
+// TestReadAPI_ClientGoneDuringRead checks that a read failing once the
+// client has gone neither logs read failed nor answers 503.
+func TestReadAPI_ClientGoneDuringRead(t *testing.T) {
+	fg := readFake(readBadil, pinnedEntry("backend-1", backend42))
+	s, _, capture := newReadServer(t, fg)
+	if err := os.RemoveAll(fg.remote.Dir()); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/v1/previews", "/v1/previews/feature-x", "/v1/previews/feature-x/wait", "/v1/wait?repo=acme/backend-1&pr=42"} {
+		fg.st.Invalidate()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		req := httptest.NewRequestWithContext(ctx, http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer "+testReadToken)
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		if rec.Code == http.StatusServiceUnavailable || rec.Body.Len() != 0 {
+			t.Errorf("GET %s with the client gone = %d %q, want no answer", path, rec.Code, rec.Body.String())
+		}
+	}
+	for _, r := range capture.Records() {
+		if r.Message == "read failed" {
+			t.Errorf("logged read failed for a client that has gone")
+		}
+	}
+}
+
 func TestWait_InvalidQuery(t *testing.T) {
 	s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("backend-1", backend42)))
 	for _, q := range []string{"pr=1", "repo=acme/front", "repo=acme/front&pr=0", "repo=acme/front&pr=abc",

@@ -144,8 +144,12 @@ func (s *Server) readPreview(ctx context.Context, slug string) (*previewView, er
 }
 
 // readFailed logs a failed read of the gitops clone on route and answers 503
-// with its error.
+// with its error. When ctx is done the client has gone and the read failed
+// for that reason: it neither logs nor answers.
 func readFailed(ctx context.Context, w http.ResponseWriter, route string, err error) {
+	if ctx.Err() != nil {
+		return
+	}
 	slog.Default().ErrorContext(ctx, "read failed", slog.String("route", route), slog.String("err", err.Error()))
 	writeJSONError(ctx, w, http.StatusServiceUnavailable, err.Error())
 }
