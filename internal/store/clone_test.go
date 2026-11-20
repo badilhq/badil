@@ -468,6 +468,31 @@ func TestFreshness_CancelledRefreshRetriedByWaiter(t *testing.T) {
 	}
 }
 
+// TestFetch_RepacksPastPackLimit fetches more times than the pack limit and
+// checks the clone is repacked and every read still finds its objects.
+func TestFetch_RepacksPastPackLimit(t *testing.T) {
+	st, remote := readStore(t, map[string]string{"previews/a/values.yaml": previewFile("v0")})
+	packDir := filepath.Join(store.CloneDir(st), "objects", "pack")
+	for i := 1; i <= store.MaxPacks+10; i++ {
+		want := fmt.Sprintf("v%d", i)
+		remote.set("previews/a/values.yaml", previewFile(want))
+		st.Invalidate()
+		if got := serviceName(t, st); got != want {
+			t.Fatalf("service after fetch %d = %q, want %s", i, got, want)
+		}
+		packs, err := filepath.Glob(filepath.Join(packDir, "*.pack"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(packs) > store.MaxPacks {
+			t.Fatalf("packs after fetch %d = %d, want at most %d", i, len(packs), store.MaxPacks)
+		}
+	}
+	if _, err := st.ListPreviews(context.Background()); err != nil {
+		t.Errorf("ListPreviews: %v", err)
+	}
+}
+
 // TestGetPreview_SHAIsGitHashObject checks the SHA against git hash-object's
 // definition: the SHA-1 of "blob <size>\x00" and the content.
 func TestGetPreview_SHAIsGitHashObject(t *testing.T) {

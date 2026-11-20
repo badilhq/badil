@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"slices"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/plumbing/storer"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 )
@@ -21,6 +23,11 @@ import (
 // remoteCheckTTL is how long a successful ls-remote of the branch head is
 // trusted before the next read checks the remote again.
 const remoteCheckTTL = 5 * time.Second
+
+// maxPacks is the pack count past which a fetch consolidates the clone into
+// one pack, the default of git's gc.autoPackLimit: every fetch adds a pack,
+// and every object lookup scans the index of each pack.
+const maxPacks = 50
 
 // remoteName is the name of the gitops remote in the clone.
 const remoteName = "origin"
@@ -304,10 +311,37 @@ func (c *gitClone) fetch(ctx context.Context) (err error) {
 		Auth:       auth,
 		Tags:       git.NoTags,
 	})
-	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
+	if errors.Is(err, git.NoErrAlreadyUpToDate) {
+		return nil
+	}
+	if err != nil {
 		return fmt.Errorf("fetch gitops repo: %w", classifyGitError(err))
 	}
+	if repackErr := c.repack(); repackErr != nil {
+		slog.WarnContext(ctx, "repack gitops clone", slog.Any("error", repackErr))
+	}
 	return nil
+}
+
+// repack consolidates the clone's packs into one when there are more than
+// maxPacks. The caller holds c.mu for writing. A failure leaves every object
+// readable: the new pack is complete before any old one is deleted.
+func (c *gitClone) repack() error {
+	pos, ok := c.repo.Storer.(storer.PackedObjectStorer)
+	if !ok {
+		return nil
+	}
+	packs, err := pos.ObjectPacks()
+	if err != nil || len(packs) <= maxPacks {
+		return err
+	}
+	err = c.repo.RepackObjects(&git.RepackConfig{})
+	// RepackObjects deletes the old packs but leaves their indexes in the
+	// object storage's memory: drop them so lookups read the packs on disk.
+	if r, ok := c.repo.Storer.(interface{ Reindex() }); ok {
+		r.Reindex()
+	}
+	return err
 }
 
 // tree returns the tree of the remote-tracking ref's commit. The caller holds

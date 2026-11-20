@@ -13,3 +13,6 @@ func SetNow(c *GitHubStore, now func() time.Time) {
 func CloneDir(c *GitHubStore) string {
 	return c.clone.dir
 }
+
+// MaxPacks is the pack count past which a fetch repacks the clone.
+const MaxPacks = maxPacks
