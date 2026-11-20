@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -117,9 +118,12 @@ func (s *Server) handleStatusEvent(w http.ResponseWriter, r *http.Request) {
 	if reason == "" {
 		recorded, firstReady := s.status.Record(e.Preview, e.Service,
 			status.Entry{Revision: e.Revision, Status: e.Status, At: at})
-		if !recorded {
+		switch {
+		case !recorded:
 			reason = reasonStale
-		} else if firstReady {
+		case s.previewGone(ctx, e.Preview):
+			reason = reasonUnknownPreview
+		case firstReady:
 			if d, ok := spinUp(pinned, e.Revision, at); ok {
 				s.metrics.SpinUp(e.Service, d)
 				attrs = append(attrs, slog.Float64("spinup_seconds", d.Seconds()))
@@ -136,6 +140,30 @@ func (s *Server) handleStatusEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Default().InfoContext(ctx, "status event", attrs...)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// previewGone reads the preview slug again, after an event of it was
+// recorded, and reports whether its file is gone. A deletion that landed
+// between the first read and the record would otherwise bring the status
+// back: the store's WithApplied Delete may already have run, and the garbage
+// collection keeps a preview recorded after its listing started. When the
+// preview is gone, its status is deleted. When the read fails, the status is
+// kept, the failure logged, and a garbage collection asked for: it removes
+// the status if the preview is gone.
+func (s *Server) previewGone(ctx context.Context, slug string) bool {
+	_, _, err := s.store.GetPreview(ctx, slug)
+	switch {
+	case err == nil:
+		return false
+	case errors.Is(err, store.ErrNotFound):
+		s.status.Delete(slug)
+		return true
+	default:
+		slog.Default().WarnContext(ctx, "status event preview re-read failed",
+			slog.String("preview", slug), slog.String("err", err.Error()))
+		s.status.CollectGarbage()
+		return false
+	}
 }
 
 // findService reports whether vals has a service or a dependency named name,

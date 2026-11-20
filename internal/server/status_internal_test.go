@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/status"
+	"github.com/badilhq/badil/internal/store"
 )
 
 const testStatusToken = "test-status-token"
@@ -402,5 +404,128 @@ func TestStatusEvent_SpinUp(t *testing.T) {
 				t.Errorf("no status event logged spinup_seconds=%v", tt.sum)
 			}
 		})
+	}
+}
+
+// TestStatusEvent_PreviewDeletedWhileRecording checks that an event whose
+// preview is deleted between its read and its record leaves no status: the
+// deletion is either one of badil's own pushes, whose WithApplied Delete ran
+// before the record, or an outside commit the next read fetches.
+func TestStatusEvent_PreviewDeletedWhileRecording(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		delete func(t *testing.T, fg *fakeGitops, st *status.Store)
+	}{
+		{
+			name: "deleted by apply",
+			delete: func(t *testing.T, fg *fakeGitops, st *status.Store) {
+				t.Helper()
+				res, err := fg.st.Apply(t.Context(), store.Op{
+					Kind: store.OpTeardown,
+					Change: func(tree *store.Tree) (store.Summary, error) {
+						tree.DeletePreview("feature-x")
+						return store.Summary{Subject: "teardown feature-x"}, nil
+					},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				// What badil serve's WithApplied callback does.
+				st.Delete(res.Deleted...)
+			},
+		},
+		{
+			name: "deleted outside",
+			delete: func(t *testing.T, fg *fakeGitops, _ *status.Store) {
+				t.Helper()
+				fg.remote.Change(map[string]string{"previews/feature-x/values.yaml": ""})
+				fg.st.Invalidate()
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fg := &fakeGitops{}
+			var st *status.Store
+			reads := 0
+			fg.afterGetPreview = func() {
+				reads++
+				if reads == 1 {
+					tt.delete(t, fg, st)
+				}
+			}
+			srv, st0, m, capture := newStatusServer(t, testStatusToken, fg)
+			st = st0
+			sendStatus(t, srv, statusBody("backend-1", statusSHA, "ready", "2026-11-19T21:05:00Z"))
+
+			if got := st.Preview("feature-x"); len(got) != 0 {
+				t.Errorf("status of the deleted preview = %v, want none", got)
+			}
+			_, attrs := lastStatusLog(t, capture)
+			if attrs["result"] != "ignored" || attrs["reason"] != "unknown_preview" {
+				t.Errorf("log result, reason = %q, %q, want ignored, unknown_preview", attrs["result"], attrs["reason"])
+			}
+			assertStatusEvents(t, m, `{result="ignored",status="ready"} 1`)
+			if n, _ := spinUpCount(t, m); n != 0 {
+				t.Errorf("spin-up observed %d times, want 0", n)
+			}
+		})
+	}
+}
+
+// listerFunc lists the previews with a function.
+type listerFunc func(ctx context.Context) ([]string, error)
+
+func (f listerFunc) ListPreviewFiles(ctx context.Context) ([]string, error) { return f(ctx) }
+
+// TestStatusEvent_RereadFails checks that an event whose second preview read
+// fails stays recorded, logs the failure and asks for a garbage collection,
+// which removes the status of a preview the gitops repo no longer lists.
+func TestStatusEvent_RereadFails(t *testing.T) {
+	fg := &fakeGitops{}
+	reads := 0
+	fg.afterGetPreview = func() {
+		reads++
+		if reads == 1 {
+			fg.getPreviewErr = errors.New("ls-remote gitops repo: connection refused")
+		}
+	}
+	srv, st, m, capture := newStatusServer(t, testStatusToken, fg)
+	listed := make(chan struct{}, 4)
+	st.Start(t.Context(), listerFunc(func(context.Context) ([]string, error) {
+		listed <- struct{}{}
+		return nil, nil
+	}))
+	t.Cleanup(func() { st.Close(context.Background()) })
+	// The garbage collection Start asks for listed before the event, so it
+	// keeps what the event records.
+	<-listed
+
+	sendStatus(t, srv, statusBody("backend-1", statusSHA, "progressing", "2026-11-19T21:05:00Z"))
+	_, attrs := lastStatusLog(t, capture)
+	if attrs["result"] != "recorded" {
+		t.Errorf("log result = %q, want recorded", attrs["result"])
+	}
+	assertStatusEvents(t, m, `{result="recorded",status="progressing"} 1`)
+	warned := false
+	for _, r := range capture.Records() {
+		if r.Message == "status event preview re-read failed" && r.Level == slog.LevelWarn {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Error("no warning for the failed re-read")
+	}
+
+	select {
+	case <-listed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no garbage collection after the failed re-read")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for len(st.Preview("feature-x")) != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("status of the unlisted preview = %v, want none", st.Preview("feature-x"))
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

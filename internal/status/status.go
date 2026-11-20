@@ -263,8 +263,10 @@ func (s *Store) runWriter(ctx context.Context) {
 
 // collectGarbage forgets the status of the previews whose file is not in
 // the gitops repo, as lister lists it, and deletes their ConfigMaps. A
-// preview recorded after the listing started is kept: its event read a
-// newer tree. A failed listing is logged.
+// preview recorded after the listing started is kept: the listing may be
+// older than the tree its event read. The server reads the preview again
+// after recording an event and deletes its status when the file is gone. A
+// failed listing is logged.
 func (s *Store) collectGarbage(ctx context.Context, lister Lister) {
 	s.mu.Lock()
 	seq := s.seq
