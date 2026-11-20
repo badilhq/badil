@@ -41,27 +41,12 @@ func TestClientMetrics_TimesRetryOperations(t *testing.T) {
 	}
 
 	// Durations vary, so only each operation's observation count is compared.
-	families, err := m.Gatherer().Gather()
-	if err != nil {
-		t.Fatalf("Gather: %v", err)
-	}
-	got := map[string]uint64{}
-	for _, mf := range families {
-		if mf.GetName() != "badil_gitops_operation_duration_seconds" {
-			continue
-		}
-		for _, metric := range mf.GetMetric() {
-			labels := map[string]string{}
-			for _, l := range metric.GetLabel() {
-				labels[l.GetName()] = l.GetValue()
-			}
-			got[labels["op"]+"/"+labels["result"]] = metric.GetHistogram().GetSampleCount()
-		}
-	}
+	// The remote checks the reads make depend on the clock, and the freshness
+	// tests count them.
+	got := opCounts(t, m)
+	delete(got, "ls_remote/ok")
+	delete(got, "fetch/ok")
 	want["write/ok"], want["teardown/error"], want["teardown/ok"], want["sync/error"], want["sync/ok"] = 1, 2, 2, 1, 1
-	// The first read after the write checks the remote, whose head the write
-	// moved.
-	want["ls_remote/ok"], want["fetch/ok"] = 1, 1
 	if !maps.Equal(got, want) {
 		t.Errorf("gitops operation counts = %v, want %v", got, want)
 	}
