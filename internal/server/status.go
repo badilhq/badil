@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/badilhq/badil/internal/preview"
@@ -189,8 +188,7 @@ func findService(vals *preview.PreviewValues, name string) (*preview.ServiceEntr
 // to at, when the entry is pinned, revision starts with its commitSha, and
 // the time is within [0, maxSpinUp].
 func spinUp(entry *preview.ServiceEntry, revision string, at time.Time) (time.Duration, bool) {
-	if entry == nil || entry.CommitSha == "" || entry.Metadata == nil ||
-		!strings.HasPrefix(revision, entry.CommitSha) {
+	if entry == nil || entry.Metadata == nil || !preview.AtPin(revision, entry.CommitSha) {
 		return 0, false
 	}
 	updatedAt, err := time.Parse(time.RFC3339, entry.Metadata.UpdatedAt)

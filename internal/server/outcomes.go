@@ -1,8 +1,6 @@
 package server
 
 import (
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -46,8 +44,8 @@ type outcome struct {
 	At time.Time
 }
 
-// outcomes holds the latest reconcile outcome of each PR, by outcomeKey, in
-// memory only. Its methods are safe for concurrent use.
+// outcomes holds the latest reconcile outcome of each PR, by
+// lifecycle.PRKey, in memory only. Its methods are safe for concurrent use.
 type outcomes struct {
 	mu sync.Mutex
 	m  map[string]outcome
@@ -55,12 +53,6 @@ type outcomes struct {
 
 func newOutcomes() *outcomes {
 	return &outcomes{m: map[string]outcome{}}
-}
-
-// outcomeKey is the key of owner/repo#number, owner and repo lowercased:
-// GitHub compares them case-insensitively.
-func outcomeKey(owner, repo string, number int) string {
-	return strings.ToLower(owner+"/"+repo) + "#" + strconv.Itoa(number)
 }
 
 func (o *outcomes) set(key string, v outcome) {
@@ -96,7 +88,7 @@ func (s *Server) RecordOutcome(t lifecycle.Target, res lifecycle.ReconcileResult
 	if res.Outcome == lifecycle.OutcomeSkipped && res.Reason == lifecycle.OtherLabelReason {
 		return
 	}
-	s.outcomes.set(outcomeKey(t.Owner, t.Repo, t.Number), outcome{ReconcileResult: res, At: time.Now()})
+	s.outcomes.set(lifecycle.PRKey(t), outcome{ReconcileResult: res, At: time.Now()})
 	s.wake.Notify()
 }
 
@@ -106,8 +98,7 @@ func (s *Server) RecordOutcome(t lifecycle.Target, res lifecycle.ReconcileResult
 // started listing the PR's repo. A stale listing then never replaces an
 // outcome a reconcile recorded after it.
 func (s *Server) RecordCatchUpSkip(t lifecycle.Target, res lifecycle.ReconcileResult, listedAt time.Time) {
-	if s.outcomes.setIfOlder(outcomeKey(t.Owner, t.Repo, t.Number), outcome{ReconcileResult: res, At: time.Now()},
-		listedAt) {
+	if s.outcomes.setIfOlder(lifecycle.PRKey(t), outcome{ReconcileResult: res, At: time.Now()}, listedAt) {
 		s.wake.Notify()
 	}
 }

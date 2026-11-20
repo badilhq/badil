@@ -18,6 +18,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/server"
 )
 
@@ -168,7 +169,7 @@ func printPreviews(w io.Writer, list server.PreviewList) error {
 				continue
 			}
 			pinned = append(pinned, e.Name)
-			if e.Status == "ready" && e.Revision != "" && strings.HasPrefix(e.Revision, e.Pinned.SHA) {
+			if e.Status == "ready" && preview.AtPin(e.Revision, e.Pinned.SHA) {
 				ready++
 			}
 		}

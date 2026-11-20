@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -117,12 +118,6 @@ func shaMatch(a, b string) bool {
 	return strings.HasPrefix(a, b)
 }
 
-// atPin reports whether revision is at the pin commitSha: it is non-empty
-// and starts with commitSha.
-func atPin(revision, commitSha string) bool {
-	return revision != "" && strings.HasPrefix(revision, commitSha)
-}
-
 // handleWait answers GET /v1/wait: the state of a PR's preview, long-polled.
 func (s *Server) handleWait(w http.ResponseWriter, r *http.Request) {
 	q, err := parsePRQuery(r.URL.Query())
@@ -195,10 +190,8 @@ func (s *Server) evalPR(ctx context.Context, q prQuery) (*WaitResponse, error) {
 	if len(catalog.ServicesForRepo(q.owner, q.repo)) == 0 {
 		return newWaitResponse(stateRefused, lifecycle.RepoNotInCatalogReason, "", q.sha), nil
 	}
-	if o, ok := s.outcomes.get(
-		outcomeKey(q.owner, q.repo, q.number),
-	); ok &&
-		(q.sha == "" || shaMatch(q.sha, o.HeadSHA)) {
+	key := lifecycle.PRKey(lifecycle.Target{Owner: q.owner, Repo: q.repo, Number: q.number})
+	if o, ok := s.outcomes.get(key); ok && (q.sha == "" || shaMatch(q.sha, o.HeadSHA)) {
 		if state, reason, decided := outcomeState(o.ReconcileResult); decided {
 			return newWaitResponse(state, reason, "", cmp.Or(q.sha, o.HeadSHA)), nil
 		}
@@ -231,11 +224,8 @@ func (s *Server) evalSlug(ctx context.Context, slug string) (*WaitResponse, erro
 	if err != nil {
 		return nil, err
 	}
-	pinned := func(svc *preview.ServiceEntry) bool { return svc.CommitSha != "" }
-	for i := range v.vals.Services {
-		if pinned(&v.vals.Services[i]) {
-			return s.waitSetState(*v, pinned, ""), nil
-		}
+	if slices.ContainsFunc(v.vals.Services, func(e preview.ServiceEntry) bool { return e.CommitSha != "" }) {
+		return s.waitSetState(*v, func(*preview.ServiceEntry) bool { return true }, ""), nil
 	}
 	return newWaitResponse(statePending, "", v.slug, ""), nil
 }
@@ -263,30 +253,11 @@ func outcomeState(res lifecycle.ReconcileResult) (string, string, bool) {
 // waitSetState returns the state of the wait set of v whose roots are its
 // pinned service entries for which root is true: those entries and every
 // service and dependency in the transitive needs of the catalog services
-// among them (preview.Catalog.NeedsClosure). It is failed when an entry is
+// among them (preview.Catalog.PinnedClosure). It is failed when an entry is
 // failed, with the first one, in file order, as the reason; ready when every
 // entry is ready; otherwise progressing.
 func (s *Server) waitSetState(v previewView, root func(*preview.ServiceEntry) bool, sha string) *WaitResponse {
-	inCatalog := map[string]bool{}
-	for _, name := range v.catalog.Services {
-		inCatalog[name] = true
-	}
-	set := map[string]bool{}
-	var roots []string
-	for i := range v.vals.Services {
-		svc := &v.vals.Services[i]
-		if svc.CommitSha == "" || !root(svc) {
-			continue
-		}
-		set[svc.Name] = true
-		if inCatalog[svc.Name] {
-			roots = append(roots, svc.Name)
-		}
-	}
-	for name := range v.catalog.NeedsClosure(roots) {
-		set[name] = true
-	}
-
+	set := v.catalog.PinnedClosure(v.vals.Services, root)
 	statuses := s.previewStatus(v.slug)
 	res := newWaitResponse(stateReady, "", v.slug, sha)
 	for _, e := range entries(v) {
@@ -318,7 +289,7 @@ func (s *Server) waitSetState(v previewView, root func(*preview.ServiceEntry) bo
 // or sync-failed, at a revision at its pin; any other entry when its status
 // is. Anything else is progressing.
 func entryState(e entry, st status.Entry, known bool) string {
-	if !known || (e.pinned() && !atPin(st.Revision, e.svc.CommitSha)) {
+	if !known || (e.pinned() && !preview.AtPin(st.Revision, e.svc.CommitSha)) {
 		return stateProgressing
 	}
 	switch st.Status {

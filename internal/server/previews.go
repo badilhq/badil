@@ -209,7 +209,7 @@ func (s *Server) previewJSON(v previewView) PreviewJSON {
 		Slug:     v.slug,
 		Services: make([]PreviewEntryJSON, 0, len(v.vals.Services)+len(v.vals.Dependencies)),
 	}
-	if created, ok := firstCreated(*v.vals); ok {
+	if created, ok := preview.FirstCreated(*v.vals); ok {
 		out.CreatedAt = created.UTC().Format(time.RFC3339)
 	}
 	if updated, ok := preview.LastDeploy(*v.vals); ok {
@@ -243,26 +243,6 @@ func pinnedJSON(svc *preview.ServiceEntry) *PinnedJSON {
 		p.PR.Repo, p.PR.Number = owner+"/"+repo, number
 	}
 	return p
-}
-
-// firstCreated returns the oldest created-at (RFC3339) across the pinned
-// entries of vals, as preview.LastDeploy does for updated-at.
-func firstCreated(vals preview.PreviewValues) (time.Time, bool) {
-	var first time.Time
-	found := false
-	for _, svc := range vals.Services {
-		if svc.CommitSha == "" || svc.Metadata == nil {
-			continue
-		}
-		t, err := time.Parse(time.RFC3339, svc.Metadata.CreatedAt)
-		if err != nil {
-			continue
-		}
-		if !found || t.Before(first) {
-			first, found = t, true
-		}
-	}
-	return first, found
 }
 
 // entry is a service or dependency entry of a preview file: its name, kind,

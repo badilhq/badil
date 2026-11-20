@@ -28,20 +28,30 @@ func (c Catalog) NeedsClosure(roots []string) map[string]bool {
 }
 
 // included returns the names of the parts a preview whose service entries are
-// services runs, when c declares needs: every pinned entry (a catalog service,
-// or a kept pinned entry of a service removed from the catalog) and every
-// service and dependency in the transitive needs of the pinned catalog
-// services (NeedsClosure). A kept pinned entry of a removed service has no
-// needs. It returns nil when c declares no needs: every part runs.
-// inCatalog holds the names of c.Services.
-func (c Catalog) included(services []ServiceEntry, inCatalog map[string]bool) map[string]bool {
+// services runs, when c declares needs: PinnedClosure of every pinned entry.
+// A kept pinned entry of a service removed from the catalog has no needs. It
+// returns nil when c declares no needs: every part runs.
+func (c Catalog) included(services []ServiceEntry) map[string]bool {
 	if len(c.Needs) == 0 {
 		return nil
 	}
+	return c.PinnedClosure(services, func(*ServiceEntry) bool { return true })
+}
+
+// PinnedClosure returns the names of the pinned entries of services for which
+// root is true (catalog services, or kept pinned entries of services removed
+// from the catalog) and of every service and dependency in the transitive
+// needs of the catalog services among them (NeedsClosure).
+func (c Catalog) PinnedClosure(services []ServiceEntry, root func(*ServiceEntry) bool) map[string]bool {
+	inCatalog := make(map[string]bool, len(c.Services))
+	for _, name := range c.Services {
+		inCatalog[name] = true
+	}
 	in := make(map[string]bool)
 	var roots []string
-	for _, svc := range services {
-		if svc.CommitSha == "" {
+	for i := range services {
+		svc := &services[i]
+		if svc.CommitSha == "" || !root(svc) {
 			continue
 		}
 		in[svc.Name] = true

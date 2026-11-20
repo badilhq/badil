@@ -473,7 +473,7 @@ func TestRecordCatchUpSkip_ListingTime(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("front", front7)))
 			s.RecordOutcome(target, lifecycle.ReconcileResult{Outcome: lifecycle.OutcomeDeployed, HeadSHA: statusSHA})
-			recorded, _ := s.outcomes.get(outcomeKey("acme", "front", 7))
+			recorded, _ := s.outcomes.get(lifecycle.PRKey(target))
 			s.RecordCatchUpSkip(target, skip, tc.listedAt(recorded.At))
 			assertState(t, waitFor(t, s, path), tc.state, tc.reason)
 		})

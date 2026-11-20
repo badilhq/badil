@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"slices"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -170,7 +171,7 @@ func ApplyCatalog(vals PreviewValues, cat Catalog) Projection {
 		kept[svc.Name] = true
 		out = append(out, svc)
 	}
-	in := cat.included(out, inCatalog)
+	in := cat.included(out)
 	var excluded []string
 	if in != nil {
 		out = slices.DeleteFunc(out, func(s ServiceEntry) bool { return !in[s.Name] })
@@ -325,19 +326,42 @@ func belongsToPR(entry ServiceEntry, owner, repo string, number int) bool {
 // does not parse are ignored. The bool is false when no pinned entry has a
 // parseable updated-at.
 func LastDeploy(vals PreviewValues) (time.Time, bool) {
-	var last time.Time
-	found := false
+	ts := pinnedTimes(vals, func(m *Metadata) string { return m.UpdatedAt })
+	if len(ts) == 0 {
+		return time.Time{}, false
+	}
+	return slices.MaxFunc(ts, time.Time.Compare), true
+}
+
+// FirstCreated returns the oldest created-at (RFC3339) across the pinned
+// entries of vals, ignoring the same entries as LastDeploy. The bool is false
+// when no pinned entry has a parseable created-at.
+func FirstCreated(vals PreviewValues) (time.Time, bool) {
+	ts := pinnedTimes(vals, func(m *Metadata) string { return m.CreatedAt })
+	if len(ts) == 0 {
+		return time.Time{}, false
+	}
+	return slices.MinFunc(ts, time.Time.Compare), true
+}
+
+// pinnedTimes returns the metadata field of each pinned entry of vals,
+// parsed as RFC3339. Entries without metadata or whose field does not parse
+// are left out.
+func pinnedTimes(vals PreviewValues, field func(*Metadata) string) []time.Time {
+	var ts []time.Time
 	for _, svc := range vals.Services {
 		if svc.CommitSha == "" || svc.Metadata == nil {
 			continue
 		}
-		t, err := time.Parse(time.RFC3339, svc.Metadata.UpdatedAt)
-		if err != nil {
-			continue
-		}
-		if !found || t.After(last) {
-			last, found = t, true
+		if t, err := time.Parse(time.RFC3339, field(svc.Metadata)); err == nil {
+			ts = append(ts, t)
 		}
 	}
-	return last, found
+	return ts
+}
+
+// AtPin reports whether revision is at the pin commitSha: commitSha is
+// non-empty and revision starts with it.
+func AtPin(revision, commitSha string) bool {
+	return commitSha != "" && strings.HasPrefix(revision, commitSha)
 }
