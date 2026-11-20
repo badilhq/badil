@@ -2,7 +2,6 @@ package lifecycle_test
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"slices"
 	"strings"
@@ -10,23 +9,36 @@ import (
 
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
-	"github.com/badilhq/badil/internal/store"
+	"github.com/badilhq/badil/internal/preview"
 )
 
-func TestReconcile_UnchangedDeployWritesNothing(t *testing.T) {
-	capture := captureLogs(t)
-	f := &reconcileFake{
-		Metrics:   metrics.New(),
-		pr:        fetchedPR("front", true, "preview"),
-		unchanged: map[string]bool{"front": true},
-	}
-	lifecycle.ReconcilePR(context.Background(), f.api(), event("labeled", "front", "preview", "preview"))
+// deployFirst runs ev on f once, then gives f fresh comments, calls and
+// metrics, and returns a fresh log capture: what follows sees the preview as
+// the first reconcile left it.
+func deployFirst(t *testing.T, f *reconcileFake, ev lifecycle.Event) *logCapture {
+	t.Helper()
+	captureLogs(t)
+	lifecycle.ReconcilePR(context.Background(), f.api(t), ev)
+	f.calls, f.upserts, f.fanOuts = nil, nil, nil
+	f.Metrics = metrics.New()
+	return captureLogs(t)
+}
 
-	if len(f.writes) != 0 || len(f.fanOuts) != 0 || len(f.upserts) != 0 {
-		t.Errorf("writes = %v, fanOuts = %v, upserts = %v; want none", f.writes, f.fanOuts, f.upserts)
-	}
-	if len(f.skipped) != 1 || !f.skipped[0].skipUnchanged || f.skipped[0].commitSha != fetchedSHA {
-		t.Errorf("skipped = %+v, want front with skipUnchanged at the head SHA", f.skipped)
+// setPreview commits vals as the preview slug of f's remote.
+func (f *reconcileFake) setPreview(t *testing.T, slug string, vals preview.PreviewValues) {
+	t.Helper()
+	f.g.remote.Set("previews/"+slug+"/values.yaml", marshal(t, vals))
+}
+
+func TestReconcile_UnchangedDeployWritesNothing(t *testing.T) {
+	f := &reconcileFake{pr: fetchedPR("front", true, "preview")}
+	ev := event("labeled", "front", "preview", "preview")
+	capture := deployFirst(t, f, ev)
+	before := len(f.g.pushed())
+	lifecycle.ReconcilePR(context.Background(), f.api(t), ev)
+
+	if len(f.g.pushed()) != before || len(f.fanOuts) != 0 || len(f.upserts) != 0 {
+		t.Errorf("pushed = %q, fanOuts = %v, upserts = %v; want nothing new", f.g.subjects(), f.fanOuts, f.upserts)
 	}
 	unchanged := capture.find(slog.LevelInfo, "preview deploy unchanged")
 	if len(unchanged) != 1 || unchanged[0]["slug"].String() != "feature-pricing" ||
@@ -52,106 +64,99 @@ func TestReconcile_UnchangedDeployWritesNothing(t *testing.T) {
 	}, "badil_reconciles_total", "badil_reconcile_skips_total")
 }
 
-func TestReconcile_ChangedDeployWritesWithSkipUnchanged(t *testing.T) {
+func TestReconcile_ChangedDeployWrites(t *testing.T) {
 	captureLogs(t)
 	f := &reconcileFake{pr: fetchedPR("front", true, "preview")}
-	lifecycle.ReconcilePR(context.Background(), f.api(), event("opened", "front", "", "preview"))
+	lifecycle.ReconcilePR(context.Background(), f.api(t), event("opened", "front", "", "preview"))
 
-	if len(f.writes) != 1 || !f.writes[0].skipUnchanged || len(f.fanOuts) != 1 {
-		t.Errorf("writes = %+v, fanOuts = %d; want one write with skipUnchanged and one fan-out",
-			f.writes, len(f.fanOuts))
+	if len(f.g.pushed()) != 1 || len(f.fanOuts) != 1 {
+		t.Errorf("pushed = %q, fanOuts = %d; want one commit and one fan-out", f.g.subjects(), len(f.fanOuts))
 	}
 }
 
 func TestReconcile_SomeServicesUnchanged(t *testing.T) {
-	cases := []struct {
-		name     string
-		writeErr map[string]error
-		outcome  string
-		written  []string
-	}{
-		{name: "one written", outcome: "deployed", written: []string{"worker"}},
-		{name: "one failed", writeErr: map[string]error{"worker": errors.New("boom")}, outcome: "failed"},
+	f := &reconcileFake{pr: fetchedPR("monorepo", true, "preview")}
+	ev := event("labeled", "monorepo", "preview", "preview")
+	capture := deployFirst(t, f, ev)
+	// worker was deployed at an older commit since.
+	vals := *f.g.file("feature-pricing")
+	for i := range vals.Services {
+		if vals.Services[i].Name == "worker" {
+			vals.Services[i].CommitSha, vals.Services[i].ImageTag = "0000000old", "0000000old"
+		}
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			capture := captureLogs(t)
-			f := &reconcileFake{
-				Metrics:   metrics.New(),
-				pr:        fetchedPR("monorepo", true, "preview"),
-				unchanged: map[string]bool{"api": true},
-				writeErr:  tc.writeErr,
-			}
-			lifecycle.ReconcilePR(context.Background(), f.api(), event("labeled", "monorepo", "preview", "preview"))
+	f.setPreview(t, "feature-pricing", vals)
+	lifecycle.ReconcilePR(context.Background(), f.api(t), ev)
 
-			if got := services(f.writes); !slices.Equal(got, tc.written) {
-				t.Errorf("written = %v, want %v", got, tc.written)
-			}
-			if logs := capture.find(slog.LevelInfo, "preview deploy unchanged"); len(logs) != 1 {
-				t.Errorf("preview deploy unchanged logs = %v, want one", logs)
-			}
-			if logs := capture.find(slog.LevelInfo, "preview reconcile skipped"); len(logs) != 0 {
-				t.Errorf("preview reconcile skipped logs = %v, want none", logs)
-			}
-			assertMetrics(t, f.Metrics, map[string]float64{
-				`badil_reconciles_total{outcome="` + tc.outcome + `"}`: 1,
-			}, "badil_reconciles_total", "badil_reconcile_skips_total")
-		})
+	if got := deployedServices(capture); !slices.Equal(got, []string{"worker"}) {
+		t.Errorf("written = %v, want [worker]", got)
 	}
+	if got := f.lastCommit(t).Body(); !slices.Equal(got, []string{"feature-pricing: pin worker@fe7c4ed"}) {
+		t.Errorf("body = %q, want worker's pin only", got)
+	}
+	if logs := capture.find(slog.LevelInfo, "preview deploy unchanged"); len(logs) != 1 {
+		t.Errorf("preview deploy unchanged logs = %v, want one", logs)
+	}
+	if logs := capture.find(slog.LevelInfo, "preview reconcile skipped"); len(logs) != 0 {
+		t.Errorf("preview reconcile skipped logs = %v, want none", logs)
+	}
+	assertMetrics(t, f.Metrics, map[string]float64{
+		`badil_reconciles_total{outcome="deployed"}`: 1,
+	}, "badil_reconciles_total", "badil_reconcile_skips_total")
 }
 
 func TestReconcile_CleanupDecidesSkipUnchanged(t *testing.T) {
 	cases := []struct {
 		name          string
-		teardown      *store.TeardownResult
-		teardownErr   error
+		file          *preview.PreviewValues
+		raw           string
 		skipUnchanged bool
 	}{
-		{name: "removed from another preview", teardown: removedFront("feature-pricing")},
+		{name: "removed from another preview", file: onlyFront42()},
 		{
-			name:     "unpinned from another preview",
-			teardown: &store.TeardownResult{Removed: []string{"front"}, CommitURL: sweepCommitURL},
+			name: "unpinned from another preview",
+			file: values(pinnedBy("api", "https://github.com/acme/monorepo/pull/7"), pinnedBy("front", front42)),
 		},
-		{name: "nothing removed", teardown: &store.TeardownResult{}, skipUnchanged: true},
-		{name: "teardown failed", teardownErr: errors.New("boom"), skipUnchanged: true},
+		{name: "nothing removed", file: values(preview.ServiceEntry{Name: "front"}), skipUnchanged: true},
+		{name: "teardown failed", raw: "services: [\n", skipUnchanged: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			captureLogs(t)
-			// The PR moves from its branch preview to pricing.
-			f := &reconcileFake{
-				pr:          fetchedPR("front", true, "preview:pricing"),
-				teardown:    tc.teardown,
-				teardownErr: tc.teardownErr,
-				unchanged:   map[string]bool{"front": true},
+			// front is already deployed to pricing; the PR also is in its
+			// branch preview.
+			f := &reconcileFake{pr: fetchedPR("front", true, "preview:pricing")}
+			ev := event("labeled", "front", "preview:pricing", "preview:pricing")
+			capture := deployFirst(t, f, ev)
+			if tc.file != nil {
+				f.setPreview(t, "feature-pricing", *tc.file)
+			} else {
+				f.g.remote.Set("previews/feature-pricing/values.yaml", tc.raw)
 			}
-			lifecycle.ReconcilePR(
-				context.Background(),
-				f.api(),
-				event("labeled", "front", "preview:pricing", "preview:pricing"),
-			)
+			before := len(f.g.pushed())
+			lifecycle.ReconcilePR(context.Background(), f.api(t), ev)
 
-			if len(f.teardowns) != 1 || f.teardowns[0].slug != "feature-pricing" {
-				t.Fatalf("teardowns = %+v, want feature-pricing", f.teardowns)
+			if got := teardownSlugs(teardownsLogged(capture)); !slices.Equal(got, []string{"feature-pricing"}) {
+				t.Fatalf("teardowns = %v, want feature-pricing", got)
 			}
 			if tc.skipUnchanged {
-				if len(f.skipped) != 1 || len(f.writes) != 0 || len(f.fanOuts) != 0 {
-					t.Errorf("skipped = %v, writes = %v, fanOuts = %v; want one skipped deploy",
-						f.skipped, f.writes, f.fanOuts)
+				unchanged := capture.find(slog.LevelInfo, "preview deploy unchanged")
+				if len(unchanged) != 1 || len(f.g.pushed()) != before || len(f.fanOuts) != 0 {
+					t.Errorf("unchanged = %v, pushed = %q, fanOuts = %v; want one skipped deploy",
+						unchanged, f.g.subjects(), f.fanOuts)
 				}
 				return
 			}
-			assertDeployCommentedLast(t, f)
+			assertDeployCommentedLast(t, f, capture)
 		})
 	}
 }
 
-// assertDeployCommentedLast checks f wrote one deploy to pricing without
-// skipUnchanged, and that its summary was the last comment.
-func assertDeployCommentedLast(t *testing.T, f *reconcileFake) {
+// assertDeployCommentedLast checks f deployed front to pricing although it
+// was unchanged, and that its summary was the last comment.
+func assertDeployCommentedLast(t *testing.T, f *reconcileFake, capture *logCapture) {
 	t.Helper()
-	if len(f.writes) != 1 || f.writes[0].skipUnchanged || f.writes[0].slug != "pricing" {
-		t.Errorf("writes = %+v, want one to pricing without skipUnchanged", f.writes)
+	if got := deployedLogged(capture); !slices.Equal(got, []string{"pricing/front"}) {
+		t.Errorf("deployed = %v, want pricing/front", got)
 	}
 	last := len(f.fanOuts) - 1
 	if last < 0 || f.calls[len(f.calls)-1] != "fanout" || !strings.HasPrefix(f.fanOuts[last], "## 🚀") {

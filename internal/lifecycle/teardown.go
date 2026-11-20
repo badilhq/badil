@@ -2,7 +2,9 @@ package lifecycle
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/badilhq/badil/internal/forge"
@@ -40,21 +42,19 @@ type Recorder interface {
 	SweepDeleted(rule string)
 	// PreviewSynced records one preview rewritten to match badil.yaml.
 	PreviewSynced()
+	// PreviewCreated records one preview a deploy created.
+	PreviewCreated()
 }
 
-// TeardownStore is the subset of store.GitHubStore used by TeardownPR.
-type TeardownStore interface {
-	TeardownPreviewWithRetry(
-		ctx context.Context,
-		slug, owner, repo string,
-		prNumber int,
-	) (*store.TeardownResult, error)
+// Applier writes the gitops repo: store.GitHubStore.Apply.
+type Applier interface {
+	Apply(ctx context.Context, op store.Op) (store.Result, error)
 }
 
-// TeardownAPI is what TeardownPR uses: the store, the forge, the Recorder
+// TeardownAPI is what a teardown uses: the store, the forge, the Recorder
 // and the comment fan-out.
 type TeardownAPI struct {
-	Store    TeardownStore
+	Store    Applier
 	Forge    forge.Forge
 	Recorder Recorder
 	FanOut   FanOutFunc
@@ -69,55 +69,112 @@ type Target struct {
 	Number   int
 }
 
-// TeardownPR unpins the PR from its preview (or deletes the preview when no pin
-// remains), then edits the PR's comment, which states reason, and, when the
-// preview survives, refreshes the remaining PRs' summaries. Comment failures
-// are logged and never undo the teardown. The teardown is recorded once, with
-// trigger.
-func TeardownPR(ctx context.Context, api TeardownAPI, tt Target, reason, trigger string) {
-	teardown(ctx, api, tt, reason, trigger, true)
+// teardownStep is the teardown of the PR tt from the preview tt.Slug in an
+// operation: why, how it is recorded, whether the PR's comment states it,
+// whether only some services are unpinned, and what the last attempt did.
+type teardownStep struct {
+	tt      Target
+	reason  string
+	trigger string
+	// commentPR edits the PR's comment, which states reason.
+	commentPR bool
+	// services, when set, are the only services unpinned: the file is never
+	// deleted (store.Tree.UnpinServices).
+	services []string
+	// ran is set once an attempt ran the step; result or err is its outcome.
+	ran    bool
+	result *store.TeardownResult
+	err    error
 }
 
-// unpinOnly does what TeardownPR does but leaves the PR's comment alone, for a
-// PR whose comment shows where it lives now. Only the sweep unpins this way.
-func unpinOnly(ctx context.Context, api TeardownAPI, tt Target, reason string) {
-	teardown(ctx, api, tt, reason, triggerSweep, false)
+// run tears the PR down from its preview in tree, recording the outcome. A
+// failure is recorded, not returned: it stages nothing.
+func (s *teardownStep) run(tree *store.Tree) {
+	s.ran = true
+	if s.services != nil {
+		s.result, s.err = tree.UnpinServices(s.tt.Slug, s.tt.Owner, s.tt.Repo, s.tt.Number, s.services)
+		return
+	}
+	s.result, s.err = tree.Teardown(s.tt.Slug, s.tt.Owner, s.tt.Repo, s.tt.Number)
 }
 
-// teardown is TeardownPR, which edits the PR's comment only when commentPR is
-// true. It reports whether it removed the PR from the preview (unpinned a
-// service or deleted the preview); a failed or no-op teardown removed nothing.
-func teardown(ctx context.Context, api TeardownAPI, tt Target, reason, trigger string, commentPR bool) bool {
-	result, err := api.Store.TeardownPreviewWithRetry(ctx, tt.Slug, tt.Owner, tt.Repo, tt.Number)
-	return afterTeardown(ctx, api, tt, result, err, reason, trigger, commentPR)
+// removed reports whether the step removed the PR from its preview.
+func (s *teardownStep) removed() bool {
+	return s.ran && s.err == nil && len(s.result.Removed) > 0
 }
 
-// unpinServices unpins, in the preview tt.Slug, the entries of the PR tt for
-// services (store.GitHubStore.UnpinServicesWithRetry), which never deletes the
-// file, then handles the write as teardown does, with trigger webhook and
-// the PR's comment left alone. It reports whether it unpinned an entry, and
-// the write's error.
-func unpinServices(ctx context.Context, api ReconcileAPI, tt Target, services []string) (bool, error) {
-	result, err := api.Store.UnpinServicesWithRetry(ctx, tt.Slug, tt.Owner, tt.Repo, tt.Number, services)
-	return afterTeardown(ctx, api.teardownAPI(), tt, result, err, "", triggerWebhook, false), err
+// newSteps returns the teardown steps of the PR tt from each of slugs, with
+// reason, triggered by a webhook, each editing the PR's comment.
+func newSteps(tt Target, slugs []string, reason string) []*teardownStep {
+	steps := make([]*teardownStep, 0, len(slugs))
+	for _, slug := range slugs {
+		t := tt
+		t.Slug = slug
+		steps = append(steps, &teardownStep{tt: t, reason: reason, trigger: triggerWebhook, commentPR: true})
+	}
+	return steps
 }
 
-// afterTeardown handles the outcome of a write removing the PR tt from its
-// preview: it records the teardown with trigger and logs it; when commentPR
-// is true, it edits the PR's comment, which states reason; when the preview
-// survives, it refreshes the remaining PRs' summaries. It reports whether the
-// PR was removed from the preview; a failed or no-op write removed nothing.
+// removedSlugs returns, sorted and deduplicated, the previews steps removed
+// their PR from.
+func removedSlugs(steps []*teardownStep) []string {
+	var slugs []string
+	for _, s := range steps {
+		if s.removed() {
+			slugs = append(slugs, s.tt.Slug)
+		}
+	}
+	slices.Sort(slugs)
+	return slices.Compact(slugs)
+}
+
+// unpinSubject is the commit subject of an operation that only unpins the PR
+// tt from slugs or deletes them.
+func unpinSubject(tt Target, slugs []string) string {
+	return fmt.Sprintf("chore(preview): unpin %s#%d from %s", tt.FullName, tt.Number, strings.Join(slugs, ", "))
+}
+
+// teardownPRs tears the PR tt down from each of slugs, with reason and the
+// webhook trigger, in one teardown operation, then handles each teardown
+// (afterTeardown).
+func teardownPRs(ctx context.Context, api TeardownAPI, tt Target, slugs []string, reason string) {
+	var steps []*teardownStep
+	res, err := api.Store.Apply(ctx, store.Op{
+		Kind: store.OpTeardown,
+		Change: func(tree *store.Tree) (store.Summary, error) {
+			steps = newSteps(tt, slugs, reason)
+			for _, s := range steps {
+				s.run(tree)
+			}
+			return store.Summary{Subject: unpinSubject(tt, removedSlugs(steps))}, nil
+		},
+	})
+	if steps == nil {
+		steps = newSteps(tt, slugs, reason)
+	}
+	for _, s := range steps {
+		afterTeardown(ctx, api, s, res, err, true)
+	}
+}
+
+// afterTeardown handles a teardown step of an operation that ended with res
+// or applyErr: it records the teardown with the step's trigger and logs it;
+// when the step comments the PR, it edits the PR's comment, which states the
+// reason; when the preview survives and fanOut is set, it refreshes the
+// remaining PRs' summaries. A step whose operation failed is recorded as an
+// error when it removed the PR from the preview, or never ran; a step that
+// removed nothing is a no-op. The comments link to the commit of res. It
+// reports whether the PR was removed from the preview.
 func afterTeardown(
-	ctx context.Context,
-	api TeardownAPI,
-	tt Target,
-	result *store.TeardownResult,
-	err error,
-	reason, trigger string,
-	commentPR bool,
+	ctx context.Context, api TeardownAPI, s *teardownStep, res store.Result, applyErr error, fanOut bool,
 ) bool {
+	err := s.err
+	if applyErr != nil && (!s.ran || s.removed()) {
+		err = applyErr
+	}
+	tt := s.tt
 	if err != nil {
-		api.Recorder.Teardown(trigger, teardownError)
+		api.Recorder.Teardown(s.trigger, teardownError)
 		slog.ErrorContext(ctx, "preview teardown failed",
 			slog.String("slug", tt.Slug),
 			slog.String("repo", tt.FullName),
@@ -126,8 +183,9 @@ func afterTeardown(
 		)
 		return false
 	}
+	result := s.result
 	if len(result.Removed) == 0 {
-		api.Recorder.Teardown(trigger, teardownNoop)
+		api.Recorder.Teardown(s.trigger, teardownNoop)
 		slog.InfoContext(ctx, "preview teardown skipped",
 			slog.String("slug", tt.Slug),
 			slog.String("repo", tt.FullName),
@@ -137,9 +195,9 @@ func afterTeardown(
 		return false
 	}
 	if result.Deleted {
-		api.Recorder.Teardown(trigger, teardownDeleted)
+		api.Recorder.Teardown(s.trigger, teardownDeleted)
 	} else {
-		api.Recorder.Teardown(trigger, teardownUnpinned)
+		api.Recorder.Teardown(s.trigger, teardownUnpinned)
 	}
 	slog.InfoContext(ctx, "preview teardown",
 		slog.String("slug", tt.Slug),
@@ -147,24 +205,20 @@ func afterTeardown(
 		slog.Int("pr_number", tt.Number),
 		slog.String("removed", strings.Join(result.Removed, ", ")),
 		slog.Bool("deleted", result.Deleted),
-		slog.String("gitops_commit_url", result.CommitURL),
+		slog.String("gitops_commit_url", res.URL),
 	)
 
-	if commentPR {
-		body := preview.BuildTeardownSummary(
-			tt.Slug, result.Removed, result.Deleted, reason, result.CommitMessage, result.CommitURL,
-		)
+	if s.commentPR {
+		body := preview.BuildTeardownSummary(tt.Slug, result.Removed, result.Deleted, s.reason, res.Subject, res.URL)
 		if upsertErr := api.Forge.UpsertComment(ctx, tt.Owner, tt.Repo, tt.Number, body); upsertErr != nil {
 			teardownCommentFailed(ctx, tt, upsertErr)
 		}
 	}
-	if result.Deleted {
+	if result.Deleted || !fanOut {
 		return true
 	}
-
 	summary := preview.BuildSummary(
-		tt.Slug, result.Values, result.Catalog.URLs, result.Catalog.ArgoCDURL, result.Excluded,
-		result.CommitMessage, result.CommitURL,
+		tt.Slug, result.Values, result.Catalog.URLs, result.Catalog.ArgoCDURL, result.Excluded, res.Subject, res.URL,
 	)
 	if fanErr := api.FanOut(ctx, api.Forge, result.Values, summary); fanErr != nil {
 		teardownCommentFailed(ctx, tt, fanErr)

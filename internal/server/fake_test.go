@@ -3,48 +3,61 @@ package server
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
 	"sync"
+	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
+	"github.com/badilhq/badil/internal/store/storetest"
 )
 
-// fakeGitops captures calls and returns canned responses. Each field controls
-// one of the methods on storeAPI or forge.Forge. When badilYAML is set, the catalog is
-// parsed from it instead of being taken from catalog. When started is non-nil,
-// FetchServiceCatalog sends "catalog" and TeardownPreviewWithRetry sends
-// "teardown" on entry; the test buffers the channel.
-type fakeGitops struct {
-	catalog     []string
-	badilYAML   string
-	catalogErr  error
-	writeResult *store.WriteResult
-	writeErr    error
-	fanOutErr   error
+// testIdentity is the commit identity of the fake's store.
+var testIdentity = store.CommitIdentity{ //nolint:gochecknoglobals // test fixture
+	Name:  "badil-test[bot]",
+	Email: "1+badil-test[bot]@users.noreply.github.com",
+}
 
-	// teardownResult nil means TeardownPreviewWithRetry returns an empty
-	// result. A non-nil teardownGate blocks the call until it is closed.
-	teardownResult *store.TeardownResult
-	teardownErr    error
-	teardownGate   chan struct{}
-	teardownPanic  bool
+// fakeGitops is the store and the forge of a server test. Its catalog is
+// parsed from badilYAML when set, or lists catalog, each service at
+// https://github.com/acme/<name>.git. Apply runs on a real store over a
+// remote holding that badil.yaml, the files of previews and of synced (each
+// projected on the catalog, so that a sync leaves it alone, unless it is in
+// stale) and raw; the remote is made by open. Apply fails with applyErr when
+// set. When started is non-nil, FetchServiceCatalog sends "catalog" and Apply
+// sends "apply" on entry; the test buffers the channel. A non-nil applyGate
+// blocks Apply until it is closed; applyPanic makes it panic.
+//
+// After each pushed commit, the fake records from its subject and body the
+// last service deployed (capturedSlug, capturedService and capturedInputs,
+// read back from the pushed file), the last preview a PR left (teardownSlug,
+// teardownOwner, teardownRepo, teardownNumber) and the previews synced.
+type fakeGitops struct {
+	t          *testing.T
+	catalog    []string
+	badilYAML  string
+	catalogErr error
+	applyErr   error
+	fanOutErr  error
+	applyGate  chan struct{}
+	applyPanic bool
 
 	// pr is what GetPullRequest returns, unless prErr is set.
 	pr      *forge.PullRequest
 	prErr   error
 	prCalls int
 
-	// previews is what GetPreview reads, unless previewErr is set; an unknown
-	// slug is ErrNotFound.
-	previews   map[string]*preview.PreviewValues
-	previewErr error
-	// listed is what ListPreviews returns, unless listErr is set.
-	listed    []string
-	listErr   error
-	listCalls int
+	previews map[string]*preview.PreviewValues
+	stale    map[string]bool
+	raw      map[string]string
 
 	started chan string
 
@@ -52,30 +65,23 @@ type fakeGitops struct {
 	// catalog; catalogDeadline is the deadline of its last call.
 	catalogSHA      string
 	catalogDeadline time.Time
-	// syncResult is what SyncPreviewWithRetry returns for a slug (an empty
-	// result when unset), unless syncErr has an error for it. A non-nil
-	// syncGate blocks the call until it is closed. syncMu guards syncs, the
-	// slugs synced so far.
-	syncResult map[string]*store.SyncResult
-	syncErr    map[string]error
-	syncGate   chan struct{}
-	syncMu     sync.Mutex
-	syncs      []string
+	// syncMu guards syncs, invalidations and catalogInvalidations.
+	syncMu sync.Mutex
+	syncs  []string
 	// invalidations counts the Invalidate calls; catalogInvalidations is
-	// invalidations when FetchServiceCatalogSHA was last called. syncMu
-	// guards both.
+	// invalidations when FetchServiceCatalogSHA was last called.
 	invalidations        int
 	catalogInvalidations int
 
+	remote *storetest.Remote
+	st     *store.GitHubStore
+
 	capturedInputs   preview.DeployInputs
-	capturedCatalog  []string
 	capturedURLs     preview.URLConfig
 	capturedService  string
 	capturedSlug     string
 	fanOutBodyCalled bool
 	capturedSummary  string
-	// capturedSkipUnchanged holds the skipUnchanged of each write, in order.
-	capturedSkipUnchanged []bool
 
 	teardownSlug   string
 	teardownOwner  string
@@ -88,6 +94,64 @@ type fakeGitops struct {
 	}
 }
 
+// badil returns the fake's badil.yaml.
+func (f *fakeGitops) badil() string {
+	if f.badilYAML != "" {
+		return f.badilYAML
+	}
+	var b strings.Builder
+	b.WriteString("services:\n")
+	for _, name := range f.catalog {
+		b.WriteString("  " + name + ":\n    repo: https://github.com/acme/" + name + ".git\n")
+	}
+	if len(f.catalog) == 0 {
+		b.WriteString("  backend-1:\n    repo: https://github.com/acme/backend-1.git\n")
+	}
+	return b.String()
+}
+
+// open makes the fake's remote and store, once, for t.
+func (f *fakeGitops) open(t *testing.T) {
+	t.Helper()
+	if f.st != nil {
+		return
+	}
+	f.t = t
+	files := map[string]string{"badil.yaml": f.badil()}
+	catalog, _ := store.ParseCatalog([]byte(f.badil()))
+	for slug, vals := range f.previews {
+		v := *vals
+		if catalog != nil && !f.stale[slug] {
+			v = projectOn(slug, v, catalog)
+		}
+		out, err := yaml.Marshal(v)
+		if err != nil {
+			t.Fatalf("marshal %s: %v", slug, err)
+		}
+		files["previews/"+slug+"/values.yaml"] = string(out)
+	}
+	for path, content := range f.raw {
+		files[path] = content
+	}
+	f.remote = storetest.NewRemote(t, files)
+	st, err := store.Open(context.Background(), "acme", "gitops", store.CloneConfig{URL: f.remote.URL()}, testIdentity)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	f.st = st
+}
+
+// projectOn returns vals projected on catalog, as a sync writes it.
+func projectOn(slug string, vals preview.PreviewValues, catalog *store.ServiceCatalog) preview.PreviewValues {
+	cat := catalog.Catalog
+	cat.GitopsRepoURL = "https://github.com/acme/gitops.git"
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.DiscardHandler))
+	defer slog.SetDefault(prev)
+	return preview.ApplyHosts(preview.ApplyCatalog(vals, cat).Values, slug, catalog.URLs)
+}
+
 func (f *fakeGitops) FetchServiceCatalog(_ context.Context) (*store.ServiceCatalog, error) {
 	if f.started != nil {
 		f.started <- "catalog"
@@ -95,73 +159,84 @@ func (f *fakeGitops) FetchServiceCatalog(_ context.Context) (*store.ServiceCatal
 	if f.catalogErr != nil {
 		return nil, f.catalogErr
 	}
-	if f.badilYAML != "" {
-		return store.ParseCatalog([]byte(f.badilYAML))
+	catalog, err := store.ParseCatalog([]byte(f.badil()))
+	if err == nil {
+		f.capturedURLs = catalog.URLs
 	}
-	return &store.ServiceCatalog{Catalog: preview.Catalog{Services: f.catalog}}, nil
+	return catalog, err
 }
 
-func (f *fakeGitops) WritePreviewWithRetry(
-	_ context.Context,
-	slug string,
-	catalog *store.ServiceCatalog,
-	serviceName, _ string,
-	inputs preview.DeployInputs,
-	_, _ string,
-	skipUnchanged bool,
-) (*store.WriteResult, error) {
-	f.capturedSkipUnchanged = append(f.capturedSkipUnchanged, skipUnchanged)
-	f.capturedSlug = slug
-	f.capturedCatalog = catalog.Services
-	f.capturedURLs = catalog.URLs
-	f.capturedService = serviceName
-	f.capturedInputs = inputs
-	if f.writeResult == nil {
-		return nil, f.writeErr
+// prRef matches the owner/repo#number a commit subject names.
+var prRef = regexp.MustCompile(`([^\s/]+)/([^\s/#]+)#(\d+)`)
+
+func (f *fakeGitops) Apply(ctx context.Context, op store.Op) (store.Result, error) {
+	if f.started != nil {
+		f.started <- "apply"
 	}
-	result := *f.writeResult
-	result.Values = preview.ApplyHosts(f.writeResult.Values, slug, catalog.URLs)
-	return &result, f.writeErr
+	if f.applyGate != nil {
+		<-f.applyGate
+	}
+	if f.applyPanic {
+		panic("fake apply panic")
+	}
+	if f.applyErr != nil {
+		return store.Result{}, f.applyErr
+	}
+	res, err := f.st.Apply(ctx, op)
+	if err != nil || res.NoOp {
+		return res, err
+	}
+	f.record(f.remote.Commits()[0])
+	return res, nil
+}
+
+// record records what the pushed commit c did.
+func (f *fakeGitops) record(c storetest.Commit) {
+	for _, line := range c.Body() {
+		slug, change, _ := strings.Cut(line, ": ")
+		switch {
+		case strings.HasPrefix(change, "pin "):
+			service, _, _ := strings.Cut(strings.TrimPrefix(change, "pin "), "@")
+			f.capturedSlug, f.capturedService = slug, service
+			f.captureInputs(c, slug, service)
+		case strings.HasPrefix(change, "unpin "), change == "delete":
+			f.teardownSlug = slug
+			if m := prRef.FindStringSubmatch(c.Subject()); m != nil {
+				f.teardownOwner, f.teardownRepo = m[1], m[2]
+				f.teardownNumber, _ = strconv.Atoi(m[3])
+			}
+		case change == "sync":
+			f.syncMu.Lock()
+			f.syncs = append(f.syncs, slug)
+			f.syncMu.Unlock()
+		}
+	}
+}
+
+// captureInputs sets capturedInputs from the entry of service in the preview
+// slug of c.
+func (f *fakeGitops) captureInputs(c storetest.Commit, slug, service string) {
+	var vals preview.PreviewValues
+	if err := yaml.Unmarshal([]byte(c.Tree["previews/"+slug+"/values.yaml"]), &vals); err != nil {
+		f.t.Errorf("parse %s: %v", slug, err)
+		return
+	}
+	for _, svc := range vals.Services {
+		if svc.Name != service || svc.Metadata == nil {
+			continue
+		}
+		f.capturedInputs = preview.DeployInputs{
+			ServiceName: service, CommitSha: svc.CommitSha, HeadRef: svc.Metadata.VCSRefName,
+			PRAuthor: svc.Metadata.PRAuthor, PRURL: svc.Metadata.PRURL, PRNumber: svc.Metadata.PRNumber,
+			Timestamp: svc.Metadata.UpdatedAt, WorkflowRunURL: svc.Metadata.PipelineRunURL,
+		}
+	}
 }
 
 func (f *fakeGitops) FanOutPRComments(_ context.Context, _ preview.PreviewValues, body string) error {
 	f.fanOutBodyCalled = true
 	f.capturedSummary = body
 	return f.fanOutErr
-}
-
-func (f *fakeGitops) TeardownPreviewWithRetry(
-	_ context.Context,
-	slug, owner, repo string,
-	prNumber int,
-) (*store.TeardownResult, error) {
-	if f.started != nil {
-		f.started <- "teardown"
-	}
-	f.teardownSlug, f.teardownOwner, f.teardownRepo, f.teardownNumber = slug, owner, repo, prNumber
-	if f.teardownGate != nil {
-		<-f.teardownGate
-	}
-	if f.teardownPanic {
-		panic("fake teardown panic")
-	}
-	if f.teardownErr != nil {
-		return nil, f.teardownErr
-	}
-	if f.teardownResult == nil {
-		return &store.TeardownResult{}, nil
-	}
-	if len(f.teardownResult.Removed) == 0 || f.teardownResult.Deleted {
-		return f.teardownResult, nil
-	}
-	// Like the store, an update carries the catalog it was projected on.
-	res := *f.teardownResult
-	if f.badilYAML != "" {
-		res.Catalog, _ = store.ParseCatalog([]byte(f.badilYAML))
-	} else {
-		res.Catalog = &store.ServiceCatalog{Catalog: preview.Catalog{Services: f.catalog}}
-	}
-	return &res, nil
 }
 
 func (f *fakeGitops) UpsertComment(_ context.Context, owner, repo string, prNumber int, body string) error {
@@ -189,31 +264,6 @@ func (f *fakeGitops) ParseWebhook(*http.Request) (forge.Event, error) {
 	return forge.Event{}, errors.New("unexpected ParseWebhook")
 }
 
-func (f *fakeGitops) UnpinServicesWithRetry(
-	context.Context, string, string, string, int, []string,
-) (*store.TeardownResult, error) {
-	return &store.TeardownResult{}, nil
-}
-
-func (f *fakeGitops) GetPreview(_ context.Context, slug string) (*preview.PreviewValues, string, error) {
-	if f.previewErr != nil {
-		return nil, "", f.previewErr
-	}
-	vals, ok := f.previews[slug]
-	if !ok {
-		return nil, "", store.ErrNotFound
-	}
-	return vals, "blob-" + slug, nil
-}
-
-func (f *fakeGitops) ListPreviews(context.Context) ([]string, error) {
-	f.listCalls++
-	if f.listErr != nil {
-		return nil, f.listErr
-	}
-	return f.listed, nil
-}
-
 func (f *fakeGitops) FetchServiceCatalogSHA(ctx context.Context) (*store.ServiceCatalog, string, error) {
 	f.syncMu.Lock()
 	f.catalogInvalidations = f.invalidations
@@ -221,29 +271,6 @@ func (f *fakeGitops) FetchServiceCatalogSHA(ctx context.Context) (*store.Service
 	f.catalogDeadline, _ = ctx.Deadline()
 	catalog, err := f.FetchServiceCatalog(ctx)
 	return catalog, f.catalogSHA, err
-}
-
-func (f *fakeGitops) SyncPreviewWithRetry(
-	_ context.Context,
-	slug string,
-	_ *store.ServiceCatalog,
-) (*store.SyncResult, error) {
-	if f.syncGate != nil {
-		<-f.syncGate
-	}
-	f.syncMu.Lock()
-	defer f.syncMu.Unlock()
-	if _, ok := f.previews[slug]; !ok {
-		return &store.SyncResult{NotFound: true}, nil
-	}
-	f.syncs = append(f.syncs, slug)
-	if err := f.syncErr[slug]; err != nil {
-		return nil, err
-	}
-	if res, ok := f.syncResult[slug]; ok {
-		return res, nil
-	}
-	return &store.SyncResult{}, nil
 }
 
 func (f *fakeGitops) FullName() string { return "acme/gitops" }
@@ -271,9 +298,22 @@ func withFanOut(f *fakeGitops) Option {
 	}
 }
 
-// synced returns the slugs synced so far.
+// synced returns the previews pushed commits synced so far.
 func (f *fakeGitops) synced() []string {
 	f.syncMu.Lock()
 	defer f.syncMu.Unlock()
 	return append([]string(nil), f.syncs...)
+}
+
+// headURL returns the GitHub URL of the remote's head commit.
+func (f *fakeGitops) headURL() string {
+	return "https://github.com/acme/gitops/commit/" + f.remote.Head()
+}
+
+// pinnedBy42 is a preview entry of backend-1 pinned by acme/backend-1#42.
+func pinnedBy42() preview.ServiceEntry {
+	return preview.ServiceEntry{
+		Name: "backend-1", CommitSha: "aaaaaaaaaa",
+		Metadata: &preview.Metadata{PRURL: "https://github.com/acme/backend-1/pull/42", PRNumber: "42"},
+	}
 }

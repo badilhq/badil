@@ -12,7 +12,6 @@ import (
 
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/metrics"
-	"github.com/badilhq/badil/internal/store"
 )
 
 const (
@@ -51,10 +50,9 @@ func fetchedPR(open bool, labels ...string) *forge.PullRequest {
 // and whose fetched PR is open and labeled.
 func reconcileFake() *fakeGitops {
 	return &fakeGitops{
-		badilYAML:   servicesWithPreview,
-		writeResult: previewWriteResult(),
-		pr:          fetchedPR(true, "preview"),
-		started:     make(chan string, 8),
+		badilYAML: servicesWithPreview,
+		pr:        fetchedPR(true, "preview"),
+		started:   make(chan string, 8),
 	}
 }
 
@@ -98,7 +96,6 @@ func TestReconcile_ClosedButReopenedAndLabeledDeploys(t *testing.T) {
 }
 
 func TestReconcile_ClosedFallsBackToPayloadTeardown(t *testing.T) {
-	const msg = "chore(preview): delete feature-add-pricing preview"
 	cases := []struct {
 		name        string
 		set         func(*fakeGitops)
@@ -111,16 +108,14 @@ func TestReconcile_ClosedFallsBackToPayloadTeardown(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fg := reconcileFake()
 			tc.set(fg)
-			fg.teardownResult = &store.TeardownResult{
-				Removed: []string{"backend-1"}, Deleted: true, CommitURL: teardownCommitURL, CommitMessage: msg,
-			}
+			fg.previews = pinnedAt(teardownSlug)
 			s, capture := newTeardownServer(t, fg)
 			deliver(t, s, prEvent("closed"))
 
 			if fg.prCalls != tc.wantPRCalls {
 				t.Errorf("GetPullRequest calls = %d, want %d", fg.prCalls, tc.wantPRCalls)
 			}
-			assertPayloadTeardown(t, fg, capture, msg)
+			assertPayloadTeardown(t, fg, capture)
 		})
 	}
 }
@@ -128,7 +123,7 @@ func TestReconcile_ClosedFallsBackToPayloadTeardown(t *testing.T) {
 // assertPayloadTeardown checks that fg tore down the closed event's payload
 // head branch with the PR closed reason, deployed nothing, and that the
 // fallback was logged.
-func assertPayloadTeardown(t *testing.T, fg *fakeGitops, capture *LogCapture, msg string) {
+func assertPayloadTeardown(t *testing.T, fg *fakeGitops, capture *LogCapture) {
 	t.Helper()
 	if fg.teardownSlug != teardownSlug || fg.teardownOwner != "acme" ||
 		fg.teardownRepo != "backend-1" || fg.teardownNumber != 42 {
@@ -138,7 +133,7 @@ func assertPayloadTeardown(t *testing.T, fg *fakeGitops, capture *LogCapture, ms
 	wantComment := "## 🧹 Preview: `feature-add-pricing`\n\n" +
 		"Preview deleted (PR closed): no other PR is pinned.\n\n" +
 		"---\n" +
-		"🔗 [" + msg + "](" + teardownCommitURL + ")"
+		"🔗 [" + teardownSubject + "](" + fg.headURL() + ")"
 	if len(fg.upserts) != 1 || fg.upserts[0].body != wantComment {
 		t.Errorf("upserts = %+v, want one with body:\n%s", fg.upserts, wantComment)
 	}
@@ -206,12 +201,9 @@ func TestReconcile_LabeledDeploysFetchedHead(t *testing.T) {
 }
 
 func TestReconcile_UnlabeledTearsDownWithReason(t *testing.T) {
-	const msg = "chore(preview): delete feature-pricing preview"
 	fg := reconcileFake()
 	fg.pr = fetchedPR(true, "bug")
-	fg.teardownResult = &store.TeardownResult{
-		Removed: []string{"backend-1"}, Deleted: true, CommitURL: teardownCommitURL, CommitMessage: msg,
-	}
+	fg.previews = pinnedAt("feature-pricing")
 	s, _ := newTeardownServer(t, fg)
 	deliver(t, s, labelEvent("unlabeled", "preview", "bug"))
 
@@ -223,7 +215,7 @@ func TestReconcile_UnlabeledTearsDownWithReason(t *testing.T) {
 	wantComment := "## 🧹 Preview: `feature-pricing`\n\n" +
 		"Preview deleted (label `preview` removed): no other PR is pinned.\n\n" +
 		"---\n" +
-		"🔗 [" + msg + "](" + teardownCommitURL + ")"
+		"🔗 [chore(preview): unpin acme/backend-1#42 from feature-pricing](" + fg.headURL() + ")"
 	if len(fg.upserts) != 1 || fg.upserts[0].body != wantComment {
 		t.Errorf("upserts = %+v, want one with body:\n%s", fg.upserts, wantComment)
 	}
@@ -278,7 +270,8 @@ func TestReconcile_MissingFields(t *testing.T) {
 func TestReconcile_WaitBackgroundCoversReconcile(t *testing.T) {
 	fg := reconcileFake()
 	fg.pr = fetchedPR(false)
-	fg.teardownGate = make(chan struct{})
+	fg.previews = pinnedAt("feature-pricing")
+	fg.applyGate = make(chan struct{})
 	s, _ := newTeardownServer(t, fg)
 	s.handlePullRequest(context.Background(), labelEvent("unlabeled", "preview"))
 
@@ -287,7 +280,7 @@ func TestReconcile_WaitBackgroundCoversReconcile(t *testing.T) {
 	if err := s.WaitBackground(expired); !errors.Is(err, context.Canceled) {
 		t.Errorf("WaitBackground while blocked = %v, want context.Canceled", err)
 	}
-	close(fg.teardownGate)
+	close(fg.applyGate)
 	if err := s.WaitBackground(context.Background()); err != nil {
 		t.Fatalf("WaitBackground: %v", err)
 	}
@@ -299,7 +292,7 @@ func TestReconcile_WaitBackgroundCoversReconcile(t *testing.T) {
 func TestReconcile_PanicRecovered(t *testing.T) {
 	fg := reconcileFake()
 	fg.pr = fetchedPR(false)
-	fg.teardownPanic = true
+	fg.applyPanic = true
 	s, capture := newTeardownServer(t, fg)
 	deliver(t, s, labelEvent("unlabeled", "preview"))
 
@@ -308,7 +301,7 @@ func TestReconcile_PanicRecovered(t *testing.T) {
 		t.Errorf("level = %v, want ERROR", r.Level)
 	}
 	if attrs["repo"].String() != "acme/backend-1" || attrs["pr_number"].Int64() != 42 ||
-		attrs["action"].String() != "unlabeled" || !strings.Contains(attrs["panic"].String(), "fake teardown panic") {
+		attrs["action"].String() != "unlabeled" || !strings.Contains(attrs["panic"].String(), "fake apply panic") {
 		t.Errorf("attrs = %v", attrs)
 	}
 }
@@ -327,24 +320,24 @@ func waitStarted(t *testing.T, started chan string, want string) {
 }
 
 func TestJobs_NeverOverlap(t *testing.T) {
-	fg := &fakeGitops{teardownGate: make(chan struct{}), pr: closedPR(), started: make(chan string, 4)}
+	fg := &fakeGitops{applyGate: make(chan struct{}), pr: closedPR(), started: make(chan string, 4)}
 	s, _ := newTeardownServer(t, fg)
 	s.handlePullRequest(context.Background(), prEvent("closed"))
 	s.handlePullRequest(context.Background(), prEvent("closed"))
 
 	waitStarted(t, fg.started, "catalog")
-	waitStarted(t, fg.started, "teardown")
+	waitStarted(t, fg.started, "apply")
 	select {
 	case got := <-fg.started:
 		t.Fatalf("second job reached %q while the first held the gate", got)
 	case <-time.After(quiet):
 	}
 
-	close(fg.teardownGate)
+	close(fg.applyGate)
 	if err := s.WaitBackground(context.Background()); err != nil {
 		t.Fatalf("WaitBackground: %v", err)
 	}
-	if got := drain(fg.started); len(got) != 2 || got[0] != "catalog" || got[1] != "teardown" {
+	if got := drain(fg.started); len(got) != 2 || got[0] != "catalog" || got[1] != "apply" {
 		t.Errorf("after release started = %v, want [catalog teardown]", got)
 	}
 }

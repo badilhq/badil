@@ -12,7 +12,7 @@ import (
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
-	"github.com/badilhq/badil/internal/store"
+	"github.com/badilhq/badil/internal/store/storetest"
 )
 
 // assertMetrics fails t unless the samples of m's metrics named names are
@@ -59,10 +59,10 @@ func assertMetrics(t *testing.T, m *metrics.Metrics, want map[string]float64, na
 }
 
 func TestReconcileMetrics_Outcomes(t *testing.T) {
-	deleted := &store.TeardownResult{Removed: []string{"front"}, Deleted: true, CommitURL: sweepCommitURL}
 	held := values(pin("front", "https://github.com/acme/front/pull/7", recent))
 	fork := fetchedPR("front", true, "preview")
 	fork.HeadFullName = "octocat/front"
+	branchPreview := map[string]*preview.PreviewValues{"feature-pricing": onlyFront42()}
 	cases := []struct {
 		name string
 		f    *reconcileFake
@@ -73,17 +73,6 @@ func TestReconcileMetrics_Outcomes(t *testing.T) {
 			name: "deployed",
 			f:    &reconcileFake{pr: fetchedPR("front", true, "preview")},
 			ev:   event("labeled", "front", "preview", "preview"),
-			want: map[string]float64{
-				`badil_reconciles_total{outcome="deployed"}`: 1,
-			},
-		},
-		{
-			name: "deployed despite a failed service",
-			f: &reconcileFake{
-				pr:       fetchedPR("monorepo", true, "preview"),
-				writeErr: map[string]error{"api": errors.New("boom")},
-			},
-			ev: event("labeled", "monorepo", "preview", "preview"),
 			want: map[string]float64{
 				`badil_reconciles_total{outcome="deployed"}`: 1,
 			},
@@ -109,9 +98,10 @@ func TestReconcileMetrics_Outcomes(t *testing.T) {
 		{
 			name: "held skip after cleanup",
 			f: &reconcileFake{
-				pr:       fetchedPR("front", true, "preview:pricing"),
-				previews: map[string]*preview.PreviewValues{"pricing": held},
-				teardown: deleted,
+				pr: fetchedPR("front", true, "preview:pricing"),
+				previews: map[string]*preview.PreviewValues{
+					"pricing": held, "feature-pricing": onlyFront42(),
+				},
 			},
 			ev: event("labeled", "front", "preview:pricing", "preview:pricing"),
 			want: map[string]float64{
@@ -138,8 +128,11 @@ func TestReconcileMetrics_Outcomes(t *testing.T) {
 		},
 		{
 			name: "preview read failure",
-			f:    &reconcileFake{pr: fetchedPR("front", true, "preview:pricing"), previewErr: errors.New("boom")},
-			ev:   event("labeled", "front", "preview:pricing", "preview:pricing"),
+			f: &reconcileFake{
+				pr:  fetchedPR("front", true, "preview:pricing"),
+				raw: map[string]string{"previews/pricing/values.yaml": "services: [\n"},
+			},
+			ev: event("labeled", "front", "preview:pricing", "preview:pricing"),
 			want: map[string]float64{
 				`badil_reconciles_total{outcome="failed"}`:               1,
 				`badil_teardowns_total{result="noop",trigger="webhook"}`: 1,
@@ -148,15 +141,15 @@ func TestReconcileMetrics_Outcomes(t *testing.T) {
 		{
 			name: "every write failed",
 			f: &reconcileFake{
-				pr:       fetchedPR("front", true, "preview"),
-				writeErr: map[string]error{"front": errors.New("boom")},
+				pr:         fetchedPR("front", true, "preview"),
+				beforePush: func(*storetest.Remote) error { return errors.New("boom") },
 			},
 			ev:   event("labeled", "front", "preview", "preview"),
 			want: map[string]float64{`badil_reconciles_total{outcome="failed"}`: 1},
 		},
 		{
 			name: "torn down",
-			f:    &reconcileFake{pr: fetchedPR("front", true, "bug"), teardown: deleted},
+			f:    &reconcileFake{pr: fetchedPR("front", true, "bug"), previews: branchPreview},
 			ev:   event("labeled", "front", "preview", "preview"),
 			want: map[string]float64{
 				`badil_reconciles_total{outcome="torn_down"}`:               1,
@@ -165,8 +158,11 @@ func TestReconcileMetrics_Outcomes(t *testing.T) {
 		},
 		{
 			name: "payload teardown",
-			f:    &reconcileFake{catalogErr: errors.New("boom"), teardown: deleted},
-			ev:   lifecycle.Event{Target: event("", "front", "").Target, Action: "closed", HeadRef: "feature/x"},
+			f: &reconcileFake{
+				catalogErr: errors.New("boom"),
+				previews:   map[string]*preview.PreviewValues{"feature-x": onlyFront42()},
+			},
+			ev: lifecycle.Event{Target: event("", "front", "").Target, Action: "closed", HeadRef: "feature/x"},
 			want: map[string]float64{
 				`badil_reconciles_total{outcome="torn_down"}`:               1,
 				`badil_teardowns_total{result="deleted",trigger="webhook"}`: 1,
@@ -177,7 +173,7 @@ func TestReconcileMetrics_Outcomes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			captureLogs(t)
 			tc.f.Metrics = metrics.New()
-			lifecycle.ReconcilePR(context.Background(), tc.f.api(), tc.ev)
+			lifecycle.ReconcilePR(context.Background(), tc.f.api(t), tc.ev)
 
 			assertMetrics(t, tc.f.Metrics, tc.want,
 				"badil_reconciles_total", "badil_reconcile_skips_total", "badil_teardowns_total")
@@ -187,32 +183,31 @@ func TestReconcileMetrics_Outcomes(t *testing.T) {
 
 func TestTeardownMetrics_Results(t *testing.T) {
 	cases := []struct {
-		name   string
-		f      *reconcileFake
-		result string
+		name     string
+		previews map[string]*preview.PreviewValues
+		raw      map[string]string
+		result   string
 	}{
-		{name: "noop", f: &reconcileFake{}, result: "noop"},
-		{name: "error", f: &reconcileFake{teardownErr: errors.New("boom")}, result: "error"},
+		{name: "noop", result: "noop"},
+		{name: "error", raw: map[string]string{"previews/feature-x/values.yaml": "services: [\n"}, result: "error"},
+		{name: "deleted", previews: map[string]*preview.PreviewValues{"feature-x": onlyFront42()}, result: "deleted"},
 		{
-			name:   "deleted",
-			f:      &reconcileFake{teardown: &store.TeardownResult{Removed: []string{"front"}, Deleted: true}},
-			result: "deleted",
-		},
-		{
-			name:   "unpinned",
-			f:      &reconcileFake{teardown: &store.TeardownResult{Removed: []string{"front"}}},
+			name: "unpinned",
+			previews: map[string]*preview.PreviewValues{"feature-x": values(
+				pinnedBy("api", "https://github.com/acme/monorepo/pull/7"), pinnedBy("front", front42),
+			)},
 			result: "unpinned",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			captureLogs(t)
-			tc.f.Metrics = metrics.New()
+			f := &reconcileFake{Metrics: metrics.New(), previews: tc.previews, raw: tc.raw}
 			target := event("", "front", "").Target
-			target.Slug = "feature-x"
-			lifecycle.TeardownPR(context.Background(), tc.f.teardownAPI(), target, lifecycle.PRClosedReason, "webhook")
+			lifecycle.TeardownPRs(context.Background(), f.teardownAPI(t), target, []string{"feature-x"},
+				lifecycle.PRClosedReason)
 
-			assertMetrics(t, tc.f.Metrics, map[string]float64{
+			assertMetrics(t, f.Metrics, map[string]float64{
 				`badil_teardowns_total{result="` + tc.result + `",trigger="webhook"}`: 1,
 			}, "badil_teardowns_total")
 		})
@@ -223,36 +218,52 @@ func TestTeardownMetrics_WebhookDeleteDecrementsPreviews(t *testing.T) {
 	captureLogs(t)
 	f := &reconcileFake{
 		Metrics:  metrics.New(),
-		teardown: &store.TeardownResult{Removed: []string{"front"}, Deleted: true},
+		previews: map[string]*preview.PreviewValues{"feature-x": onlyFront42()},
 	}
 	f.PreviewsListed(2)
 	target := event("", "front", "").Target
-	target.Slug = "feature-x"
-	lifecycle.TeardownPR(context.Background(), f.teardownAPI(), target, lifecycle.PRClosedReason, "webhook")
+	lifecycle.TeardownPRs(context.Background(), f.teardownAPI(t), target, []string{"feature-x"},
+		lifecycle.PRClosedReason)
 
 	assertMetrics(t, f.Metrics, map[string]float64{`badil_previews`: 1}, "badil_previews")
+}
+
+// TestReconcileMetrics_CreateIncrementsPreviews checks a deploy that creates
+// its preview increments the previews gauge, and one to an existing preview
+// does not.
+func TestReconcileMetrics_CreateIncrementsPreviews(t *testing.T) {
+	captureLogs(t)
+	f := &reconcileFake{Metrics: metrics.New(), pr: fetchedPR("monorepo", true, "preview")}
+	f.PreviewsListed(1)
+	ev := event("labeled", "monorepo", "preview", "preview")
+	lifecycle.ReconcilePR(context.Background(), f.api(t), ev)
+	assertMetrics(t, f.Metrics, map[string]float64{`badil_previews`: 2}, "badil_previews")
+
+	f.pr = fetchedPR("front", true, "preview")
+	lifecycle.ReconcilePR(context.Background(), f.api(t), event("labeled", "front", "preview", "preview"))
+	assertMetrics(t, f.Metrics, map[string]float64{`badil_previews`: 2}, "badil_previews")
 }
 
 func TestSweepMetrics(t *testing.T) {
 	captureLogs(t)
 	f := &fakeAPI{
-		Metrics:  metrics.New(),
-		label:    "preview",
-		previews: []string{"unpinned", "expired", "closed", "open", "stale"},
-		files: map[string]*preview.PreviewValues{
+		Metrics: metrics.New(),
+		previews: map[string]*preview.PreviewValues{
 			"unpinned": values(preview.ServiceEntry{Name: "backend-1"}),
 			"expired":  values(pin("backend-1", pr42, stale)),
 			"closed":   values(pin("backend-2", pr7, recent)),
 			"open":     values(pin("backend-1", pr42, recent)),
-			"stale":    values(pin("front", "https://github.com/acme/front/pull/3", recent)),
+		},
+		// "open" syncs unchanged, "stale" is rewritten.
+		raw: map[string]string{
+			"previews/stale/values.yaml": "services:\n  - name: front\n    commitSha: abc123\n" +
+				"    metadata: {pr-url: \"https://github.com/acme/front/pull/3\", updated-at: \"" + recent + "\"}\n",
 		},
 		prOpen:    map[string]bool{"acme/backend-1#42": true, "acme/front#3": true},
 		prHeadRef: map[string]string{"acme/backend-1#42": "open", "acme/front#3": "stale"},
 		prLabels:  map[string][]string{"acme/backend-1#42": {"preview"}, "acme/front#3": {"preview"}},
-		// "open" syncs unchanged, "stale" is rewritten.
-		sync: map[string]*store.SyncResult{"stale": {Changed: true}},
 	}
-	if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
+	if err := f.sweep(t, ttl); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
 
@@ -270,7 +281,7 @@ func TestSweepMetrics_UnpinOnlyIsASweepTeardown(t *testing.T) {
 	captureLogs(t)
 	f := openPRAt("feature-x", "preview:other")
 	f.Metrics = metrics.New()
-	if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
+	if err := f.sweep(t, ttl); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
 

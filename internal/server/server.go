@@ -109,10 +109,10 @@ func (s *Server) reconcileAPI() lifecycle.ReconcileAPI {
 	return lifecycle.ReconcileAPI{Store: s.store, Forge: s.forge, Recorder: s.metrics, FanOut: s.fanOut}
 }
 
-// deployAPI is the store, the forge and the fan-out as lifecycle.DeployPR
-// expects them.
+// deployAPI is the store, the forge, the metrics and the fan-out as
+// lifecycle.DeployPR expects them.
 func (s *Server) deployAPI() lifecycle.DeployAPI {
-	return lifecycle.DeployAPI{Store: s.store, Forge: s.forge, FanOut: s.fanOut}
+	return lifecycle.DeployAPI{Store: s.store, Forge: s.forge, Recorder: s.metrics, FanOut: s.fanOut}
 }
 
 // syncAPI is the store, the forge, the metrics and the fan-out as

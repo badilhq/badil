@@ -1,7 +1,7 @@
 package store_test
 
 import (
-	"context"
+	"errors"
 	"maps"
 	"testing"
 
@@ -9,44 +9,42 @@ import (
 	"github.com/badilhq/badil/internal/store"
 )
 
-func TestClientMetrics_TimesRetryOperations(t *testing.T) {
+// TestClientMetrics_TimesApplyByKind checks each Apply is timed once, as its
+// operation kind, with its result.
+func TestClientMetrics_TimesApplyByKind(t *testing.T) {
 	m := metrics.New()
-	f := newGitopsFake(t, map[string]string{"previews/broken/values.yaml": "services: [\n"})
+	f := newGitopsFake(t, map[string]string{"previews/a/values.yaml": previewFile("a")})
 	c := f.open(t, store.WithMetrics(m))
 	// The clone made when the store opened is timed too.
 	want := map[string]uint64{"clone/ok": 1}
 
-	ctx := context.Background()
-	if _, err := c.WritePreviewWithRetry(ctx, "fresh", testCatalog("backend-1"),
-		"backend-1", "abc", sampleInputs(), "create", "update", false); err != nil {
-		t.Fatalf("WritePreviewWithRetry: %v", err)
-	}
-	if _, err := c.TeardownPreviewWithRetry(ctx, "broken", "acme", "backend-1", 42); err == nil {
-		t.Fatal("TeardownPreviewWithRetry: want an error")
-	}
-	if _, err := c.TeardownPreviewWithRetry(ctx, "gone", "acme", "backend-1", 42); err != nil {
-		t.Fatalf("TeardownPreviewWithRetry: %v", err)
-	}
-	if _, err := c.UnpinServicesWithRetry(ctx, "broken", "acme", "backend-1", 42, []string{"backend-1"}); err == nil {
-		t.Fatal("UnpinServicesWithRetry: want an error")
-	}
-	if _, err := c.UnpinServicesWithRetry(ctx, "gone", "acme", "backend-1", 42, []string{"backend-1"}); err != nil {
-		t.Fatalf("UnpinServicesWithRetry: %v", err)
-	}
-	if _, err := c.SyncPreviewWithRetry(ctx, "broken", testCatalog("backend-1")); err == nil {
-		t.Fatal("SyncPreviewWithRetry: want an error")
-	}
-	if _, err := c.SyncPreviewWithRetry(ctx, "gone", testCatalog("backend-1")); err != nil {
-		t.Fatalf("SyncPreviewWithRetry: %v", err)
+	fail := func(*store.Tree) (store.Summary, error) { return store.Summary{}, errors.New("boom") }
+	noop := func(*store.Tree) (store.Summary, error) { return store.Summary{Subject: "noop"}, nil }
+	for _, op := range []struct {
+		kind   string
+		change func(*store.Tree) (store.Summary, error)
+	}{
+		{store.OpDeploy, rename("a", "deployed", "deploy")},
+		{store.OpTeardown, fail},
+		{store.OpTeardown, noop},
+		{store.OpSweep, rename("a", "swept", "sweep")},
+		{store.OpSync, fail},
+		{store.OpSync, noop},
+	} {
+		_, _ = apply(c, op.kind, op.change)
 	}
 
 	// Durations vary, so only each operation's observation count is compared.
-	// The remote checks the reads make depend on the clock, and the freshness
-	// tests count them.
+	// The fetches of every attempt are timed as fetch.
 	got := opCounts(t, m)
+	if got["fetch/ok"] == 0 {
+		t.Errorf("fetches = 0, want Apply's fetches timed")
+	}
 	delete(got, "ls_remote/ok")
 	delete(got, "fetch/ok")
-	want["write/ok"], want["teardown/error"], want["teardown/ok"], want["sync/error"], want["sync/ok"] = 1, 2, 2, 1, 1
+	maps.Copy(want, map[string]uint64{
+		"deploy/ok": 1, "teardown/error": 1, "teardown/ok": 1, "sweep/ok": 1, "sync/error": 1, "sync/ok": 1,
+	})
 	if !maps.Equal(got, want) {
 		t.Errorf("gitops operation counts = %v, want %v", got, want)
 	}

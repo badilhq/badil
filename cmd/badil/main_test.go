@@ -9,13 +9,16 @@ import (
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/bradleyfalzon/ghinstallation/v2"
+	gh "github.com/google/go-github/v71/github"
 
 	"github.com/badilhq/badil/internal/github"
+	"github.com/badilhq/badil/internal/store"
 )
 
 func TestParseCleanupTTL(t *testing.T) {
@@ -95,5 +98,57 @@ func TestGitCredentials_OneTokenPerValidity(t *testing.T) {
 	}
 	if n := mints.Load(); n != 1 {
 		t.Errorf("access token requests = %d, want 1", n)
+	}
+}
+
+// TestCommitIdentity checks the identity is the App's bot, read with the App
+// JWT client for GET /app and the installation client for the bot user, and
+// that a failed lookup is an error.
+func TestCommitIdentity(t *testing.T) {
+	var appAuth, userAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/app":
+			appAuth = r.Header.Get("Authorization")
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 1, "slug": "badil-dev"})
+		case "/users/badil-dev[bot]":
+			userAuth = r.Header.Get("Authorization")
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 348525889, "login": "badil-dev[bot]"})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	client := func(token string) *gh.Client {
+		c := gh.NewClient(nil).WithAuthToken(token)
+		u, err := url.Parse(srv.URL + "/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.BaseURL = u
+		return c
+	}
+
+	id, err := commitIdentity(context.Background(), client("app-jwt"), client("installation"))
+	if err != nil {
+		t.Fatalf("commitIdentity: %v", err)
+	}
+	want := store.CommitIdentity{
+		Name:  "badil-dev[bot]",
+		Email: "348525889+badil-dev[bot]@users.noreply.github.com",
+	}
+	if id != want {
+		t.Errorf("identity = %+v, want %+v", id, want)
+	}
+	if appAuth != "Bearer app-jwt" || userAuth != "Bearer installation" {
+		t.Errorf("auth = %q, %q; want the App JWT for /app and the installation for the user", appAuth, userAuth)
+	}
+
+	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	if _, err = commitIdentity(context.Background(), client("app-jwt"), client("installation")); err == nil {
+		t.Error("commitIdentity with GET /app failing = nil error, want one")
 	}
 }

@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
-	"sync"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,147 +16,75 @@ import (
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
+	"github.com/badilhq/badil/internal/store/storetest"
 )
 
-const (
-	sweepCommitURL = "https://github.com/acme/gitops/commit/c0ffee"
-	ttl            = 168 * time.Hour
-)
+const ttl = 168 * time.Hour
 
 // now is the sweep time: 2026-06-10, so 2026-05-26 is past a 168h TTL and
 // 2026-06-09 is not.
 var now = time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC) //nolint:gochecknoglobals // test fixture
 
-// logCapture is a slog.Handler retaining every record.
-type logCapture struct {
-	mu      sync.Mutex
-	entries []slog.Record
-}
+// sweepBadil is the badil.yaml of the sweep tests.
+const sweepBadil = `services:
+  backend-1:
+    repo: https://github.com/acme/backend-1.git
+  backend-2:
+    repo: https://github.com/acme/backend-2.git
+  worker:
+    repo: https://github.com/acme/backend-1.git
+  front:
+    repo: https://github.com/acme/front.git
+`
 
-func (h *logCapture) Enabled(context.Context, slog.Level) bool { return true }
-
-func (h *logCapture) Handle(_ context.Context, r slog.Record) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.entries = append(h.entries, r.Clone())
-	return nil
-}
-
-func (h *logCapture) WithAttrs([]slog.Attr) slog.Handler { return h }
-func (h *logCapture) WithGroup(string) slog.Handler      { return h }
-
-// find returns the attributes of every record logged with msg at level.
-func (h *logCapture) find(level slog.Level, msg string) []map[string]slog.Value {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	var out []map[string]slog.Value
-	for _, r := range h.entries {
-		if r.Level != level || r.Message != msg {
-			continue
-		}
-		attrs := map[string]slog.Value{}
-		r.Attrs(func(a slog.Attr) bool {
-			attrs[a.Key] = a.Value
-			return true
-		})
-		out = append(out, attrs)
-	}
-	return out
-}
-
-// count returns the number of records logged at level.
-func (h *logCapture) count(level slog.Level) int {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	n := 0
-	for _, r := range h.entries {
-		if r.Level == level {
-			n++
-		}
-	}
-	return n
-}
-
-func captureLogs(t *testing.T) *logCapture {
-	t.Helper()
-	capture := &logCapture{}
-	prev := slog.Default()
-	slog.SetDefault(slog.New(capture))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-	return capture
-}
-
-type deleteCall struct {
-	slug    string
-	message string
-}
-
-type teardownCall struct {
-	slug, owner, repo string
-	number            int
-}
-
+// fanOut is one comment posted on the open PRs of a preview.
 type fanOut struct {
 	vals preview.PreviewValues
 	body string
 }
 
-// syncCall is one SyncPreviewWithRetry call and the number of teardowns made
-// before it.
-type syncCall struct {
-	slug            string
-	teardownsBefore int
-}
-
-// fakeAPI is an in-memory SweepAPI. files holds what GetPreview reads; fresh,
-// when set for a slug, is what DeletePreviewWithRetry re-reads (a deploy that
-// landed in between). PR states, labels and head refs are keyed by
-// "owner/repo#n". label is the catalog's preview label, unless catalogErr is
-// set. SyncPreviewWithRetry returns sync[slug] (an empty result when unset) or
-// syncErr[slug]. Metrics records the outcomes; nil records nothing.
+// fakeAPI is a SweepAPI over a gitops repo of a real store, made on the
+// first api call. The repo holds sweepBadil (with preview.argocdURL set to
+// argocdURL when it is), or no badil.yaml when noCatalog is set, the files of
+// previews (projected on the catalog) and raw. ListPreviews fails with
+// listErr when set. PR states, labels and head refs are keyed by
+// "owner/repo#n". Each push first runs beforePush when set, whose error fails
+// the push. Metrics records the outcomes; nil records nothing.
 type fakeAPI struct {
 	*metrics.Metrics
 
-	label      string
+	noCatalog  bool
 	argocdURL  string
-	catalogErr error
+	previews   map[string]*preview.PreviewValues
+	raw        map[string]string
+	listErr    error
+	prOpen     map[string]bool
+	prErr      map[string]error
 	prLabels   map[string][]string
 	prHeadRef  map[string]string
+	fanErr     error
+	beforePush func(*storetest.Remote) error
 
-	previews  []string
-	listErr   error
-	files     map[string]*preview.PreviewValues
-	getErr    map[string]error
-	fresh     map[string]preview.PreviewValues
-	deleteErr map[string]error
-	prOpen    map[string]bool
-	prErr     map[string]error
-	fanErr    error
-	sync      map[string]*store.SyncResult
-	syncErr   map[string]error
-
-	deletes   []deleteCall
-	syncs     []syncCall
-	prReads   []string
-	teardowns []teardownCall
-	upserts   []string
-	bodies    []string
-	fanOuts   []fanOut
+	g       *gitops
+	prReads []string
+	upserts []string
+	bodies  []string
+	fanOuts []fanOut
 }
 
-func (f *fakeAPI) ListPreviews(context.Context) ([]string, error) {
-	return f.previews, f.listErr
+func (f *fakeAPI) ListPreviews(ctx context.Context) ([]string, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return f.g.st.ListPreviews(ctx)
 }
 
-func (f *fakeAPI) GetPreview(_ context.Context, slug string) (*preview.PreviewValues, string, error) {
-	if err := f.getErr[slug]; err != nil {
-		return nil, "", err
-	}
-	vals, ok := f.files[slug]
-	if !ok {
-		return nil, "", store.ErrNotFound
-	}
-	return vals, "blob-" + slug, nil
+func (f *fakeAPI) GetPreview(ctx context.Context, slug string) (*preview.PreviewValues, string, error) {
+	return f.g.st.GetPreview(ctx, slug)
+}
+
+func (f *fakeAPI) Apply(ctx context.Context, op store.Op) (store.Result, error) {
+	return f.g.st.Apply(ctx, op)
 }
 
 func (f *fakeAPI) GetPullRequest(_ context.Context, owner, repo string, number int) (*forge.PullRequest, error) {
@@ -168,70 +96,10 @@ func (f *fakeAPI) GetPullRequest(_ context.Context, owner, repo string, number i
 	return &forge.PullRequest{Open: f.prOpen[key], Labels: f.prLabels[key], HeadRef: f.prHeadRef[key]}, nil
 }
 
-func (f *fakeAPI) DeletePreviewWithRetry(
-	_ context.Context,
-	slug, message string,
-	stillDelete func(preview.PreviewValues) bool,
-) (*store.DeleteResult, error) {
-	if err := f.deleteErr[slug]; err != nil {
-		return nil, err
-	}
-	vals := *f.files[slug]
-	if fresh, ok := f.fresh[slug]; ok {
-		vals = fresh
-	}
-	if !stillDelete(vals) {
-		return &store.DeleteResult{}, nil
-	}
-	f.deletes = append(f.deletes, deleteCall{slug: slug, message: message})
-	return &store.DeleteResult{Deleted: true, Values: vals, CommitURL: sweepCommitURL}, nil
-}
-
-func (f *fakeAPI) TeardownPreviewWithRetry(
-	_ context.Context,
-	slug, owner, repo string,
-	prNumber int,
-) (*store.TeardownResult, error) {
-	f.teardowns = append(f.teardowns, teardownCall{slug: slug, owner: owner, repo: repo, number: prNumber})
-	return &store.TeardownResult{
-		Removed:       []string{repo},
-		Deleted:       true,
-		CommitURL:     sweepCommitURL,
-		CommitMessage: "chore(preview): delete " + slug + " preview",
-	}, nil
-}
-
-func (f *fakeAPI) SyncPreviewWithRetry(
-	_ context.Context,
-	slug string,
-	_ *store.ServiceCatalog,
-) (*store.SyncResult, error) {
-	f.syncs = append(f.syncs, syncCall{slug: slug, teardownsBefore: len(f.teardowns)})
-	if err := f.syncErr[slug]; err != nil {
-		return nil, err
-	}
-	if res, ok := f.sync[slug]; ok {
-		return res, nil
-	}
-	return &store.SyncResult{}, nil
-}
-
 func (f *fakeAPI) UpsertComment(_ context.Context, owner, repo string, prNumber int, body string) error {
 	f.upserts = append(f.upserts, fmt.Sprintf("%s/%s#%d", owner, repo, prNumber))
 	f.bodies = append(f.bodies, body)
 	return nil
-}
-
-func (f *fakeAPI) FetchServiceCatalog(context.Context) (*store.ServiceCatalog, error) {
-	if f.catalogErr != nil {
-		return nil, f.catalogErr
-	}
-	return &store.ServiceCatalog{Label: f.label, ArgoCDURL: f.argocdURL}, nil
-}
-
-func (f *fakeAPI) FanOutPRComments(_ context.Context, vals preview.PreviewValues, body string) error {
-	f.fanOuts = append(f.fanOuts, fanOut{vals: vals, body: body})
-	return f.fanErr
 }
 
 func (f *fakeAPI) ListChangedFiles(context.Context, string, string, int) ([]forge.ChangedFile, error) {
@@ -243,16 +111,52 @@ func (f *fakeAPI) ParseWebhook(*http.Request) (forge.Event, error) {
 }
 
 // api is the lifecycle.SweepAPI over f: its store, forge and recorder, with
-// its FanOutPRComments as the fan-out.
-func (f *fakeAPI) api() lifecycle.SweepAPI {
+// the fan-out recorded in fanOuts.
+func (f *fakeAPI) api(t *testing.T) lifecycle.SweepAPI {
+	t.Helper()
+	if f.g == nil {
+		badil := ""
+		if !f.noCatalog {
+			badil = sweepBadil
+			if f.argocdURL != "" {
+				badil += "preview:\n  argocdURL: " + f.argocdURL + "\n"
+			}
+		}
+		f.g = newGitops(t, badil, f.previews, f.raw)
+		if f.beforePush != nil {
+			f.g.remote.OnPush(func() error { return f.beforePush(f.g.remote) })
+		}
+	}
 	return lifecycle.SweepAPI{
 		Store:    f,
 		Forge:    f,
 		Recorder: f,
-		FanOut: func(ctx context.Context, _ forge.Forge, vals preview.PreviewValues, body string) error {
-			return f.FanOutPRComments(ctx, vals, body)
+		FanOut: func(_ context.Context, _ forge.Forge, vals preview.PreviewValues, body string) error {
+			f.fanOuts = append(f.fanOuts, fanOut{vals: vals, body: body})
+			return f.fanErr
 		},
 	}
+}
+
+// sweep runs one sweep over f at now with ttl.
+func (f *fakeAPI) sweep(t *testing.T, ttl time.Duration) error {
+	t.Helper()
+	return lifecycle.Sweep(context.Background(), f.api(t), now, ttl)
+}
+
+// assertOneCommit fails t unless f pushed exactly one commit, with subject
+// and body, and returns it.
+func (f *fakeAPI) assertOneCommit(t *testing.T, subject string, body ...string) storetest.Commit {
+	t.Helper()
+	pushed := f.g.pushed()
+	if len(pushed) != 1 || pushed[0].Subject() != subject || !slices.Equal(pushed[0].Body(), body) {
+		var got []string
+		for _, c := range pushed {
+			got = append(got, c.Message)
+		}
+		t.Fatalf("pushed = %q, want one commit %q with body %q", got, subject, body)
+	}
+	return pushed[0]
 }
 
 // pin is an entry pinned by prURL and last deployed at updatedAt.
@@ -278,23 +182,19 @@ const (
 func TestSweep_NoPinsDeletes(t *testing.T) {
 	capture := captureLogs(t)
 	f := &fakeAPI{
-		previews: []string{"feature-x"},
-		files:    map[string]*preview.PreviewValues{"feature-x": values(preview.ServiceEntry{Name: "backend-1"})},
+		previews: map[string]*preview.PreviewValues{"feature-x": values(preview.ServiceEntry{Name: "backend-1"})},
 	}
-	if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
+	if err := f.sweep(t, ttl); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
-	want := []deleteCall{{slug: "feature-x", message: "chore(preview): delete feature-x preview"}}
-	if !slices.Equal(f.deletes, want) {
-		t.Errorf("deletes = %+v, want %+v", f.deletes, want)
-	}
+	c := f.assertOneCommit(t, "chore(preview): sweep: delete 1, unpin 0, sync 0", "feature-x: delete")
 	if len(f.fanOuts) != 0 || len(f.upserts) != 0 || len(f.prReads) != 0 {
 		t.Errorf("rule 1 must not comment or read PRs: fanOuts=%d upserts=%v prReads=%v",
 			len(f.fanOuts), f.upserts, f.prReads)
 	}
 	logs := capture.find(slog.LevelInfo, "preview deleted")
 	if len(logs) != 1 || logs[0]["slug"].String() != "feature-x" || logs[0]["reason"].String() != "no pins" ||
-		logs[0]["gitops_commit_url"].String() != sweepCommitURL {
+		logs[0]["gitops_commit_url"].String() != commitURL(c) {
 		t.Errorf("preview deleted logs = %v", logs)
 	}
 	if _, ok := logs[0]["last_deploy"]; ok {
@@ -305,34 +205,29 @@ func TestSweep_NoPinsDeletes(t *testing.T) {
 func TestSweep_ExpiredDeletesAndComments(t *testing.T) {
 	capture := captureLogs(t)
 	f := &fakeAPI{
-		previews: []string{"feature-x"},
-		files: map[string]*preview.PreviewValues{"feature-x": values(
+		previews: map[string]*preview.PreviewValues{"feature-x": values(
 			pin("backend-1", pr42, stale),
 			preview.ServiceEntry{Name: "front"},
 		)},
 		// The PR is closed: rule 2 still wins over rule 3.
 		prOpen: map[string]bool{},
 	}
-	if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
+	if err := f.sweep(t, ttl); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
-	want := []deleteCall{{slug: "feature-x", message: "chore(preview): expire feature-x preview"}}
-	if !slices.Equal(f.deletes, want) {
-		t.Errorf("deletes = %+v, want %+v", f.deletes, want)
-	}
-	if len(f.prReads) != 0 || len(f.teardowns) != 0 {
-		t.Errorf("an expired preview must not go through rule 3: prReads=%v teardowns=%v", f.prReads, f.teardowns)
+	c := f.assertOneCommit(t, "chore(preview): sweep: delete 1, unpin 0, sync 0", "feature-x: delete")
+	if logs := capture.find(slog.LevelInfo, "preview teardown"); len(logs) != 0 || len(f.upserts) != 0 {
+		t.Errorf("an expired preview must not go through rule 3: teardowns=%v upserts=%v", logs, f.upserts)
 	}
 	wantBody := "## 🧹 Preview: `feature-x`\n\n" +
 		"Preview deleted: no deploy for 168h0m0s.\n\n" +
-		"---\n" +
-		"🔗 [chore(preview): expire feature-x preview](" + sweepCommitURL + ")"
-	if len(f.fanOuts) != 1 || f.fanOuts[0].body != wantBody || len(f.fanOuts[0].vals.Services) != 2 {
+		"---\n" + link(c)
+	if len(f.fanOuts) != 1 || f.fanOuts[0].body != wantBody || len(f.fanOuts[0].vals.Services) == 0 {
 		t.Fatalf("fanOuts = %+v, want one with body:\n%s", f.fanOuts, wantBody)
 	}
 	logs := capture.find(slog.LevelInfo, "preview deleted")
 	if len(logs) != 1 || logs[0]["reason"].String() != "expired" ||
-		logs[0]["last_deploy"].String() != stale || logs[0]["gitops_commit_url"].String() != sweepCommitURL {
+		logs[0]["last_deploy"].String() != stale || logs[0]["gitops_commit_url"].String() != commitURL(c) {
 		t.Errorf("preview deleted logs = %v", logs)
 	}
 }
@@ -340,11 +235,10 @@ func TestSweep_ExpiredDeletesAndComments(t *testing.T) {
 func TestSweep_ExpiryCommentFailure(t *testing.T) {
 	capture := captureLogs(t)
 	f := &fakeAPI{
-		previews: []string{"feature-x"},
-		files:    map[string]*preview.PreviewValues{"feature-x": values(pin("backend-1", pr42, stale))},
+		previews: map[string]*preview.PreviewValues{"feature-x": values(pin("backend-1", pr42, stale))},
 		fanErr:   errors.New("comment boom"),
 	}
-	if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
+	if err := f.sweep(t, ttl); err != nil {
 		t.Fatalf("Sweep: %v (a comment failure is not a preview failure)", err)
 	}
 	logs := capture.find(slog.LevelWarn, "preview expiry comment failed")
@@ -365,48 +259,54 @@ func TestSweep_NeverExpires(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			captureLogs(t)
+			capture := captureLogs(t)
 			f := &fakeAPI{
-				previews: []string{"feature-x"},
-				files:    map[string]*preview.PreviewValues{"feature-x": tc.vals},
+				previews: map[string]*preview.PreviewValues{"feature-x": tc.vals},
 				prOpen:   map[string]bool{"acme/backend-1#42": true, "acme/backend-2#7": true},
+				// Both are open at their branch preview: rule 3 leaves them.
+				prHeadRef: map[string]string{"acme/backend-1#42": "feature/x", "acme/backend-2#7": "feature/x"},
 			}
-			if err := lifecycle.Sweep(context.Background(), f.api(), now, tc.ttl); err != nil {
+			if err := f.sweep(t, tc.ttl); err != nil {
 				t.Fatalf("Sweep: %v", err)
 			}
-			if len(f.deletes) != 0 || len(f.fanOuts) != 0 || len(f.teardowns) != 0 {
-				t.Errorf("deletes=%v fanOuts=%d teardowns=%v, want nothing", f.deletes, len(f.fanOuts), f.teardowns)
+			if got := f.g.subjects(); len(got) != 0 || len(f.fanOuts) != 0 || len(teardownsLogged(capture)) != 0 {
+				t.Errorf("pushed=%q fanOuts=%d teardowns=%v, want nothing",
+					got, len(f.fanOuts), teardownsLogged(capture))
 			}
 		})
 	}
 }
 
 func TestSweep_ClosedPRTearsDown(t *testing.T) {
-	captureLogs(t)
+	capture := captureLogs(t)
 	f := &fakeAPI{
-		previews: []string{"feature-x"},
-		files: map[string]*preview.PreviewValues{"feature-x": values(
+		previews: map[string]*preview.PreviewValues{"feature-x": values(
 			pin("backend-1", pr42, recent),
 			pin("backend-2", pr7, recent),
 		)},
-		prOpen: map[string]bool{"acme/backend-2#7": true},
+		prOpen:    map[string]bool{"acme/backend-2#7": true},
+		prHeadRef: map[string]string{"acme/backend-2#7": "feature/x"},
 	}
-	if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
+	if err := f.sweep(t, ttl); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
 	if want := []string{"acme/backend-1#42", "acme/backend-2#7"}; !slices.Equal(f.prReads, want) {
 		t.Errorf("prReads = %v, want %v", f.prReads, want)
 	}
 	want := []teardownCall{{slug: "feature-x", owner: "acme", repo: "backend-1", number: 42}}
-	if !slices.Equal(f.teardowns, want) {
-		t.Errorf("teardowns = %+v, want %+v", f.teardowns, want)
+	if got := teardownsLogged(capture); !slices.Equal(got, want) {
+		t.Errorf("teardowns = %+v, want %+v", got, want)
 	}
+	c := f.assertOneCommit(t, "chore(preview): sweep: delete 0, unpin 1, sync 0", "feature-x: unpin backend-1")
 	// The teardown path comments on the closed PR, exactly like a webhook close.
 	if want := []string{"acme/backend-1#42"}; !slices.Equal(f.upserts, want) {
 		t.Errorf("upserts = %v, want %v", f.upserts, want)
 	}
-	if len(f.deletes) != 0 {
-		t.Errorf("deletes = %v, want none", f.deletes)
+	if len(f.bodies) != 1 || !strings.HasSuffix(f.bodies[0], link(c)) {
+		t.Errorf("bodies = %q, want one linking %s", f.bodies, link(c))
+	}
+	if len(f.fanOuts) != 1 {
+		t.Errorf("fanOuts = %d, want one summary of the kept preview", len(f.fanOuts))
 	}
 }
 
@@ -422,16 +322,15 @@ func TestSweep_PRStateUnknownKeepsPin(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			capture := captureLogs(t)
 			f := &fakeAPI{
-				previews: []string{"feature-x"},
-				files:    map[string]*preview.PreviewValues{"feature-x": values(pin("backend-1", pr42, recent))},
+				previews: map[string]*preview.PreviewValues{"feature-x": values(pin("backend-1", pr42, recent))},
 				prErr:    map[string]error{"acme/backend-1#42": tc.err},
 			}
-			if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
+			if err := f.sweep(t, ttl); err != nil {
 				t.Fatalf("Sweep: %v", err)
 			}
-			if len(f.teardowns) != 0 || len(f.deletes) != 0 || len(f.fanOuts) != 0 || len(f.upserts) != 0 {
-				t.Errorf("teardowns=%v deletes=%v fanOuts=%d upserts=%v, want none",
-					f.teardowns, f.deletes, len(f.fanOuts), f.upserts)
+			if got := f.g.subjects(); len(got) != 0 || len(teardownsLogged(capture)) != 0 ||
+				len(f.fanOuts) != 0 || len(f.upserts) != 0 {
+				t.Errorf("pushed=%q fanOuts=%d upserts=%v, want none", got, len(f.fanOuts), f.upserts)
 			}
 			logs := capture.find(slog.LevelWarn, "cleanup pr state unknown")
 			if len(logs) != 1 || logs[0]["slug"].String() != "feature-x" ||
@@ -444,62 +343,130 @@ func TestSweep_PRStateUnknownKeepsPin(t *testing.T) {
 }
 
 func TestSweep_OnePRPinningTwoServicesCheckedOnce(t *testing.T) {
-	captureLogs(t)
+	capture := captureLogs(t)
 	f := &fakeAPI{
-		previews: []string{"feature-x"},
-		files: map[string]*preview.PreviewValues{"feature-x": values(
-			pin("backend-1", pr42, recent),
-			pin("worker", "https://github.com/ACME/Backend-1/pull/42/files", recent),
-			pin("front", "not-a-pr-url", recent),
-			preview.ServiceEntry{Name: "backend-2", CommitSha: "abc123"},
-		)},
+		previews: map[string]*preview.PreviewValues{
+			"feature-x": values(
+				pin("backend-1", pr42, recent),
+				pin("worker", "https://github.com/ACME/Backend-1/pull/42/files", recent),
+				pin("front", "not-a-pr-url", recent),
+				preview.ServiceEntry{Name: "backend-2", CommitSha: "abc123"},
+			),
+			// The same PR in another preview is not read again.
+			"other": values(pin("backend-1", pr42, recent)),
+		},
 	}
-	if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
+	if err := f.sweep(t, ttl); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
 	if want := []string{"acme/backend-1#42"}; !slices.Equal(f.prReads, want) {
 		t.Errorf("prReads = %v, want %v", f.prReads, want)
 	}
-	if len(f.teardowns) != 1 {
-		t.Errorf("teardowns = %+v, want one", f.teardowns)
+	if got := teardownSlugs(teardownsLogged(capture)); !slices.Equal(got, []string{"feature-x", "other"}) {
+		t.Errorf("teardowns = %v, want one from each preview", got)
 	}
 }
 
-func TestSweep_ConcurrentDeployCancelsDelete(t *testing.T) {
+// TestSweep_RulesOnRetriedTree loses the first push to a deploy that lands
+// in the deleted previews: the retry keeps them.
+func TestSweep_RulesOnRetriedTree(t *testing.T) {
 	cases := []struct {
 		name  string
 		file  *preview.PreviewValues
-		fresh preview.PreviewValues
+		fresh *preview.PreviewValues
 	}{
 		{
 			name:  "rule 1: a new pin",
 			file:  values(preview.ServiceEntry{Name: "backend-1"}),
-			fresh: *values(pin("backend-1", pr42, recent)),
+			fresh: values(pin("backend-1", pr42, recent)),
 		},
 		{
 			name:  "rule 2: a newer updated-at",
 			file:  values(pin("backend-1", pr42, stale)),
-			fresh: *values(pin("backend-1", pr42, recent)),
+			fresh: values(pin("backend-1", pr42, recent)),
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			capture := captureLogs(t)
 			f := &fakeAPI{
-				previews: []string{"feature-x"},
-				files:    map[string]*preview.PreviewValues{"feature-x": tc.file},
-				fresh:    map[string]preview.PreviewValues{"feature-x": tc.fresh},
+				previews:  map[string]*preview.PreviewValues{"feature-x": tc.file},
+				prOpen:    map[string]bool{"acme/backend-1#42": true},
+				prHeadRef: map[string]string{"acme/backend-1#42": "feature/x"},
 			}
-			if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); err != nil {
+			raced := false
+			f.beforePush = func(r *storetest.Remote) error {
+				if !raced {
+					raced = true
+					r.Set("previews/feature-x/values.yaml", marshal(t,
+						projectOn("feature-x", *tc.fresh, sweepCatalog(t))))
+				}
+				return nil
+			}
+			if err := f.sweep(t, ttl); err != nil {
 				t.Fatalf("Sweep: %v", err)
 			}
-			if len(f.deletes) != 0 || len(f.fanOuts) != 0 {
-				t.Errorf("deletes=%v fanOuts=%d, want none", f.deletes, len(f.fanOuts))
+			if got := f.g.subjects(); !slices.Equal(got, []string{"test"}) || len(f.fanOuts) != 0 {
+				t.Errorf("pushed=%q fanOuts=%d, want only the commit the push lost to", got, len(f.fanOuts))
 			}
 			if logs := capture.find(slog.LevelInfo, "preview deleted"); len(logs) != 0 {
 				t.Errorf("preview deleted logged: %v", logs)
 			}
+			if f.g.file("feature-x") == nil {
+				t.Error("feature-x deleted, want it kept")
+			}
 		})
+	}
+}
+
+// sweepCatalog parses sweepBadil.
+func sweepCatalog(t *testing.T) *store.ServiceCatalog {
+	t.Helper()
+	catalog, err := store.ParseCatalog([]byte(sweepBadil))
+	if err != nil {
+		t.Fatalf("ParseCatalog: %v", err)
+	}
+	return catalog
+}
+
+// TestSweep_PRPinnedAfterThePreRead loses the first push to a deploy of a
+// PR whose state the sweep did not read: the retry leaves its pins alone and
+// reads nothing more from the forge.
+func TestSweep_PRPinnedAfterThePreRead(t *testing.T) {
+	capture := captureLogs(t)
+	f := &fakeAPI{
+		previews: map[string]*preview.PreviewValues{
+			"feature-x": values(pin("backend-1", pr42, recent)),
+			"unpinned":  values(preview.ServiceEntry{Name: "backend-1"}),
+		},
+		prOpen: map[string]bool{},
+	}
+	raced := false
+	f.beforePush = func(r *storetest.Remote) error {
+		if !raced {
+			raced = true
+			r.Set("previews/feature-x/values.yaml", marshal(t, projectOn("feature-x",
+				*values(pin("backend-1", pr42, recent), pin("backend-2", pr7, recent)), sweepCatalog(t))))
+		}
+		return nil
+	}
+	if err := f.sweep(t, ttl); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if want := []string{"acme/backend-1#42"}; !slices.Equal(f.prReads, want) {
+		t.Errorf("prReads = %v, want only the pre-read %v", f.prReads, want)
+	}
+	pushed := f.g.pushed()
+	if len(pushed) != 2 || pushed[1].Subject() != "chore(preview): sweep: delete 1, unpin 1, sync 0" ||
+		!slices.Equal(pushed[1].Body(), []string{"feature-x: unpin backend-1", "unpinned: delete"}) {
+		t.Fatalf("pushed = %q, want the race then the sweep", f.g.subjects())
+	}
+	if pins := f.g.pins("feature-x"); pins["backend-1"] != "" || pins["backend-2"] != "abc123" {
+		t.Errorf("feature-x pins = %v, want backend-1 torn down, backend-2 kept", pins)
+	}
+	want := []teardownCall{{slug: "feature-x", owner: "acme", repo: "backend-1", number: 42}}
+	if got := teardownsLogged(capture); !slices.Equal(got, want) {
+		t.Errorf("teardowns = %+v, want %+v", got, want)
 	}
 }
 
@@ -507,27 +474,20 @@ func TestSweep_FailuresCountedAndSweepContinues(t *testing.T) {
 	capture := captureLogs(t)
 	unpinned := values(preview.ServiceEntry{Name: "backend-1"})
 	f := &fakeAPI{
-		previews: []string{"a", "b", "c", "d", "gone"},
-		files: map[string]*preview.PreviewValues{
-			"a": unpinned, "b": unpinned, "c": unpinned, "d": unpinned,
+		previews: map[string]*preview.PreviewValues{"a": unpinned, "c": unpinned, "d": unpinned},
+		raw: map[string]string{
+			"previews/b/values.yaml":  "services: [\n",
+			"previews/gone/README.md": "no values file\n",
 		},
-		getErr:    map[string]error{"b": errors.New("read boom")},
-		deleteErr: map[string]error{"c": errors.New("delete boom")},
 	}
-	err := lifecycle.Sweep(context.Background(), f.api(), now, 0)
-	if err == nil || err.Error() != "cleanup: 2 preview(s) failed" {
-		t.Fatalf("err = %v, want cleanup: 2 preview(s) failed", err)
+	err := f.sweep(t, 0)
+	if err == nil || err.Error() != "cleanup: 1 preview(s) failed" {
+		t.Fatalf("err = %v, want cleanup: 1 preview(s) failed", err)
 	}
-	want := []deleteCall{
-		{slug: "a", message: "chore(preview): delete a preview"},
-		{slug: "d", message: "chore(preview): delete d preview"},
-	}
-	if !slices.Equal(f.deletes, want) {
-		t.Errorf("deletes = %+v, want %+v", f.deletes, want)
-	}
+	f.assertOneCommit(t, "chore(preview): sweep: delete 3, unpin 0, sync 0", "a: delete", "c: delete", "d: delete")
 	failed := capture.find(slog.LevelError, "cleanup preview failed")
-	if len(failed) != 2 || failed[0]["slug"].String() != "b" || failed[0]["err"].String() != "read boom" ||
-		failed[1]["slug"].String() != "c" || failed[1]["err"].String() != "delete boom" {
+	if len(failed) != 1 || failed[0]["slug"].String() != "b" ||
+		!strings.HasPrefix(failed[0]["err"].String(), "parse previews/b/values.yaml") {
 		t.Errorf("cleanup preview failed logs = %v", failed)
 	}
 	started := capture.find(slog.LevelInfo, "cleanup started")
@@ -535,16 +495,70 @@ func TestSweep_FailuresCountedAndSweepContinues(t *testing.T) {
 		t.Errorf("cleanup started logs = %v", started)
 	}
 	finished := capture.find(slog.LevelInfo, "cleanup finished")
-	if len(finished) != 1 || finished[0]["previews"].Int64() != 5 || finished[0]["failed"].Int64() != 2 {
+	if len(finished) != 1 || finished[0]["previews"].Int64() != 5 || finished[0]["failed"].Int64() != 1 {
 		t.Errorf("cleanup finished logs = %v", finished)
 	}
+}
+
+// TestSweep_OneCommit checks a sweep that deletes 1, unpins 2 and syncs 3
+// previews makes one commit.
+func TestSweep_OneCommit(t *testing.T) {
+	captureLogs(t)
+	// An entry whose pr-url names no PR is left alone by rule 3.
+	kept := pin("backend-2", "not-a-pr-url", recent)
+	unsynced := marshal(t, *values(kept))
+	f := &fakeAPI{
+		previews: map[string]*preview.PreviewValues{
+			"a-unpinned": values(preview.ServiceEntry{Name: "backend-1"}),
+			"b-closed":   values(pin("backend-1", pr42, recent), kept),
+			"c-closed":   values(pin("backend-1", pr42, recent), kept),
+		},
+		raw: map[string]string{
+			"previews/d-sync/values.yaml": unsynced,
+			"previews/e-sync/values.yaml": unsynced,
+			"previews/f-sync/values.yaml": unsynced,
+		},
+	}
+	if err := f.sweep(t, ttl); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	f.assertOneCommit(t, "chore(preview): sweep: delete 1, unpin 2, sync 3",
+		"a-unpinned: delete", "b-closed: unpin backend-1", "c-closed: unpin backend-1",
+		"d-sync: sync", "e-sync: sync", "f-sync: sync")
+}
+
+func TestSweep_PushFailure(t *testing.T) {
+	capture := captureLogs(t)
+	f := &fakeAPI{
+		Metrics: metrics.New(),
+		previews: map[string]*preview.PreviewValues{
+			"a":         values(preview.ServiceEntry{Name: "backend-1"}),
+			"feature-x": values(pin("backend-1", pr42, recent), pin("backend-2", pr7, recent)),
+		},
+		prOpen:     map[string]bool{"acme/backend-2#7": true},
+		prHeadRef:  map[string]string{"acme/backend-2#7": "feature/x"},
+		beforePush: func(*storetest.Remote) error { return errors.New("push boom") },
+	}
+	err := f.sweep(t, ttl)
+	if err == nil || !strings.Contains(err.Error(), "push boom") {
+		t.Fatalf("err = %v, want the push error", err)
+	}
+	if got := f.g.subjects(); len(got) != 0 || len(f.upserts) != 0 || len(f.fanOuts) != 0 {
+		t.Errorf("pushed=%q upserts=%v fanOuts=%d, want nothing", got, f.upserts, len(f.fanOuts))
+	}
+	if logs := capture.find(slog.LevelInfo, "preview deleted"); len(logs) != 0 {
+		t.Errorf("preview deleted logged: %v", logs)
+	}
+	assertMetrics(t, f.Metrics, map[string]float64{
+		`badil_teardowns_total{result="error",trigger="sweep"}`: 1,
+	}, "badil_teardowns_total", "badil_sweep_previews_deleted_total")
 }
 
 func TestSweep_ListError(t *testing.T) {
 	captureLogs(t)
 	listErr := errors.New("list boom")
 	f := &fakeAPI{listErr: listErr}
-	if err := lifecycle.Sweep(context.Background(), f.api(), now, ttl); !errors.Is(err, listErr) {
+	if err := f.sweep(t, ttl); !errors.Is(err, listErr) {
 		t.Fatalf("err = %v, want %v", err, listErr)
 	}
 }

@@ -1,21 +1,8 @@
 package lifecycle
 
-import (
-	"context"
+import "context"
 
-	"github.com/badilhq/badil/internal/forge"
-	"github.com/badilhq/badil/internal/preview"
-)
-
-// RefusedByHolder exports refusedByHolder to the external tests.
-func RefusedByHolder(
-	ctx context.Context,
-	api ReconcileAPI,
-	ev Event,
-	pr *forge.PullRequest,
-	t preview.Resolution,
-	services []string,
-	label string,
-) (string, string, *preview.PreviewValues) {
-	return refusedByHolder(ctx, api, ev, pr, t, services, label)
+// TeardownPRs exports teardownPRs to the external tests.
+func TeardownPRs(ctx context.Context, api TeardownAPI, tt Target, slugs []string, reason string) {
+	teardownPRs(ctx, api, tt, slugs, reason)
 }

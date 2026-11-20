@@ -16,7 +16,7 @@ If other pins remain, the file is updated and the remaining PRs' comments are re
 
 Otherwise the file is deleted, without reading `badil.yaml`.
 
-Both writes use SHA optimistic locking + 409 retry, deciding update vs delete again on every retry.
+Both are part of the reconcile's one commit (see [Label flow](EVENTS.md#label-flow)). When its push is rejected because the remote head moved, update vs delete is decided again on the new head.
 
 ### Comment
 
@@ -63,13 +63,13 @@ The sweep lists `previews/*` and applies to each preview the first matching rule
 
 #### 1. No pinned service
 
-The file is deleted (`chore(preview): delete <slug> preview`). No comment.
+The file is deleted. No comment.
 
 #### 2. Expired
 
 This rule applies only when `CLEANUP_TTL` is set. It matches when the newest `updated-at` of the pinned services is older than `CLEANUP_TTL`.
 
-The file is deleted (`chore(preview): expire <slug> preview`), and its open PRs get a comment saying the preview expired. A pinned service without a parseable `updated-at` never counts, so such a preview never expires.
+The file is deleted, and its open PRs get a comment saying the preview expired. A pinned service without a parseable `updated-at` never counts, so such a preview never expires.
 
 #### 3. Closed or moved PRs
 
@@ -101,7 +101,7 @@ A webhook reconcile of the PR also unpins it from its branch slug and its named-
 
 #### 4. Sync with `badil.yaml`
 
-Every preview that rules 1 and 2 did not match is re-read after rule 3, whose teardowns may have changed or deleted it. It is rewritten as its projection on the catalog (see [Preview file writes](SERVICES.md#preview-file-writes)) when it differs, in one commit `chore(preview): sync <slug> with badil.yaml`, with SHA optimistic locking + 409 retry. A file that already matches is not written.
+Every preview that rules 1 and 2 did not match is re-read after rule 3, whose teardowns may have changed or deleted it. It is rewritten as its projection on the catalog (see [Preview file writes](SERVICES.md#preview-file-writes)) when it differs, in the sweep's commit. A file that already matches is not written.
 
 A preview whose rule 1–2 delete is cancelled by the re-check skips this step: the deploy that cancelled it already wrote the projection.
 
@@ -113,15 +113,17 @@ A `badil.yaml` change therefore reaches every preview within one sweep interval,
 
 A mistaken edit propagates the same way, except that pinned entries of a removed service stay until their PR leaves. A git revert of `badil.yaml` undoes it at the next sweep.
 
-After a catalog edit, one sweep makes one commit per preview whose file differs. It updates the comment of each open PR of the previews whose services, dependencies or hosts changed. All of this stays within the GitHub App's rate limit, and `badil_previews_synced_total` shows the volume.
+After a catalog edit, one sweep makes one commit for every preview whose file differs. It updates the comment of each open PR of the previews whose services, dependencies or hosts changed. All of this stays within the GitHub App's rate limit, and `badil_previews_synced_total` shows the volume.
 
-A failed sync write counts as a failed preview and is retried by the next sweep. A failed comment refresh is logged (`preview sync comment failed`) and not retried. That comment stays stale until the PR's next deploy or teardown, as for every comment fan-out.
+A failed sweep commit is retried by the next sweep. A failed comment refresh is logged (`preview sync comment failed`) and not retried. That comment stays stale until the PR's next deploy or teardown, as for every comment fan-out.
 
 ### Failures and races
 
-Rules 1 and 2 re-check their condition on the freshly read file, and again after every 409, so a deploy landing during the sweep cancels the delete.
+A sweep is one commit, `chore(preview): sweep: delete <d>, unpin <u>, sync <s>`, with the count of previews deleted, unpinned and kept, and synced, and one body line per change. The rules and step 4 are decided on the head the commit is made on. When the push is rejected because the remote head moved, they are decided again on the new head, so a deploy landing during the sweep cancels a delete.
 
-A failing preview read, rule 1–2 delete or step 4 sync is logged and the sweep goes on. The command then exits 1 and the Job fails without retrying (`backoffLimit: 0`). A failing closed-PR teardown is only logged. The next scheduled run retries both.
+The PR states rule 3 needs are read once, before the commit, one read per PR. A PR that a retried attempt finds pinned without its state read keeps its pins until the next sweep. The comments are posted once the commit is pushed.
+
+A preview file that can't be read is logged and the sweep goes on. The command then exits 1 and the Job fails without retrying (`backoffLimit: 0`). A failing closed-PR teardown is only logged. A failed commit fails the whole sweep. The next scheduled run retries all of them.
 
 Comment fan-outs (deploy, teardown, expiry) skip closed PRs, so a closed PR keeps its teardown comment.
 
@@ -141,7 +143,7 @@ The `webhook push` log of any other push carries its `reason`. Every push is ans
 
 badil makes the next read of its gitops clone check the remote, so it reads the pushed commit. In the background, it reads `badil.yaml`'s blob SHA on the default branch. When it equals the SHA of the last push sync (kept in memory, empty at startup), it stops (`config sync skipped`, reason `badil.yaml unchanged`). badil's own deploy, teardown and sync commits are pushes too, and stop there.
 
-Otherwise every preview is synced with that content, and its SHA is kept. The SHA is kept also when a preview failed (the sweep retries it) or the content can't be parsed (the same content would fail again). A `badil.yaml` that can't be read, or previews that can't be listed, keep no SHA, so the next push retries.
+Otherwise every preview is synced with that content, in one commit, and its SHA is kept. The SHA is kept also when a preview failed (the sweep retries it) or the content can't be parsed (the same content would fail again). A `badil.yaml` that can't be read, or a commit that can't be pushed, keep no SHA, so the next push retries.
 
 ### `POST /v1/sync`
 
@@ -151,10 +153,10 @@ Otherwise every preview is synced with that content, and its SHA is kept. The SH
 
 One config sync runs at a time in the server. Pushes and `/v1/sync` calls each wait their turn, in no guaranteed order. A push whose `badil.yaml` SHA a run before it synced stops at the SHA check, and each `/v1/sync` call gets its own answer.
 
-A run is capped at 10 minutes (the sweep's bound), counted from when it starts running. It does not wait for reconciles nor block them, and the sweep's own step 4 runs beside it. SHA optimistic locking keeps concurrent writes safe.
+A run is one commit: `chore(preview): sync <slug> with badil.yaml` for one preview, `chore(preview): sync <n> previews with badil.yaml` for several. It is capped at 10 minutes (the sweep's bound), counted from when it starts running. Its commit is serialized with the other operations of the process, and a push rejected because the remote head moved is decided again on the new head, so concurrent writes, from the server or the cleanup CronJob, are safe.
 
 Shutdown waits for a push sync like for reconciles (up to 25s).
 
 Each run logs `config sync finished` (with `synced`, `unchanged` and `failed` counts) or `config sync failed`. A failed preview logs `config sync preview failed`.
 
-A large `badil.yaml` change makes the same burst of commits and comments as a sweep.
+A large `badil.yaml` change makes the same burst of comments as a sweep, in one commit.

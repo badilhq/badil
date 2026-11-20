@@ -3,18 +3,14 @@ package store_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"maps"
-	"net/http"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
-	"github.com/prometheus/client_golang/prometheus/testutil"
 	"gopkg.in/yaml.v3"
 
-	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
 )
@@ -153,62 +149,6 @@ func TestGetPreview_NotFound(t *testing.T) {
 	}
 }
 
-func TestWritePreview_Create(t *testing.T) {
-	f := newGitopsFake(t, nil)
-	c := f.open(t)
-	vals := preview.BuildPreviewValues("backend-1", "abc1234567890",
-		[]string{"backend-1", "backend-2"}, sampleInputs())
-
-	commitURL, err := c.WritePreview(context.Background(), "slug", vals, "", "chore(preview): create slug preview")
-	if err != nil {
-		t.Fatalf("WritePreview: %v", err)
-	}
-	reqs := f.requests()
-	if len(reqs) != 1 || reqs[0].method != http.MethodPut || reqs[0].sha != "" {
-		t.Errorf("requests = %+v, want one PUT without sha", reqs)
-	}
-	if commitURL != fakeCommitURL {
-		t.Errorf("commitURL = %q", commitURL)
-	}
-}
-
-func TestWritePreview_Update(t *testing.T) {
-	f := newGitopsFake(t, nil)
-	c := f.open(t)
-	vals := preview.BuildPreviewValues("backend-1", "newsha", []string{"backend-1"}, sampleInputs())
-	commitURL, err := c.WritePreview(
-		context.Background(),
-		"slug",
-		vals,
-		"old-blob",
-		"chore(preview): update backend-1 in slug",
-	)
-	if err != nil {
-		t.Fatalf("WritePreview: %v", err)
-	}
-	if reqs := f.requests(); len(reqs) != 1 || reqs[0].sha != "old-blob" {
-		t.Errorf("requests = %+v, want one at sha old-blob", reqs)
-	}
-	if commitURL != fakeCommitURL {
-		t.Errorf("commitURL = %q", commitURL)
-	}
-}
-
-func TestWritePreview_Unauthorized(t *testing.T) {
-	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
-		t.Run(fmt.Sprintf("status_%d", status), func(t *testing.T) {
-			f := newGitopsFake(t, nil)
-			f.statuses = []int{status}
-			c := f.open(t)
-			vals := preview.BuildPreviewValues("backend-1", "sha", []string{"backend-1"}, sampleInputs())
-			_, err := c.WritePreview(context.Background(), "slug", vals, "", "msg")
-			if !errors.Is(err, store.ErrUnauthorized) {
-				t.Errorf("expected ErrUnauthorized, got %v", err)
-			}
-		})
-	}
-}
-
 // hostURLs exposes backend-1 under the domain 127.0.0.1.nip.io.
 func hostURLs() preview.URLConfig {
 	return preview.URLConfig{Domain: "127.0.0.1.nip.io", Expose: map[string]string{"backend-1": "/"}}
@@ -224,7 +164,7 @@ func testCatalog(services ...string) *store.ServiceCatalog {
 	return &store.ServiceCatalog{Catalog: preview.Catalog{Services: services, Repos: repos}, URLs: hostURLs()}
 }
 
-func TestWritePreviewWithRetry_ConflictThenSuccess(t *testing.T) {
+func TestDeploy_ConflictThenSuccess(t *testing.T) {
 	const initialFile = `services:
   - name: backend-1
     commitSha: oldsha
@@ -251,7 +191,7 @@ func TestWritePreviewWithRetry_ConflictThenSuccess(t *testing.T) {
       cicd.pipeline.run.url: https://github.com/x/y/actions/runs/0
   - name: backend-2
 `
-	f := newFileFake(t, slugPath, []string{initialFile, refreshedFile}, []int{http.StatusConflict}, nil)
+	f := newFileFake(t, slugPath, []string{initialFile, refreshedFile}, 1, nil)
 	c := f.open(t)
 	in := sampleInputs()
 	in.CommitSha = "newsha"
@@ -259,29 +199,20 @@ func TestWritePreviewWithRetry_ConflictThenSuccess(t *testing.T) {
 	catalog := testCatalog("backend-1", "backend-2")
 	catalog.Branches = map[string]string{"backend-2": "develop"}
 
-	result, err := c.WritePreviewWithRetry(
-		context.Background(), "slug",
-		catalog,
-		"backend-1", "newsha", in,
-		"chore(preview): create slug preview",
-		"chore(preview): update backend-1 in slug",
-		false,
-	)
+	result, out, err := deploy(c, "slug", catalog, "backend-1", "newsha", in, false)
 	if err != nil {
-		t.Fatalf("WritePreviewWithRetry: %v", err)
+		t.Fatalf("Apply: %v", err)
 	}
-	reqs := f.requests()
-	if len(reqs) != 2 {
-		t.Fatalf("write attempts = %d, want 2", len(reqs))
+	if n := f.pushCount(); n != 2 {
+		t.Fatalf("pushes = %d, want 2", n)
 	}
-	if want := blobSHA(refreshedFile); reqs[1].sha != want {
-		t.Errorf("retry sha = %v, want %v, the re-read file's", reqs[1].sha, want)
+	// The retry merged the deploy into the file the lost race committed.
+	if got := result.Values.Services[0].Metadata.CreatedAt; got != "2026-05-26T09:00:00Z" {
+		t.Errorf("created-at = %q, want the re-read file's", got)
 	}
-	if result.CommitURL != fakeCommitURL {
-		t.Errorf("commitURL = %q", result.CommitURL)
-	}
-	if result.CommitMessage != "chore(preview): update backend-1 in slug" {
-		t.Errorf("commitMessage = %q, want update form", result.CommitMessage)
+	if commits := f.remote.Commits(); out.Commit != commits[0].Hash || commits[1].Tree[slugPath] != refreshedFile {
+		t.Errorf("result commit = %s, want the head %s on the file the lost race committed",
+			out.Commit, commits[0].Hash)
 	}
 	if len(result.Values.Services) != 2 {
 		t.Fatalf("returned vals = %+v, want 2 services", result.Values)
@@ -294,7 +225,7 @@ func TestWritePreviewWithRetry_ConflictThenSuccess(t *testing.T) {
 	}
 	// The re-fetched file has no apiVersion, repoURL or branch: the retry
 	// write must carry the catalog's facts.
-	written := reqs[1].content
+	written := f.written()
 	assertCatalogFacts(t, decode(t, written), []string{
 		"backend-1 https://github.com/acme/backend-1.git main",
 		"backend-2 https://github.com/acme/backend-2.git develop",
@@ -342,32 +273,18 @@ func assertWrittenHosts(t *testing.T, vals preview.PreviewValues, written, slug 
 	}
 }
 
-func TestWritePreviewWithRetry_FreshCreateUsesCatalog(t *testing.T) {
-	f := newGitopsFake(t, nil)
+func TestDeploy_FreshCreateUsesCatalog(t *testing.T) {
+	f := newFileFake(t, "previews/fresh-slug/values.yaml", nil, 0, nil)
 	c := f.open(t)
 	catalog := testCatalog("backend-1", "backend-2", "front")
 	catalog.Repos["front"] = "https://github.com/acme/front"
 	catalog.Branches = map[string]string{"backend-2": "develop"}
-	result, err := c.WritePreviewWithRetry(
-		context.Background(), "fresh-slug",
-		catalog,
-		"backend-1", "abc1234567890", sampleInputs(),
-		"chore(preview): create fresh-slug preview",
-		"chore(preview): update backend-1 in fresh-slug",
-		false,
-	)
+	result, _, err := deploy(c, "fresh-slug", catalog, "backend-1", "abc1234567890", sampleInputs(), false)
 	if err != nil {
-		t.Fatalf("WritePreviewWithRetry: %v", err)
+		t.Fatalf("Apply: %v", err)
 	}
-	reqs := f.requests()
-	if len(reqs) != 1 || reqs[0].sha != "" {
-		t.Fatalf("requests = %+v, want one create without sha", reqs)
-	}
-	if result.CommitURL != fakeCommitURL {
-		t.Errorf("commitURL = %q", result.CommitURL)
-	}
-	if result.CommitMessage != "chore(preview): create fresh-slug preview" {
-		t.Errorf("commitMessage = %q, want create form", result.CommitMessage)
+	if n := f.pushCount(); n != 1 || !result.Created {
+		t.Fatalf("pushes, Created = %d, %v; want one create", n, result.Created)
 	}
 	if len(result.Values.Services) != 3 {
 		t.Fatalf("vals = %+v, want 3 services (full catalog)", result.Values)
@@ -380,7 +297,7 @@ func TestWritePreviewWithRetry_FreshCreateUsesCatalog(t *testing.T) {
 			t.Errorf("main-tracking entry %q polluted: %+v", svc.Name, svc)
 		}
 	}
-	written := reqs[0].content
+	written := f.written()
 	assertCatalogFacts(t, decode(t, written), []string{
 		"backend-1 https://github.com/acme/backend-1.git main",
 		"backend-2 https://github.com/acme/backend-2.git develop",
@@ -406,8 +323,8 @@ func decode(t *testing.T, content string) preview.PreviewValues {
 	return vals
 }
 
-// assertWritten fails t unless s received one write whose content parses to
-// want (preview.Equal).
+// assertWritten fails t unless the file s wrote parses to want
+// (preview.Equal).
 func assertWritten(t *testing.T, s *writeServer, want preview.PreviewValues) {
 	t.Helper()
 	if got := decode(t, s.written()); !preview.Equal(got, want) {
@@ -456,10 +373,10 @@ dependencies: []
 // slugPath is the values file of the preview slug.
 const slugPath = "previews/slug/values.yaml"
 
-// writeServer is the gitops repo of a write to the preview slug: its file is
+// writeServer is the gitops repo of a deploy to the preview slug: its file is
 // files[0] (none when files is empty or files[0] is ""). The first conflicts
-// PUTs are answered 409, each once the next file of files is committed (the
-// last one repeats; "" removes the file); the next PUTs succeed.
+// pushes lose a race to a commit of the next file of files (the last one
+// repeats; "" removes the file); the next pushes succeed.
 type writeServer struct {
 	files     []string
 	conflicts int
@@ -468,25 +385,21 @@ type writeServer struct {
 
 func (s *writeServer) start(t *testing.T, opts ...store.Option) *store.GitHubStore {
 	t.Helper()
-	s.fake = newFileFake(t, slugPath, s.files, slices.Repeat([]int{http.StatusConflict}, s.conflicts), nil)
+	s.fake = newFileFake(t, slugPath, s.files, s.conflicts, nil)
 	return s.fake.open(t, opts...)
 }
 
-// puts returns the number of PUTs received.
+// puts returns the number of pushes.
 func (s *writeServer) puts() int {
-	return len(s.fake.requests())
+	return s.fake.pushCount()
 }
 
-// written returns the content of the last PUT, "" when there was none.
+// written returns the file on the remote, "" when there is none.
 func (s *writeServer) written() string {
-	reqs := s.fake.requests()
-	if len(reqs) == 0 {
-		return ""
-	}
-	return reqs[len(reqs)-1].content
+	return s.fake.written()
 }
 
-func TestWritePreviewWithRetry_SkipUnchanged(t *testing.T) {
+func TestDeploy_SkipUnchanged(t *testing.T) {
 	tests := []struct {
 		name          string
 		files         []string
@@ -547,12 +460,12 @@ func TestWritePreviewWithRetry_SkipUnchanged(t *testing.T) {
 			wantPuts:      1,
 		},
 		{
-			name:  "unchanged after a 409 re-fetch",
+			name:  "unchanged after a lost push",
 			files: []string{pinnedFile("abc1234567890", "0000000old"), pinnedFile()}, conflicts: 1, skipUnchanged: true,
 			wantUnchanged: true, wantPuts: 1,
 		},
 		{
-			name: "changed after a 409 re-fetch",
+			name: "changed after a lost push",
 			files: []string{
 				pinnedFile("abc1234567890", "0000000old"),
 				pinnedFile("abc1234567890", "0000000other"),
@@ -569,45 +482,44 @@ func TestWritePreviewWithRetry_SkipUnchanged(t *testing.T) {
 				tt.catalog(catalog)
 			}
 
-			result, err := c.WritePreviewWithRetry(
-				context.Background(), "slug", catalog,
-				"backend-1", "abc1234567890", sampleInputs(), "create", "update", tt.skipUnchanged,
+			result, out, err := deploy(
+				c, "slug", catalog, "backend-1", "abc1234567890", sampleInputs(), tt.skipUnchanged,
 			)
 			if err != nil {
-				t.Fatalf("WritePreviewWithRetry: %v", err)
+				t.Fatalf("Apply: %v", err)
 			}
 			if puts := s.puts(); puts != tt.wantPuts {
 				t.Errorf("puts = %d, want %d", puts, tt.wantPuts)
 			}
-			assertSkipResult(t, result, tt.wantUnchanged)
+			assertSkipResult(t, result, out, tt.wantUnchanged)
 		})
 	}
 }
 
-// assertSkipResult checks result is an update written as "update", or, when
+// assertSkipResult checks result is an update pushed as one commit, or, when
 // unchanged, the fetched file with no commit.
-func assertSkipResult(t *testing.T, result *store.WriteResult, unchanged bool) {
+func assertSkipResult(t *testing.T, result *store.WriteResult, out store.Result, unchanged bool) {
 	t.Helper()
 	if result.Unchanged != unchanged || result.Created {
 		t.Errorf("Unchanged, Created = %v, %v; want %v, false", result.Unchanged, result.Created, unchanged)
 	}
+	if out.NoOp != unchanged {
+		t.Errorf("NoOp = %v, want %v", out.NoOp, unchanged)
+	}
 	if !unchanged {
-		if result.CommitURL != fakeCommitURL || result.CommitMessage != "update" {
-			t.Errorf("CommitURL, CommitMessage = %q, %q", result.CommitURL, result.CommitMessage)
+		if out.Subject != "deploy backend-1 to slug" ||
+			out.URL != "https://github.com/acme/gitops/commit/"+out.Commit {
+			t.Errorf("Subject, URL = %q, %q", out.Subject, out.URL)
 		}
 		return
-	}
-	if result.CommitURL != "" || result.CommitMessage != "" {
-		t.Errorf("CommitURL, CommitMessage = %q, %q; want empty", result.CommitURL, result.CommitMessage)
 	}
 	if got := result.Values.Services[0].Metadata.UpdatedAt; got != "2026-05-26T09:00:00Z" {
 		t.Errorf("Values updated-at = %q, want the fetched file's", got)
 	}
 }
 
-// TestWritePreviewWithRetry_Created checks Created and that only a create
-// increments the previews gauge, from 1.
-func TestWritePreviewWithRetry_Created(t *testing.T) {
+// TestDeploy_Created checks Created.
+func TestDeploy_Created(t *testing.T) {
 	tests := []struct {
 		name      string
 		files     []string
@@ -616,50 +528,34 @@ func TestWritePreviewWithRetry_Created(t *testing.T) {
 	}{
 		{name: "create", want: true},
 		{name: "update", files: []string{pinnedFile("abc1234567890", "0000000old")}},
-		{name: "create lost to a 409", files: []string{"", pinnedFile("abc1234567890", "0000000old")}, conflicts: 1},
+		{name: "create lost to a push race", files: []string{"", pinnedFile("abc1234567890", "0000000old")}, conflicts: 1},
 		{name: "unchanged", files: []string{pinnedFile()}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &writeServer{files: tt.files, conflicts: tt.conflicts}
-			m := metrics.New()
-			m.PreviewsListed(1)
-			c := s.start(t, store.WithMetrics(m))
+			c := s.start(t)
 
-			result, err := c.WritePreviewWithRetry(
-				context.Background(), "slug", testCatalog("backend-1", "backend-2"),
-				"backend-1", "abc1234567890", sampleInputs(), "create", "update", tt.name == "unchanged",
+			result, _, err := deploy(
+				c, "slug", testCatalog("backend-1", "backend-2"), "backend-1", "abc1234567890", sampleInputs(),
+				tt.name == "unchanged",
 			)
 			if err != nil {
-				t.Fatalf("WritePreviewWithRetry: %v", err)
+				t.Fatalf("Apply: %v", err)
 			}
 			if result.Created != tt.want {
 				t.Errorf("Created = %v, want %v", result.Created, tt.want)
-			}
-			want := "1"
-			if tt.want {
-				want = "2"
-			}
-			expected := "# HELP badil_previews Previews in the gitops repo: listed at startup, " +
-				"counted on each create and delete by this server, and reset by each in-server cleanup sweep.\n" +
-				"# TYPE badil_previews gauge\nbadil_previews " + want + "\n"
-			if cmpErr := testutil.GatherAndCompare(
-				m.Gatherer(),
-				strings.NewReader(expected),
-				"badil_previews",
-			); cmpErr != nil {
-				t.Error(cmpErr)
 			}
 		})
 	}
 }
 
-// TestWritePreviewWithRetry_FollowsCatalog checks that a deploy update writes
+// TestDeploy_FollowsCatalog checks that a deploy update writes
 // apiVersion and every catalog service in catalog order with its repoURL and
 // branch from the catalog, then keeps a pinned entry of a removed service as
 // it is (its imageTag and chart as last written), and drops an unpinned one
 // and a pinned one without repoURL.
-func TestWritePreviewWithRetry_FollowsCatalog(t *testing.T) {
+func TestDeploy_FollowsCatalog(t *testing.T) {
 	const file = `services:
   - name: gone-pinned
     repoURL: https://github.com/acme/gone-pinned.git
@@ -693,12 +589,9 @@ func TestWritePreviewWithRetry_FollowsCatalog(t *testing.T) {
 	catalog := testCatalog("backend-1", "backend-2")
 	catalog.Branches = map[string]string{"backend-2": "develop"}
 
-	result, err := c.WritePreviewWithRetry(
-		context.Background(), "slug", catalog,
-		"backend-1", "abc1234567890", sampleInputs(), "create", "update", true,
-	)
+	result, _, err := deploy(c, "slug", catalog, "backend-1", "abc1234567890", sampleInputs(), true)
 	if err != nil {
-		t.Fatalf("WritePreviewWithRetry: %v", err)
+		t.Fatalf("Apply: %v", err)
 	}
 	if result.Unchanged {
 		t.Fatal("Unchanged = true, want a write")
@@ -747,20 +640,17 @@ func TestWritePreviewWithRetry_FollowsCatalog(t *testing.T) {
 	assertWritten(t, s, decode(t, want))
 }
 
-// TestWritePreviewWithRetry_AddsMissingService checks that a deploy to an
+// TestDeploy_AddsMissingService checks that a deploy to an
 // existing preview writes a catalog service the file lacks as a
 // branch-tracking entry, in catalog order.
-func TestWritePreviewWithRetry_AddsMissingService(t *testing.T) {
+func TestDeploy_AddsMissingService(t *testing.T) {
 	s := &writeServer{files: []string{pinnedFile()}}
 	c := s.start(t)
 	catalog := testCatalog("backend-1", "front", "backend-2")
 
-	result, err := c.WritePreviewWithRetry(
-		context.Background(), "slug", catalog,
-		"backend-1", "abc1234567890", sampleInputs(), "create", "update", true,
-	)
+	result, _, err := deploy(c, "slug", catalog, "backend-1", "abc1234567890", sampleInputs(), true)
 	if err != nil {
-		t.Fatalf("WritePreviewWithRetry: %v", err)
+		t.Fatalf("Apply: %v", err)
 	}
 	if result.Unchanged {
 		t.Fatal("Unchanged = true, want a write")
@@ -784,20 +674,17 @@ func TestWritePreviewWithRetry_AddsMissingService(t *testing.T) {
 	}
 }
 
-// TestWritePreviewWithRetry_BranchChangeWritten checks that a catalog branch
+// TestDeploy_BranchChangeWritten checks that a catalog branch
 // change is written even when the commit is unchanged.
-func TestWritePreviewWithRetry_BranchChangeWritten(t *testing.T) {
+func TestDeploy_BranchChangeWritten(t *testing.T) {
 	s := &writeServer{files: []string{pinnedFile()}}
 	c := s.start(t)
 	catalog := testCatalog("backend-1", "backend-2")
 	catalog.Branches = map[string]string{"backend-2": "develop"}
 
-	result, err := c.WritePreviewWithRetry(
-		context.Background(), "slug", catalog,
-		"backend-1", "abc1234567890", sampleInputs(), "create", "update", true,
-	)
+	result, _, err := deploy(c, "slug", catalog, "backend-1", "abc1234567890", sampleInputs(), true)
 	if err != nil {
-		t.Fatalf("WritePreviewWithRetry: %v", err)
+		t.Fatalf("Apply: %v", err)
 	}
 	if result.Unchanged || result.Values.Services[1].Branch != "develop" {
 		t.Fatalf("result = %+v, want a write with backend-2 on develop", result)
@@ -810,10 +697,10 @@ func TestWritePreviewWithRetry_BranchChangeWritten(t *testing.T) {
 	}
 }
 
-// TestWritePreviewWithRetry_RendererSettings checks that a deploy writes the
+// TestDeploy_RendererSettings checks that a deploy writes the
 // catalog's namespace metadata and, on every entry, its chart settings with
 // their defaults applied and its image tag format expanded.
-func TestWritePreviewWithRetry_RendererSettings(t *testing.T) {
+func TestDeploy_RendererSettings(t *testing.T) {
 	const sha = "f913b6cb1a2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f"
 	s := &writeServer{}
 	c := s.start(t)
@@ -824,10 +711,8 @@ func TestWritePreviewWithRetry_RendererSettings(t *testing.T) {
 	}
 	catalog.Namespace = &preview.NamespaceMetadata{Labels: map[string]string{"team": "platform"}}
 
-	if _, err := c.WritePreviewWithRetry(
-		context.Background(), "slug", catalog, "backend-1", sha, sampleInputs(), "create", "update", false,
-	); err != nil {
-		t.Fatalf("WritePreviewWithRetry: %v", err)
+	if _, _, err := deploy(c, "slug", catalog, "backend-1", sha, sampleInputs(), false); err != nil {
+		t.Fatalf("Apply: %v", err)
 	}
 	got := decode(t, s.written())
 	wantNS := preview.NamespaceMetadata{Labels: map[string]string{"team": "platform"}}

@@ -16,6 +16,8 @@ badil answers `opened`, `reopened`, `synchronize`, `labeled`, `unlabeled` and `c
 4. The PR's labels resolve its target preview (see [Target preview](#target-preview)).
 5. The PR is torn down from every other preview it may still be pinned in (the [cleanup set](#cleanup-set)), before anything is deployed.
 6. An open PR with a target deploys to the target slug (see [Deploy step](#deploy-step)).
+
+Steps 5 and 6 are one commit, pushed again on a moved remote head (see [The gitops repo is the interface](ARCHITECTURE.md#the-gitops-repo-is-the-interface)). Its subject is `chore(preview): deploy <owner>/<repo>#<n> to <slug>` when a service was deployed, followed by `, unpin from <slug>, …` when the PR left other previews, and `chore(preview): unpin <owner>/<repo>#<n> from <slug>, …` otherwise. Its body has one line per change, by slug: `<slug>: pin <service>@<sha7>`, `<slug>: unpin <service>` or `<slug>: delete`. The PR comments are posted once the commit is pushed, one per PR and preview, and link to it.
 7. An open PR with conflicting named labels gets no preview. Its comment is replaced last by:
 
    ```
@@ -37,14 +39,14 @@ An open PR with a target deploys, at the PR's head SHA, in catalog order, to the
 - every catalog service of its repo;
 - or, when its services declare `paths`, the services it touches, after unpinning there its entries for the ones it no longer touches (see [Path filters](SERVICES.md#path-filters)).
 
-It goes through the manual flow's write and comment fan-out (see [`POST /v1/deploy`](API.md#post-v1deploy)). It deploys nothing when one of these holds:
+It writes the services as the manual flow does (see [`POST /v1/deploy`](API.md#post-v1deploy)), in the reconcile's commit, then posts the preview's summary once on its open PRs. It deploys nothing when one of these holds:
 
 - another PR holds one of its services there (see [One PR per service](#one-pr-per-service));
 - the target does not exist and the preview cap is reached (see [Preview cap](#preview-cap)).
 
-A failed service is logged and the next one still deploys.
+A failed commit fails the reconcile: nothing of it is written.
 
-A service whose write would change nothing but its `updated-at` writes no commit and posts no comment. Unchanged means the same SHA, host and PR metadata, on the first read and after a 409 re-fetch. It logs `preview deploy unchanged`, unless step 5 removed the PR from another preview. When every service is unchanged, the reconcile is skipped with reason `already deployed`.
+A service whose write would change nothing but its `updated-at` is not written and posts no comment. Unchanged means the same SHA, host and PR metadata, on the head the commit is made on, decided again on every push attempt. It logs `preview deploy unchanged`, unless step 5 removed the PR from another preview. When every service is unchanged, the reconcile is skipped with reason `already deployed`.
 
 A PR comment that failed to post, or that a failed teardown left stale, is therefore not repaired by a later label event at the same head SHA. The next push to the PR or a manual `/v1/deploy` repairs it.
 
@@ -109,11 +111,11 @@ Any held entry refuses the whole PR, for every target, branch or named, since tw
 `<service>` is already pinned in this preview by <holder PR URL>. Once that pull request leaves this preview, push to this pull request or re-add its label. If that pull request is closed, or now carries a different `<label>:` label, it is released within the next cleanup run.
 ```
 
-The reconcile logs `preview reconcile skipped` with reason `service held by another pr` and a `holder` attribute. A read error other than 404 logs `preview reconcile failed` and deploys nothing.
+The reconcile logs `preview reconcile skipped` with reason `service held by another pr` and a `holder` attribute. A preview file that can't be read logs `preview reconcile failed` and deploys nothing.
 
 The holder PR is never read: a holder left by a missed event is released by the sweeper. A refused PR is not retried when the holder leaves. Since the cleanup runs first, it has already left its previous preview, as its labels ask.
 
-The check assumes `replicaCount: 1` (`charts/badil/values.yaml`). Reconciles are serialized within the replica, so no other reconcile writes between the read and the write. `/v1/deploy` runs outside that queue and skips the check: it stays last-writer-wins and can overwrite a holder's pin.
+The check is decided on the head the reconcile's commit is made on, and again on every push attempt: a push is rejected when any other commit landed since, whoever made it. So it does not rely on reconciles being serialized in one replica. `/v1/deploy` skips the check: it stays last-writer-wins and can overwrite a holder's pin.
 
 ## Preview cap
 
@@ -127,13 +129,13 @@ In the label flow, the check runs after the holder check, when the target's `val
 The preview limit (<max>) is reached. Once a preview is torn down, push to this pull request or re-add its label.
 ```
 
-It logs `preview reconcile skipped` with reason `preview limit reached` and a `max_previews` attribute. A list error logs `preview reconcile failed` and deploys nothing.
+It logs `preview reconcile skipped` with reason `preview limit reached` and a `max_previews` attribute.
 
 A refused PR is not retried when a slot frees. Since the cleanup runs first, it has already left its previous preview.
 
 The cap check of `/v1/deploy` is described in [`POST /v1/deploy`](API.md#post-v1deploy).
 
-The cap is soft. The check and the write are not atomic, and `/v1/deploy` runs outside the reconcile queue, so a concurrent manual deploy and reconcile can both pass the check and each exceed the cap by one.
+The check is decided on the head the commit is made on, and again on every push attempt, so a concurrent deploy that creates a preview is counted.
 
 The check reads the gitops clone, so it costs no extra GitHub call.
 
@@ -141,15 +143,6 @@ The check reads the gitops clone, so it costs no extra GitHub call.
 
 Background reconciles run one at a time, in no guaranteed order. A reconcile reads the PR only once it runs.
 
-A reconcile has a 20s budget, counted from when it starts running. Its steps share it, in this order:
-
-1. its cleanup teardowns;
-2. the files listing of [path filters](SERVICES.md#path-filters);
-3. the holder check;
-4. the preview cap check;
-5. the unpin of untouched services;
-6. its services.
-
-A service not reached in time is logged as failed.
+A reconcile has a 20s budget, counted from when it starts running. It covers the PR and files reads of [path filters](SERVICES.md#path-filters), then its commit with every push attempt, then its comments. The commit holds, in this order, its cleanup teardowns, the holder check, the preview cap check, the unpin of untouched services and its services. A reconcile whose commit is not pushed in time fails.
 
 Shutdown waits up to 25s for queued and running jobs. Jobs still queued then are dropped, and the cleanup sweeper catches missed teardowns of closed PRs.

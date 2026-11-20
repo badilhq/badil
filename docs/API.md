@@ -35,7 +35,7 @@ The manual trigger: it pins one service of a preview at a commit.
 - **Auth:** `Authorization: Bearer $BADIL_DEPLOY_TOKEN`.
 - **Request:** a JSON object with `service`, `head_ref`, `commit_sha`, `pr_author`, `pr_url`, `pr_number` and `workflow_run_url`.
 - **Response:** `{ "preview_slug", "gitops_commit_url", "warnings": [...] }`. `warnings` holds the PR comment fan-out failures.
-- **Errors:** `409 {"error": "preview limit (<max>) reached"}` when `preview.maxPreviews` is reached and `previews/<slug>/` does not exist. Other read or list errors are answered like the write's.
+- **Errors:** `409 {"error": "preview limit (<max>) reached"}` when `preview.maxPreviews` is reached and `previews/<slug>/` does not exist. A write the gitops remote refused for badil's credentials answers 502.
 
 `service` must be a service of `badil.yaml`. `commit_sha` accepts any value: send the full SHA, or a `{sha7}`/`{sha8}` image tag will not match the one CI pushed (see [`imageTag`](CONFIGURATION.md#imagetag)).
 
@@ -47,18 +47,18 @@ A deploy runs these steps:
 2. Slugify `head_ref`.
 3. Refuse a new preview past the preview cap with 409 (see [Preview cap check](#preview-cap-check)).
 4. Read or bootstrap `previews/<slug>/values.yaml`.
-5. Write it, with SHA optimistic locking + 409 retry.
+5. Write it in one commit, `chore(preview): deploy <service>@<sha7> to <slug>`, pushed again on a moved remote head (the push retry). Steps 3 and 4 are decided again on every push attempt.
 6. Fan out the PR comment, best-effort: failures are returned as `warnings`.
 
-It always writes, even when only `updated-at` changes, so a repeated deploy of the same commit refreshes the TTL clock.
+It always writes, even when only `updated-at` changes, so a repeated deploy of the same commit refreshes the TTL clock. `gitops_commit_url` is the URL of the pushed commit, `https://github.com/<GITOPS_REPO>/commit/<sha>`.
 
 A manual deploy runs outside the reconcile queue and skips the one-PR-per-service check (see [One PR per service](EVENTS.md#one-pr-per-service)). The cleanup sweep may later unpin it (see [Manual deploy pins](CLEANUP.md#manual-deploy-pins)).
 
 ### Preview cap check
 
-After the catalog check, the deploy reads `previews/<slug>/values.yaml`. When it does not exist, it lists the previews.
+The deploy reads `previews/<slug>/values.yaml` on the head its commit is made on. When it does not exist, it lists the previews there.
 
-At the cap, it answers `409 {"error": "preview limit (<max>) reached"}`, writes nothing and logs `deploy failed` with `op` `preview limit`. Other read or list errors are answered like the write's, with `op` `read preview` or `list previews`.
+At the cap, it answers `409 {"error": "preview limit (<max>) reached"}`, writes nothing and logs `deploy failed` with `op` `preview limit`. A failed write is logged with `op` `write preview`.
 
 The cap is soft: see [Preview cap](EVENTS.md#preview-cap).
 
