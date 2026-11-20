@@ -149,7 +149,7 @@ func (f *fakeGitops) TeardownPreviewWithRetry(
 	if len(f.teardownResult.Removed) == 0 || f.teardownResult.Deleted {
 		return f.teardownResult, nil
 	}
-	// Like the client, an update carries the catalog it was projected on.
+	// Like the store, an update carries the catalog it was projected on.
 	res := *f.teardownResult
 	if f.badilYAML != "" {
 		res.Catalog, _ = store.ParseCatalog([]byte(f.badilYAML))
