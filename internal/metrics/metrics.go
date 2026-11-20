@@ -77,7 +77,7 @@ func New() *Metrics {
 		gitopsDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: namespace,
 			Name:      "gitops_operation_duration_seconds",
-			Help:      "Duration of gitops repo writes, teardowns and syncs, retries included.",
+			Help:      "Duration of gitops repo writes, teardowns and syncs, retries included, and of the gitops clone's git clone, ls-remote and fetch.",
 			Buckets:   prometheus.DefBuckets,
 		}, []string{"op", labelResult}),
 		sweepRuns: prometheus.NewCounterVec(prometheus.CounterOpts{

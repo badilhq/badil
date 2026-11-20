@@ -27,36 +27,59 @@ var (
 	ErrUnauthorized = errors.New("gitops: unauthorized")
 )
 
-// GitHubStore is the gitops repo read and written through the GitHub contents
-// API, with a go-github client scoped to its owner/repo.
+// GitHubStore is the gitops repo read from a git clone and written through the
+// GitHub contents API, with a go-github client scoped to its owner/repo.
 type GitHubStore struct {
 	gh      *gh.Client
 	owner   string
 	repo    string
 	metrics *metrics.Metrics
+	clone   *gitClone
 }
 
-// Option configures a GitHubStore built by NewClient.
+// Option configures a GitHubStore built by Open.
 type Option func(*GitHubStore)
 
 // WithMetrics times WritePreviewWithRetry, TeardownPreviewWithRetry (and
-// UnpinServicesWithRetry, as the teardown operation) and
-// SyncPreviewWithRetry in m, and counts the previews WritePreviewWithRetry
-// creates.
+// UnpinServicesWithRetry, as the teardown operation), SyncPreviewWithRetry
+// and the clone's git clone, ls-remote and fetch in m, and counts the
+// previews WritePreviewWithRetry creates.
 func WithMetrics(m *metrics.Metrics) Option {
 	return func(c *GitHubStore) {
 		c.metrics = m
 	}
 }
 
-// NewClient binds the gh client to owner/repo. owner is the GitHub
-// organization or user; repo is the bare repository name.
-func NewClient(client *gh.Client, owner, repo string, opts ...Option) *GitHubStore {
+// Open clones the gitops repo as clone says and binds the gh client to
+// owner/repo, which it writes to. owner is the GitHub organization or user;
+// repo is the bare repository name. The clone is timed as the clone
+// operation; a failed clone is an error, ErrUnauthorized when the remote or
+// the credential provider refused it.
+func Open(
+	ctx context.Context, client *gh.Client, owner, repo string, clone CloneConfig, opts ...Option,
+) (*GitHubStore, error) {
 	c := &GitHubStore{gh: client, owner: owner, repo: repo}
 	for _, opt := range opts {
 		opt(c)
 	}
-	return c
+	cl, err := openClone(ctx, clone, c.observe)
+	if err != nil {
+		return nil, err
+	}
+	c.clone = cl
+	return c, nil
+}
+
+// Close removes the clone directory when the store created it (an unset
+// CloneConfig.Dir).
+func (c *GitHubStore) Close() error {
+	return c.clone.Close()
+}
+
+// Invalidate makes the next read check the gitops remote at once, whatever
+// the time since the last check: after a push to the gitops repo.
+func (c *GitHubStore) Invalidate() {
+	c.clone.invalidate()
 }
 
 // observe records the duration since start of the gitops operation op, which
@@ -84,7 +107,7 @@ func classifyHTTPError(resp *gh.Response, err error) error {
 	return err
 }
 
-// FetchServiceCatalog reads badil.yaml from the gitops repo and returns its
+// FetchServiceCatalog reads badil.yaml from the gitops clone and returns its
 // validated service catalog (the keys of its services mapping, with each
 // service's repo and branch) and `preview` block. A malformed file is an
 // error.
@@ -95,22 +118,14 @@ func (c *GitHubStore) FetchServiceCatalog(ctx context.Context) (*ServiceCatalog,
 
 // FetchServiceCatalogSHA is FetchServiceCatalog, plus the blob SHA of the
 // badil.yaml it read on the default branch. When the file was read but its
-// content can't be decoded or parsed, the SHA is returned with the error; it
-// is "" when the file could not be read.
+// content can't be parsed, the SHA is returned with the error; it is "" when
+// the file could not be read.
 func (c *GitHubStore) FetchServiceCatalogSHA(ctx context.Context) (*ServiceCatalog, string, error) {
-	content, _, resp, err := c.gh.Repositories.GetContents(ctx, c.owner, c.repo, configFile, nil)
+	raw, sha, err := c.clone.readFile(ctx, configFile)
 	if err != nil {
-		return nil, "", classifyHTTPError(resp, err)
+		return nil, "", err
 	}
-	if content == nil {
-		return nil, "", fmt.Errorf("%s: not a file", configFile)
-	}
-	sha := content.GetSHA()
-	raw, err := content.GetContent()
-	if err != nil {
-		return nil, sha, fmt.Errorf("decode %s: %w", configFile, err)
-	}
-	catalog, err := ParseCatalog([]byte(raw))
+	catalog, err := ParseCatalog(raw)
 	return catalog, sha, err
 }
 
@@ -122,26 +137,10 @@ func (c *GitHubStore) FullName() string {
 // previewsDir is the gitops repo directory holding one subdirectory per preview.
 const previewsDir = "previews"
 
-// ListPreviews returns the sorted names of the directories under previews/.
-// A missing previews/ directory yields an empty slice. The contents API caps
-// a directory listing at 1,000 entries; this is not paginated.
+// ListPreviews returns the sorted names of the directories under previews/,
+// all of them. A missing previews/ directory yields an empty slice.
 func (c *GitHubStore) ListPreviews(ctx context.Context) ([]string, error) {
-	_, entries, resp, err := c.gh.Repositories.GetContents(ctx, c.owner, c.repo, previewsDir, nil)
-	if err != nil {
-		err = classifyHTTPError(resp, err)
-		if errors.Is(err, ErrNotFound) {
-			return []string{}, nil
-		}
-		return nil, err
-	}
-	slugs := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if e.GetType() == "dir" {
-			slugs = append(slugs, e.GetName())
-		}
-	}
-	slices.Sort(slugs)
-	return slugs, nil
+	return c.clone.listDirs(ctx, previewsDir)
 }
 
 // previewPath returns the gitops repo path for a preview slug's values file.
@@ -149,26 +148,19 @@ func previewPath(slug string) string {
 	return fmt.Sprintf("previews/%s/values.yaml", slug)
 }
 
-// GetPreview reads previews/<slug>/values.yaml and returns the parsed values
-// plus the file SHA (needed for subsequent updates). Returns ErrNotFound when
-// the file does not exist.
+// GetPreview reads previews/<slug>/values.yaml from the gitops clone and
+// returns the parsed values plus the file's blob SHA, the contents API SHA
+// subsequent updates need. Returns ErrNotFound when the file does not exist.
 func (c *GitHubStore) GetPreview(ctx context.Context, slug string) (*preview.PreviewValues, string, error) {
-	content, _, resp, err := c.gh.Repositories.GetContents(ctx, c.owner, c.repo, previewPath(slug), nil)
+	raw, sha, err := c.clone.readFile(ctx, previewPath(slug))
 	if err != nil {
-		return nil, "", classifyHTTPError(resp, err)
-	}
-	if content == nil {
-		return nil, "", fmt.Errorf("%s: not a file", previewPath(slug))
-	}
-	raw, err := content.GetContent()
-	if err != nil {
-		return nil, "", fmt.Errorf("decode %s: %w", previewPath(slug), err)
+		return nil, "", err
 	}
 	var vals preview.PreviewValues
-	if err := yaml.Unmarshal([]byte(raw), &vals); err != nil {
+	if err = yaml.Unmarshal(raw, &vals); err != nil {
 		return nil, "", fmt.Errorf("parse %s: %w", previewPath(slug), err)
 	}
-	return &vals, content.GetSHA(), nil
+	return &vals, sha, nil
 }
 
 // marshalPreview encodes vals with the same indentation rules used for the
@@ -186,9 +178,10 @@ func marshalPreview(vals preview.PreviewValues) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// WritePreview persists vals at previews/<slug>/values.yaml. When sha is empty
-// the file is created; otherwise an update is performed against that SHA.
-// Returns the html_url of the resulting commit.
+// WritePreview persists vals at previews/<slug>/values.yaml through the
+// contents API. When sha is empty the file is created; otherwise an update is
+// performed against that SHA. Returns the html_url of the resulting commit.
+// The next read checks the gitops remote.
 func (c *GitHubStore) WritePreview(
 	ctx context.Context,
 	slug string,
@@ -208,6 +201,9 @@ func (c *GitHubStore) WritePreview(
 	}
 	// Create and update are the same contents PUT; sha is only set on update.
 	out, resp, writeErr := c.gh.Repositories.UpdateFile(ctx, c.owner, c.repo, previewPath(slug), opts)
+	// Whatever its outcome, the write may have moved the branch: the next
+	// read, a 409 re-read included, checks the remote.
+	c.clone.invalidate()
 	if writeErr != nil {
 		return "", classifyHTTPError(resp, writeErr)
 	}
@@ -667,14 +663,17 @@ func (c *GitHubStore) DeletePreviewWithRetry(
 	return nil, fmt.Errorf("delete %s: %d attempts exhausted", previewPath(slug), MaxWriteRetries)
 }
 
-// deletePreview removes previews/<slug>/values.yaml at blob sha and returns
-// the html_url of the resulting commit.
+// deletePreview removes previews/<slug>/values.yaml at blob sha through the
+// contents API and returns the html_url of the resulting commit. The next read
+// checks the gitops remote.
 func (c *GitHubStore) deletePreview(ctx context.Context, slug, sha, message string) (string, error) {
 	opts := &gh.RepositoryContentFileOptions{
 		Message: gh.Ptr(message),
 		SHA:     gh.Ptr(sha),
 	}
 	out, resp, err := c.gh.Repositories.DeleteFile(ctx, c.owner, c.repo, previewPath(slug), opts)
+	// As in WritePreview, the next read checks the remote.
+	c.clone.invalidate()
 	if err != nil {
 		return "", classifyHTTPError(resp, err)
 	}

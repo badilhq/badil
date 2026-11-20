@@ -44,4 +44,10 @@ spec:
               {{- end }}
               securityContext:
                 {{- include "badil.containerSecurityContext" . | nindent 16 }}
+              volumeMounts:
+                - name: gitops
+                  mountPath: /var/lib/badil
+          volumes:
+            - name: gitops
+              emptyDir: {}
 {{- end }}

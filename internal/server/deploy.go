@@ -21,12 +21,14 @@ import (
 const deployTimeout = 30 * time.Second
 
 // storeAPI is the subset of store.GitHubStore used by the deploy, reconcile,
-// teardown and sync handlers. Defined here so tests can inject fakes without
-// spinning up an httptest server for every GitHub round-trip.
+// teardown, sync and push handlers. Defined here so tests can inject fakes
+// without spinning up an httptest server for every GitHub round-trip.
 type storeAPI interface {
 	lifecycle.ReconcileStore
 	lifecycle.SyncStore
 	FullName() string
+	// Invalidate makes the next read check the gitops remote at once.
+	Invalidate()
 }
 
 // DeployRequest is the body of POST /v1/deploy. All fields are required; the

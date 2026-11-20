@@ -61,6 +61,11 @@ type fakeGitops struct {
 	syncGate   chan struct{}
 	syncMu     sync.Mutex
 	syncs      []string
+	// invalidations counts the Invalidate calls; catalogInvalidations is
+	// invalidations when FetchServiceCatalogSHA was last called. syncMu
+	// guards both.
+	invalidations        int
+	catalogInvalidations int
 
 	capturedInputs   preview.DeployInputs
 	capturedCatalog  []string
@@ -210,6 +215,9 @@ func (f *fakeGitops) ListPreviews(context.Context) ([]string, error) {
 }
 
 func (f *fakeGitops) FetchServiceCatalogSHA(ctx context.Context) (*store.ServiceCatalog, string, error) {
+	f.syncMu.Lock()
+	f.catalogInvalidations = f.invalidations
+	f.syncMu.Unlock()
 	f.catalogDeadline, _ = ctx.Deadline()
 	catalog, err := f.FetchServiceCatalog(ctx)
 	return catalog, f.catalogSHA, err
@@ -239,6 +247,20 @@ func (f *fakeGitops) SyncPreviewWithRetry(
 }
 
 func (f *fakeGitops) FullName() string { return "acme/gitops" }
+
+func (f *fakeGitops) Invalidate() {
+	f.syncMu.Lock()
+	defer f.syncMu.Unlock()
+	f.invalidations++
+}
+
+// invalidated returns the Invalidate calls so far, and how many came before
+// the last FetchServiceCatalogSHA.
+func (f *fakeGitops) invalidated() (int, int) {
+	f.syncMu.Lock()
+	defer f.syncMu.Unlock()
+	return f.invalidations, f.catalogInvalidations
+}
 
 // withFanOut plugs f's FanOutPRComments in as the server's fan-out.
 func withFanOut(f *fakeGitops) Option {

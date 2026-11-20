@@ -125,10 +125,6 @@ A failing preview read, rule 1–2 delete or step 4 sync is logged and the sweep
 
 Comment fan-outs (deploy, teardown, expiry) skip closed PRs, so a closed PR keeps its teardown comment.
 
-### Known limit
-
-The GitHub contents API lists at most 1,000 entries per directory, so the sweep sees at most 1,000 previews.
-
 ## Config sync
 
 Two triggers run the sweep's step 4 outside the sweep, without its rules 1–3: the rewrite, the `preview synced` log, `badil_previews_synced_total` and the comment refresh.
@@ -143,7 +139,7 @@ A verified `push` delivery is acted on only when all of these hold:
 
 The `webhook push` log of any other push carries its `reason`. Every push is answered 200.
 
-In the background, badil reads `badil.yaml`'s blob SHA on the default branch. When it equals the SHA of the last push sync (kept in memory, empty at startup), it stops (`config sync skipped`, reason `badil.yaml unchanged`). badil's own deploy, teardown and sync commits are pushes too, and stop there.
+badil makes the next read of its gitops clone check the remote, so it reads the pushed commit. In the background, it reads `badil.yaml`'s blob SHA on the default branch. When it equals the SHA of the last push sync (kept in memory, empty at startup), it stops (`config sync skipped`, reason `badil.yaml unchanged`). badil's own deploy, teardown and sync commits are pushes too, and stop there.
 
 Otherwise every preview is synced with that content, and its SHA is kept. The SHA is kept also when a preview failed (the sweep retries it) or the content can't be parsed (the same content would fail again). A `badil.yaml` that can't be read, or previews that can't be listed, keep no SHA, so the next push retries.
 

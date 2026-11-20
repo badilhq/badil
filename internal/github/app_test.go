@@ -61,22 +61,6 @@ func TestNewApp(t *testing.T) {
 	})
 }
 
-func TestClientForInstallation(t *testing.T) {
-	app, err := github.NewApp(github.AppConfig{
-		AppID:         12345,
-		PrivateKey:    generateTestKey(t),
-		WebhookSecret: "test-secret",
-	})
-	if err != nil {
-		t.Fatalf("NewApp() error = %v", err)
-	}
-
-	client := app.ClientForInstallation(67890)
-	if client == nil {
-		t.Fatal("ClientForInstallation() returned nil")
-	}
-}
-
 func TestGetInstallationToken(t *testing.T) {
 	wantToken := "ghs_fake_installation_token"
 

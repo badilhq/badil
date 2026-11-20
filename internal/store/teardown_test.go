@@ -2,134 +2,58 @@ package store_test
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
-	"io"
 	"maps"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
 )
 
-const teardownPath = "/repos/acme/gitops/contents/previews/feature-x/values.yaml"
+// teardownFile is the values file of the preview feature-x.
+const teardownFile = "previews/feature-x/values.yaml"
 
-// fileState is one canned GET response: a values file at a blob SHA, or a 404
-// when body is empty.
-type fileState struct {
-	sha  string
-	body string
-}
-
-// teardownRequest is one recorded write (PUT or DELETE).
-type teardownRequest struct {
-	method  string
-	message string
-	sha     string
-	content string
-}
-
-// teardownGitHub fakes the contents API for previews/feature-x/values.yaml
-// and badil.yaml. GETs of the values file are answered from gets in order (the
-// last one repeats); PUT and DELETE get the next status from writes (200 once
-// the list is exhausted). GETs of badil.yaml are counted and answered with
-// badil, or a 404 when it is empty.
+// teardownGitHub is the gitops repo of a write to the preview feature-x: its
+// file is gets[0] (none when "") and its badil.yaml is badil (none when "").
+// The writes are answered with writes, then 200; each 409 first commits the
+// next file of gets (the last one repeats; "" removes the file), then runs
+// onConflict when set.
 type teardownGitHub struct {
-	t         *testing.T
-	mu        sync.Mutex
-	gets      []fileState
-	writes    []int
-	badil     string
-	nGet      int
-	badilGets int
-	seen      []teardownRequest
+	gets       []string
+	writes     []int
+	badil      string
+	onConflict func(*remoteRepo)
+	fake       *gitopsFake
 }
 
-func (g *teardownGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if r.Method == http.MethodGet && r.URL.Path == "/repos/acme/gitops/contents/badil.yaml" {
-		g.badilGets++
-		if g.badil == "" {
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = io.WriteString(w, `{"message":"Not Found"}`)
-			return
-		}
-		_, _ = io.WriteString(w, encodeContent("badil.yaml", "sha-badil", g.badil))
-		return
+// open returns a store over g.
+func (g *teardownGitHub) open(t *testing.T) *store.GitHubStore {
+	t.Helper()
+	files := map[string]string{}
+	if len(g.gets) > 0 && g.gets[0] != "" {
+		files[teardownFile] = g.gets[0]
 	}
-	if r.URL.Path != teardownPath {
-		g.t.Errorf("unexpected path %s %s", r.Method, r.URL.Path)
-		w.WriteHeader(http.StatusTeapot)
-		return
+	if g.badil != "" {
+		files["badil.yaml"] = g.badil
 	}
-	switch r.Method {
-	case http.MethodGet:
-		st := g.gets[min(g.nGet, len(g.gets)-1)]
-		g.nGet++
-		if st.body == "" {
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = io.WriteString(w, `{"message":"Not Found"}`)
-			return
-		}
-		_, _ = io.WriteString(w, encodeContent("previews/feature-x/values.yaml", st.sha, st.body))
-	case http.MethodPut, http.MethodDelete:
-		g.record(r)
-		status := http.StatusOK
-		if len(g.writes) > 0 {
-			status, g.writes = g.writes[0], g.writes[1:]
-		}
-		w.WriteHeader(status)
-		switch status {
-		case http.StatusOK:
-			_, _ = io.WriteString(w, `{"commit":{"html_url":"https://github.com/acme/gitops/commit/c0ffee"}}`)
-		default:
-			_, _ = io.WriteString(w, `{"message":"nope"}`)
-		}
-	default:
-		g.t.Errorf("unexpected method %s", r.Method)
+	g.fake = newGitopsFake(t, files)
+	g.fake.path, g.fake.statuses, g.fake.onConflict = teardownFile, g.writes, g.onConflict
+	if len(g.gets) > 1 {
+		g.fake.next = g.gets[1:]
 	}
+	return g.fake.open(t)
 }
 
-func (g *teardownGitHub) record(r *http.Request) {
-	raw, _ := io.ReadAll(r.Body)
-	var req struct {
-		Message string `json:"message"`
-		SHA     string `json:"sha"`
-		Content string `json:"content"`
-	}
-	if err := json.Unmarshal(raw, &req); err != nil {
-		g.t.Errorf("decode %s body: %v", r.Method, err)
-	}
-	content, _ := base64.StdEncoding.DecodeString(req.Content)
-	g.seen = append(g.seen, teardownRequest{
-		method: r.Method, message: req.Message, sha: req.SHA, content: string(content),
-	})
-}
-
-func (g *teardownGitHub) requests() []teardownRequest {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return slices.Clone(g.seen)
-}
-
-func (g *teardownGitHub) catalogReads() int {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return g.badilGets
+// requests returns the writes received so far.
+func (g *teardownGitHub) requests() []writeRequest {
+	return g.fake.requests()
 }
 
 func runTeardown(t *testing.T, g *teardownGitHub) (*store.TeardownResult, error) {
 	t.Helper()
-	g.t = t
-	srv := httptest.NewServer(g)
-	t.Cleanup(srv.Close)
-	return newClient(t, srv).TeardownPreviewWithRetry(context.Background(), "feature-x", "acme", "backend-1", 42)
+	return g.open(t).TeardownPreviewWithRetry(context.Background(), "feature-x", "acme", "backend-1", 42)
 }
 
 const pr7URL = "https://github.com/acme/backend-2/pull/7"
@@ -197,7 +121,7 @@ dependencies: []
 `
 
 func TestTeardown_UpdateWhenPinsRemain(t *testing.T) {
-	g := &teardownGitHub{gets: []fileState{{sha: "blob-1", body: pr42AndPR7}}, badil: teardownBadil}
+	g := &teardownGitHub{gets: []string{pr42AndPR7}, badil: teardownBadil}
 	result, err := runTeardown(t, g)
 	if err != nil {
 		t.Fatalf("TeardownPreviewWithRetry: %v", err)
@@ -207,8 +131,8 @@ func TestTeardown_UpdateWhenPinsRemain(t *testing.T) {
 		t.Fatalf("requests = %+v, want one PUT", reqs)
 	}
 	const wantMsg = "chore(preview): remove backend-1 from feature-x"
-	if reqs[0].message != wantMsg || reqs[0].sha != "blob-1" {
-		t.Errorf("PUT message/sha = %q/%q, want %q/blob-1", reqs[0].message, reqs[0].sha, wantMsg)
+	if reqs[0].message != wantMsg || reqs[0].sha != blobSHA(pr42AndPR7) {
+		t.Errorf("PUT message/sha = %q/%q, want %q at the file's blob", reqs[0].message, reqs[0].sha, wantMsg)
 	}
 	// The unpinned backend-1 is projected on badil.yaml in the same commit:
 	// its branch-tracking imageTag, chart and host.
@@ -257,9 +181,6 @@ func TestTeardown_UpdateWhenPinsRemain(t *testing.T) {
 		result.Values.Services[0].ImageTag != "sha-${ARGOCD_APP_REVISION_SHORT}" {
 		t.Errorf("result.Values = %+v, want the written file", result.Values)
 	}
-	if n := g.catalogReads(); n != 1 {
-		t.Errorf("badil.yaml reads = %d, want 1", n)
-	}
 }
 
 func TestTeardown_UnreadableBadilYAML(t *testing.T) {
@@ -277,7 +198,7 @@ func TestTeardown_UnreadableBadilYAML(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			g := &teardownGitHub{gets: []fileState{{sha: "blob-1", body: pr42AndPR7}}, badil: tc.badil}
+			g := &teardownGitHub{gets: []string{pr42AndPR7}, badil: tc.badil}
 			result, err := runTeardown(t, g)
 			if err == nil || !strings.HasPrefix(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want prefix %q", err, tc.want)
@@ -292,20 +213,23 @@ func TestTeardown_UnreadableBadilYAML(t *testing.T) {
 	}
 }
 
+// TestTeardown_ReadsBadilYAMLOnceAcrossConflicts checks that the retries
+// project on the badil.yaml read before the first update: a malformed one
+// committed with each conflict is never read.
 func TestTeardown_ReadsBadilYAMLOnceAcrossConflicts(t *testing.T) {
 	g := &teardownGitHub{
-		gets:   []fileState{{sha: "blob-1", body: pr42AndPR7}, {sha: "blob-2", body: pr42AndPR7}},
+		gets:   []string{pr42AndPR7, pr42AndPR7},
 		writes: []int{http.StatusConflict, http.StatusConflict},
 		badil:  teardownBadil,
+		onConflict: func(r *remoteRepo) {
+			r.set("badil.yaml", "services:\n  backend-1: {repo: r, imageTag: latest}\n")
+		},
 	}
 	if _, err := runTeardown(t, g); err != nil {
 		t.Fatalf("TeardownPreviewWithRetry: %v", err)
 	}
-	if reqs := g.requests(); len(reqs) != store.MaxWriteRetries || reqs[2].sha != "blob-2" {
-		t.Errorf("requests = %+v, want %d PUTs, the last at blob-2", reqs, store.MaxWriteRetries)
-	}
-	if n := g.catalogReads(); n != 1 {
-		t.Errorf("badil.yaml reads = %d, want 1", n)
+	if reqs := g.requests(); len(reqs) != store.MaxWriteRetries || reqs[2].sha != blobSHA(pr42AndPR7) {
+		t.Errorf("requests = %+v, want %d PUTs, the last at the re-read file's blob", reqs, store.MaxWriteRetries)
 	}
 }
 
@@ -345,10 +269,8 @@ dependencies:
 // in the teardown commit, the services and dependencies only its pinned
 // services needed.
 func TestTeardown_DropsPartsOnlyThePRNeeded(t *testing.T) {
-	g := &teardownGitHub{t: t, gets: []fileState{{sha: "blob-1", body: frontAndPayments}}, badil: needsBadil}
-	srv := httptest.NewServer(g)
-	t.Cleanup(srv.Close)
-	result, err := newClient(t, srv).TeardownPreviewWithRetry(context.Background(), "feature-x", "acme", "payments", 42)
+	g := &teardownGitHub{gets: []string{frontAndPayments}, badil: needsBadil}
+	result, err := g.open(t).TeardownPreviewWithRetry(context.Background(), "feature-x", "acme", "payments", 42)
 	if err != nil {
 		t.Fatalf("TeardownPreviewWithRetry: %v", err)
 	}
@@ -403,7 +325,7 @@ func TestTeardown_DropsPartsOnlyThePRNeeded(t *testing.T) {
 }
 
 func TestTeardown_DeleteWhenNoPinRemains(t *testing.T) {
-	g := &teardownGitHub{gets: []fileState{{sha: "blob-1", body: onlyPR42}}}
+	g := &teardownGitHub{gets: []string{onlyPR42}}
 	result, err := runTeardown(t, g)
 	if err != nil {
 		t.Fatalf("TeardownPreviewWithRetry: %v", err)
@@ -413,8 +335,8 @@ func TestTeardown_DeleteWhenNoPinRemains(t *testing.T) {
 		t.Fatalf("requests = %+v, want one DELETE", reqs)
 	}
 	const wantMsg = "chore(preview): delete feature-x preview"
-	if reqs[0].message != wantMsg || reqs[0].sha != "blob-1" {
-		t.Errorf("DELETE message/sha = %q/%q, want %q/blob-1", reqs[0].message, reqs[0].sha, wantMsg)
+	if reqs[0].message != wantMsg || reqs[0].sha != blobSHA(onlyPR42) {
+		t.Errorf("DELETE message/sha = %q/%q, want %q at the file's blob", reqs[0].message, reqs[0].sha, wantMsg)
 	}
 	if !result.Deleted || !slices.Equal(result.Removed, []string{"backend-1"}) {
 		t.Errorf("result = %+v, want Removed [backend-1], Deleted true", result)
@@ -425,40 +347,37 @@ func TestTeardown_DeleteWhenNoPinRemains(t *testing.T) {
 	if result.Values.Services != nil {
 		t.Errorf("result.Values = %+v, want empty on delete", result.Values)
 	}
-	if n := g.catalogReads(); n != 0 {
-		t.Errorf("badil.yaml reads = %d, want 0 for a deletion", n)
-	}
 }
 
 func TestTeardown_NoOps(t *testing.T) {
 	cases := []struct {
 		name   string
-		gets   []fileState
+		gets   []string
 		writes []int
 		want   int // expected number of writes
 	}{
-		{name: "file missing", gets: []fileState{{}}},
+		{name: "file missing", gets: []string{""}},
 		{
 			name: "no match means no write",
-			gets: []fileState{{sha: "blob-1", body: strings.Replace(pr42AndPR7, "pull/42", "pull/43", 1)}},
+			gets: []string{strings.Replace(pr42AndPR7, "pull/42", "pull/43", 1)},
 		},
 		{
 			name:   "404 on re-fetch",
-			gets:   []fileState{{sha: "blob-1", body: pr42AndPR7}, {}},
+			gets:   []string{pr42AndPR7, ""},
 			writes: []int{http.StatusConflict},
 			want:   1,
 		},
 		{
 			name:   "404 on DELETE",
-			gets:   []fileState{{sha: "blob-1", body: onlyPR42}},
+			gets:   []string{onlyPR42},
 			writes: []int{http.StatusNotFound},
 			want:   1,
 		},
 		{
 			name: "409 then re-fetch matches nothing",
-			gets: []fileState{
-				{sha: "blob-1", body: onlyPR42},
-				{sha: "blob-2", body: "services:\n  - name: backend-1\n  - name: front\n"},
+			gets: []string{
+				onlyPR42,
+				"services:\n  - name: backend-1\n  - name: front\n",
 			},
 			writes: []int{http.StatusConflict},
 			want:   1,
@@ -485,7 +404,7 @@ func TestTeardown_DeleteConflictBecomesUpdate(t *testing.T) {
 	// The first DELETE races a deploy from PR #7: the re-fetch shows its new
 	// pin, so the retry must update the file instead of deleting it.
 	g := &teardownGitHub{
-		gets:   []fileState{{sha: "blob-1", body: onlyPR42}, {sha: "blob-2", body: pr42AndPR7}},
+		gets:   []string{onlyPR42, pr42AndPR7},
 		writes: []int{http.StatusConflict},
 		badil:  teardownBadil,
 	}
@@ -497,11 +416,11 @@ func TestTeardown_DeleteConflictBecomesUpdate(t *testing.T) {
 	if len(reqs) != 2 {
 		t.Fatalf("requests = %+v, want DELETE then PUT", reqs)
 	}
-	if reqs[0].method != http.MethodDelete || reqs[0].sha != "blob-1" {
-		t.Errorf("first write = %s at %s, want DELETE at blob-1", reqs[0].method, reqs[0].sha)
+	if reqs[0].method != http.MethodDelete || reqs[0].sha != blobSHA(onlyPR42) {
+		t.Errorf("first write = %s at %s, want DELETE at the first file's blob", reqs[0].method, reqs[0].sha)
 	}
-	if reqs[1].method != http.MethodPut || reqs[1].sha != "blob-2" {
-		t.Errorf("retry = %s at %s, want PUT at blob-2", reqs[1].method, reqs[1].sha)
+	if reqs[1].method != http.MethodPut || reqs[1].sha != blobSHA(pr42AndPR7) {
+		t.Errorf("retry = %s at %s, want PUT at the re-read file's blob", reqs[1].method, reqs[1].sha)
 	}
 	if !strings.Contains(reqs[1].content, "commitSha: bbbbbbbbbb") {
 		t.Errorf("retry dropped PR #7's pin:\n%s", reqs[1].content)
@@ -513,7 +432,7 @@ func TestTeardown_DeleteConflictBecomesUpdate(t *testing.T) {
 
 func TestTeardown_ConflictsExhausted(t *testing.T) {
 	g := &teardownGitHub{
-		gets:   []fileState{{sha: "blob-1", body: onlyPR42}},
+		gets:   []string{onlyPR42},
 		writes: slices.Repeat([]int{http.StatusConflict}, store.MaxWriteRetries),
 	}
 	_, err := runTeardown(t, g)
@@ -528,10 +447,7 @@ func TestTeardown_ConflictsExhausted(t *testing.T) {
 
 func runUnpin(t *testing.T, g *teardownGitHub, services ...string) (*store.TeardownResult, error) {
 	t.Helper()
-	g.t = t
-	srv := httptest.NewServer(g)
-	t.Cleanup(srv.Close)
-	return newClient(t, srv).UnpinServicesWithRetry(
+	return g.open(t).UnpinServicesWithRetry(
 		context.Background(), "feature-x", "acme", "backend-1", 42, services,
 	)
 }
@@ -563,14 +479,14 @@ dependencies: []
 `
 
 func TestUnpinServices_OnlyTheGivenServices(t *testing.T) {
-	g := &teardownGitHub{gets: []fileState{{sha: "blob-1", body: pr42TwoServices}}, badil: teardownBadil}
+	g := &teardownGitHub{gets: []string{pr42TwoServices}, badil: teardownBadil}
 	result, err := runUnpin(t, g, "backend-2", "front")
 	if err != nil {
 		t.Fatalf("UnpinServicesWithRetry: %v", err)
 	}
 	reqs := g.requests()
-	if len(reqs) != 1 || reqs[0].method != http.MethodPut || reqs[0].sha != "blob-1" {
-		t.Fatalf("requests = %+v, want one PUT at blob-1", reqs)
+	if len(reqs) != 1 || reqs[0].method != http.MethodPut || reqs[0].sha != blobSHA(pr42TwoServices) {
+		t.Fatalf("requests = %+v, want one PUT at the file's blob", reqs)
 	}
 	const wantMsg = "chore(preview): remove backend-2 from feature-x"
 	if reqs[0].message != wantMsg {
@@ -607,7 +523,7 @@ func TestUnpinServices_OnlyTheGivenServices(t *testing.T) {
 }
 
 func TestUnpinServices_KeepsFileWithNoPinLeft(t *testing.T) {
-	g := &teardownGitHub{gets: []fileState{{sha: "blob-1", body: onlyPR42}}, badil: teardownBadil}
+	g := &teardownGitHub{gets: []string{onlyPR42}, badil: teardownBadil}
 	result, err := runUnpin(t, g, "backend-1")
 	if err != nil {
 		t.Fatalf("UnpinServicesWithRetry: %v", err)
@@ -630,7 +546,7 @@ func TestUnpinServices_KeepsFileWithNoPinLeft(t *testing.T) {
 }
 
 func TestUnpinServices_UnreadableBadilYAML(t *testing.T) {
-	g := &teardownGitHub{gets: []fileState{{sha: "blob-1", body: pr42TwoServices}}}
+	g := &teardownGitHub{gets: []string{pr42TwoServices}}
 	result, err := runUnpin(t, g, "backend-2")
 	const want = "unpin previews/feature-x/values.yaml: gitops: not found"
 	if err == nil || !strings.HasPrefix(err.Error(), want) {
