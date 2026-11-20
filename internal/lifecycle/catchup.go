@@ -132,11 +132,11 @@ func (c *CatchUp) Run(ctx context.Context) {
 // consider applies Run's decision order to the listed pr, label being the
 // preview label, and counts it in stats.
 func (c *CatchUp) consider(ctx context.Context, label string, pr forge.PullRequest, stats *catchUpStats) {
-	if !slices.ContainsFunc(pr.Labels, func(l string) bool { return previewLabel(l, label) }) {
+	if !hasPreviewLabel(pr.Labels, label) {
 		return
 	}
 	stats.openLabelled++
-	if !strings.EqualFold(pr.HeadFullName, pr.FullName) {
+	if pr.Fork() {
 		return
 	}
 	if t := preview.ResolveTarget(pr.Labels, pr.HeadRef, label); t.Slug != "" && c.pinnedAtHead(ctx, t.Slug, pr) {

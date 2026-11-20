@@ -160,7 +160,7 @@ func reconcile(ctx context.Context, api ReconcileAPI, ev Event) (string, string)
 	t := preview.ResolveTarget(pr.Labels, pr.HeadRef, catalog.Label)
 	logIgnored(ctx, ev, t)
 	deploy := pr.Open && t.Slug != ""
-	if (deploy || !closed) && !strings.EqualFold(pr.HeadFullName, pr.FullName) {
+	if (deploy || !closed) && pr.Fork() {
 		return reconcileSkipped(ctx, ev, "fork pr")
 	}
 	if deploy && len(services) == 0 {
@@ -628,7 +628,7 @@ func payloadSkipReason(ev Event, label string) string {
 			return "other label"
 		}
 	case "opened", "reopened", "synchronize":
-		if !slices.ContainsFunc(ev.Labels, func(l string) bool { return previewLabel(l, label) }) {
+		if !hasPreviewLabel(ev.Labels, label) {
 			return "not labeled"
 		}
 	}
@@ -640,6 +640,12 @@ func payloadSkipReason(ev Event, label string) string {
 func previewLabel(name, label string) bool {
 	slug, _, plain := preview.ParseLabel(name, label)
 	return plain || slug != ""
+}
+
+// hasPreviewLabel reports whether one of labels is a preview label of label,
+// as previewLabel says.
+func hasPreviewLabel(labels []string, label string) bool {
+	return slices.ContainsFunc(labels, func(l string) bool { return previewLabel(l, label) })
 }
 
 // afterDeploy handles the deploys of the last attempt, pushed as res: it
