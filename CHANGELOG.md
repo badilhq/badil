@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.26.0](https://github.com/badilhq/badil/compare/v0.25.3...v0.26.0) (2026-11-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* POST /webhooks/argocd and ARGOCD_WEBHOOK_TOKEN are replaced by POST /webhooks/status and BADIL_STATUS_TOKEN (chart secret key status-token instead of argocd-webhook-token); Argo CD notifications use badil-status-token, the badil-status template and the on-status-* triggers; badil_argocd_events_total is replaced by badil_status_events_total.
+
+### Features
+
+* catch up on missed pull request events after start and each sweep ([#111](https://github.com/badilhq/badil/issues/111)) ([97bfec0](https://github.com/badilhq/badil/commit/97bfec0da79edcdbba124510ae4bb244a4479ace))
+* list previews and wait for a preview to be ready ([#115](https://github.com/badilhq/badil/issues/115)) ([0f59f73](https://github.com/badilhq/badil/commit/0f59f73d79ffc2a9981273ad54d5b5b4bc0d8fe7))
+* read the gitops repo from a git clone ([#107](https://github.com/badilhq/badil/issues/107)) ([eae1793](https://github.com/badilhq/badil/commit/eae1793dc317b3452ada89236e57c619699d72b3))
+* receive preview status from the renderer and keep it in Kubernetes ([#113](https://github.com/badilhq/badil/issues/113)) ([3ae70be](https://github.com/badilhq/badil/commit/3ae70be680af4ea3132099704efbbe08cd25fc09))
+* write the gitops repo with git, one commit per operation ([#109](https://github.com/badilhq/badil/issues/109)) ([fdd8065](https://github.com/badilhq/badil/commit/fdd8065fb7ef52a526df793cc8fec6eb4fc00075))
+
 ## [0.25.3](https://github.com/badilhq/badil/compare/v0.25.2...v0.25.3) (2026-11-19)
 
 
