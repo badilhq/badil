@@ -18,7 +18,7 @@ import (
 
 // ServiceCatalog is the parsed badil.yaml of the gitops repo. Its Catalog
 // holds the services and dependencies, in file order, and their settings;
-// GitopsRepoURL is left empty, set by the client when it projects a preview
+// GitopsRepoURL is left empty, set by the store when it projects a preview
 // file. A map or slice of it is nil when no entry sets it.
 type ServiceCatalog struct {
 	preview.Catalog

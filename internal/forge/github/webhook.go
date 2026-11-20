@@ -100,9 +100,7 @@ func (f *Forge) ParseWebhook(r *http.Request) (forge.Event, error) {
 func pullRequestEvent(e *gh.PullRequestEvent) forge.PullRequestEvent {
 	var labels []string
 	if pr := e.GetPullRequest(); pr != nil {
-		for _, l := range pr.Labels {
-			labels = append(labels, l.GetName())
-		}
+		labels = labelNames(pr.Labels)
 	}
 	return forge.PullRequestEvent{
 		Owner:    e.GetRepo().GetOwner().GetLogin(),

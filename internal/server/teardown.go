@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/badilhq/badil/internal/forge"
@@ -125,10 +126,8 @@ func (s *Server) startClosed(ctx context.Context, ev lifecycle.Event) {
 // hasNamedSlug reports whether labels hold a named label of the default
 // preview label with a non-empty slug.
 func hasNamedSlug(labels []string) bool {
-	for _, l := range labels {
-		if slug, named, _ := preview.ParseLabel(l, store.DefaultLabel); named && slug != "" {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(labels, func(l string) bool {
+		slug, named, _ := preview.ParseLabel(l, store.DefaultLabel)
+		return named && slug != ""
+	})
 }
