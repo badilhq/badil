@@ -168,7 +168,7 @@ Each listed PR is decided in this order:
 1. A PR without a preview label (the plain label, or a named label with a non-empty slug) is not reconciled.
 2. A fork PR is not reconciled.
 3. The PR's labels resolve its target preview (see [Target preview](#target-preview)). A PR whose named labels conflict has no target, so it can't be pinned, and goes on to step 5.
-4. A PR is pinned at head when its target's `values.yaml` has an entry whose `metadata.pr-url` is the PR's URL and whose `commitSha` is its head SHA. It is skipped. A target that does not exist pins nothing; one that can't be read is logged (`catch-up preview read failed`) and the PR goes on to step 5.
+4. A PR is pinned at head when its target's `values.yaml` has an entry whose `metadata.pr-url` names the PR (its owner, repo and number, owner and repo in any letter case) and whose `commitSha` is its head SHA. It is skipped. A target that does not exist pins nothing; one that can't be read is logged (`catch-up preview read failed`) and the PR goes on to step 5.
 5. A PR is skipped when it is in the seen map at its head SHA, or when a catch-up reconcile of it is still queued or running.
 6. Any other PR is reconciled.
 

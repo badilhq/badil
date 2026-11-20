@@ -35,7 +35,7 @@ func Project(slug string, vals preview.PreviewValues, catalog *store.ServiceCata
 
 // Gitops returns a remote holding badil as badil.yaml (none when ""), the
 // preview file of each of previews and raw files (path to content), and a
-// store of acme/gitops over it, closed when t ends. A preview whose slug is
+// store of acme/gitops over it, configured by opts, closed when t ends. A preview whose slug is
 // not in stale is projected on badil's catalog when it parses (Project), so
 // that a sync leaves it alone.
 func Gitops(
@@ -44,6 +44,7 @@ func Gitops(
 	previews map[string]*preview.PreviewValues,
 	stale map[string]bool,
 	raw map[string]string,
+	opts ...store.Option,
 ) (*Remote, *store.GitHubStore) {
 	t.Helper()
 	files := map[string]string{}
@@ -65,7 +66,13 @@ func Gitops(
 	}
 	maps.Copy(files, raw)
 	remote := NewRemote(t, files)
-	st, err := store.Open(context.Background(), "acme", "gitops", store.CloneConfig{URL: remote.URL()}, Identity)
+	st, err := store.Open(
+		context.Background(),
+		"acme",
+		"gitops",
+		store.CloneConfig{URL: remote.URL()},
+		Identity,
+		opts...)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

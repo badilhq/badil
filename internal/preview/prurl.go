@@ -3,6 +3,7 @@ package preview
 import (
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 // prURLPattern extracts (owner, repo, number) from a github.com PR URL.
@@ -21,4 +22,11 @@ func ParsePRURL(u string) (string, string, int, bool) {
 		return "", "", 0, false
 	}
 	return m[1], m[2], number, true
+}
+
+// MatchesPR reports whether prURL is a pull request URL (ParsePRURL) of
+// owner/repo#number, owner and repo compared case-insensitively.
+func MatchesPR(prURL, owner, repo string, number int) bool {
+	o, r, n, ok := ParsePRURL(prURL)
+	return ok && n == number && strings.EqualFold(o, owner) && strings.EqualFold(r, repo)
 }

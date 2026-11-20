@@ -156,6 +156,67 @@ func TestCatchUp_DecisionOrder(t *testing.T) {
 		"badil_catchup_reconciles_total")
 }
 
+// TestCatchUp_PinnedPRURLInAnotherCase checks that an entry whose pr-url
+// names the listed PR in another letter case, as a manual deploy may write
+// it, counts as pinned at head.
+func TestCatchUp_PinnedPRURLInAnotherCase(t *testing.T) {
+	capture := captureLogs(t)
+	pr := listed(7, "s7", "preview")
+	entry := pinnedBy("front", "https://github.com/Acme/Front/pull/7")
+	entry.CommitSha = "s7"
+	f := &reconcileFake{
+		previews: map[string]*preview.PreviewValues{"feature-7": values(entry)},
+		openPRs:  map[string][]forge.PullRequest{"acme/front": {pr}},
+	}
+	r := &reconciles{}
+	catchUp(t, f, r).Run(context.Background())
+
+	if got := r.take(""); len(got) != 0 {
+		t.Errorf("reconciled = %v, want none", got)
+	}
+	assertCatchUpLogged(t, capture, map[string]int64{"repos": 2, "open_labelled": 1, "skipped_pinned": 1})
+}
+
+func TestCatchUp_SkippedCallback(t *testing.T) {
+	captureLogs(t)
+	unlabeled := listed(1, "s1", "bug")
+	fork := listed(2, "s2", "preview")
+	fork.HeadFullName = "octocat/front"
+	f := &reconcileFake{openPRs: map[string][]forge.PullRequest{
+		"acme/front": {unlabeled, fork, listed(3, "s3", "preview")},
+	}}
+	f.open(t)
+	type skip struct {
+		t   lifecycle.Target
+		res lifecycle.ReconcileResult
+	}
+	var skips []skip
+	r := &reconciles{}
+	api := lifecycle.CatchUpAPI{
+		Store:    f,
+		Forge:    f,
+		Recorder: f,
+		Skipped: func(t lifecycle.Target, res lifecycle.ReconcileResult) {
+			skips = append(skips, skip{t, res})
+		},
+	}
+	lifecycle.NewCatchUp(api, r.reconcile).Run(context.Background())
+
+	target := func(n int) lifecycle.Target {
+		return lifecycle.Target{Owner: "acme", Repo: "front", FullName: "acme/front", Number: n}
+	}
+	want := []skip{
+		{target(1), lifecycle.ReconcileResult{Outcome: "skipped", Reason: "not labeled", HeadSHA: "s1"}},
+		{target(2), lifecycle.ReconcileResult{Outcome: "skipped", Reason: "fork pr", HeadSHA: "s2"}},
+	}
+	if !slices.Equal(skips, want) {
+		t.Errorf("skipped = %+v, want %+v", skips, want)
+	}
+	if got := r.take(""); !slices.Equal(got, []int{3}) {
+		t.Errorf("reconciled = %v, want [3]", got)
+	}
+}
+
 func TestCatchUp_SeenMap(t *testing.T) {
 	cases := []struct {
 		name    string

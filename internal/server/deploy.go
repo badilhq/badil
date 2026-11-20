@@ -22,11 +22,15 @@ import (
 const deployTimeout = 30 * time.Second
 
 // storeAPI is the subset of store.GitHubStore used by the deploy, reconcile,
-// teardown, sync and push handlers. Defined here so tests can inject fakes.
+// teardown, sync, push and read handlers. Defined here so tests can inject
+// fakes.
 type storeAPI interface {
 	lifecycle.ReconcileStore
 	lifecycle.SyncStore
 	FullName() string
+	// ListPreviewFiles lists the slugs of the previews whose values.yaml is
+	// in the gitops repo, sorted.
+	ListPreviewFiles(ctx context.Context) ([]string, error)
 	// GetPreview reads previews/<slug>/values.yaml, store.ErrNotFound when
 	// it does not exist.
 	GetPreview(ctx context.Context, slug string) (*preview.PreviewValues, string, error)

@@ -28,11 +28,16 @@ type CatchUpRecorder interface {
 	CatchUpReconcile()
 }
 
-// CatchUpAPI is what CatchUp uses: the store, the forge and the recorder.
+// CatchUpAPI is what CatchUp uses: the store, the forge, the recorder and,
+// when set, Skipped.
 type CatchUpAPI struct {
 	Store    CatchUpStore
 	Forge    forge.Forge
 	Recorder CatchUpRecorder
+	// Skipped, when set, is called with the target of each listed PR that
+	// Run leaves alone at its step 1 or 2, and the skipped result it would
+	// get: reason NotLabeledReason or ForkPRReason, at its listed head SHA.
+	Skipped func(Target, ReconcileResult)
 }
 
 // ReconcileFunc reconciles ev, as ReconcilePR does, and calls done with
@@ -75,11 +80,13 @@ type catchUpStats struct {
 //
 //  1. a PR without a preview label (the plain label, or a named one with a
 //     slug) is left alone;
-//  2. so is a fork PR (its head repo differs from its base repo);
+//  2. so is a fork PR (its head repo differs from its base repo). A PR left
+//     alone at step 1 or 2 is passed to the Skipped callback, when set;
 //  3. its target preview is resolved from its labels (preview.ResolveTarget);
 //     with conflicting labels it has none, and goes on to step 5;
-//  4. a PR with a target whose preview file has an entry with its URL as
-//     pr-url and its head SHA as commitSha is pinned at head, and skipped;
+//  4. a PR with a target whose preview file has an entry whose pr-url names
+//     the PR (preview.MatchesPR) and whose commitSha is its head SHA is
+//     pinned at head, and skipped;
 //  5. a PR in the seen map at its head SHA, or whose catch-up reconcile is
 //     queued or running, is skipped;
 //  6. any other PR is reconciled as a synchronize event with its listed
@@ -133,10 +140,12 @@ func (c *CatchUp) Run(ctx context.Context) {
 // preview label, and counts it in stats.
 func (c *CatchUp) consider(ctx context.Context, label string, pr forge.PullRequest, stats *catchUpStats) {
 	if !hasPreviewLabel(pr.Labels, label) {
+		c.skipped(pr, NotLabeledReason)
 		return
 	}
 	stats.openLabelled++
 	if pr.Fork() {
+		c.skipped(pr, ForkPRReason)
 		return
 	}
 	if t := preview.ResolveTarget(pr.Labels, pr.HeadRef, label); t.Slug != "" && c.pinnedAtHead(ctx, t.Slug, pr) {
@@ -155,8 +164,19 @@ func (c *CatchUp) consider(ctx context.Context, label string, pr forge.PullReque
 	c.reconcile(ctx, catchUpEvent(pr), func(res ReconcileResult) { c.release(pr, res) })
 }
 
+// skipped passes pr, left alone for reason, to the Skipped callback when it
+// is set.
+func (c *CatchUp) skipped(pr forge.PullRequest, reason string) {
+	if c.api.Skipped == nil {
+		return
+	}
+	c.api.Skipped(catchUpEvent(pr).Target,
+		ReconcileResult{Outcome: OutcomeSkipped, Reason: reason, HeadSHA: pr.HeadSHA})
+}
+
 // pinnedAtHead reports whether the preview slug has an entry pinned by pr at
-// its head SHA. A preview that does not exist pins nothing; one that can't
+// its head SHA: its pr-url names pr (preview.MatchesPR) and its commitSha is
+// pr's head SHA. A preview that does not exist pins nothing; one that can't
 // be read is logged and counted as not pinned, so the PR is reconciled.
 func (c *CatchUp) pinnedAtHead(ctx context.Context, slug string, pr forge.PullRequest) bool {
 	vals, _, err := c.api.Store.GetPreview(ctx, slug)
@@ -171,8 +191,10 @@ func (c *CatchUp) pinnedAtHead(ctx context.Context, slug string, pr forge.PullRe
 		}
 		return false
 	}
+	owner, repo, _ := strings.Cut(pr.FullName, "/")
 	return slices.ContainsFunc(vals.Services, func(svc preview.ServiceEntry) bool {
-		return svc.Metadata != nil && svc.Metadata.PRURL == pr.URL && svc.CommitSha == pr.HeadSHA
+		return svc.Metadata != nil && svc.CommitSha == pr.HeadSHA &&
+			preview.MatchesPR(svc.Metadata.PRURL, owner, repo, pr.Number)
 	})
 }
 
@@ -202,7 +224,8 @@ func (c *CatchUp) release(pr forge.PullRequest, res ReconcileResult) {
 	}
 }
 
-// catchUpEvent is the synchronize event of the listed pr, with its labels.
+// catchUpEvent is the synchronize event of the listed pr, with its labels
+// and head SHA.
 func catchUpEvent(pr forge.PullRequest) Event {
 	owner, repo, _ := strings.Cut(pr.FullName, "/")
 	return Event{
@@ -210,5 +233,6 @@ func catchUpEvent(pr forge.PullRequest) Event {
 		Action:  catchUpAction,
 		HeadRef: pr.HeadRef,
 		Labels:  pr.Labels,
+		HeadSHA: pr.HeadSHA,
 	}
 }

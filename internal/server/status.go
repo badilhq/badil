@@ -67,7 +67,7 @@ func (e statusEvent) parse() (time.Time, error) {
 }
 
 // handleStatusEvent records the status a renderer reports for a preview
-// service. It answers 204 to every valid event, recorded or ignored, 400 to
+// service, and wakes the waits when it is recorded. It answers 204 to every valid event, recorded or ignored, 400 to
 // an invalid or oversize body, and 503, recording nothing, when the preview
 // can't be read.
 func (s *Server) handleStatusEvent(w http.ResponseWriter, r *http.Request) {
@@ -128,6 +128,9 @@ func (s *Server) handleStatusEvent(w http.ResponseWriter, r *http.Request) {
 				s.metrics.SpinUp(e.Service, d)
 				attrs = append(attrs, slog.Float64("spinup_seconds", d.Seconds()))
 			}
+		}
+		if recorded {
+			s.wake.Notify()
 		}
 	}
 

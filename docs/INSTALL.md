@@ -247,6 +247,26 @@ badil sets no quota or network policy on previews. To cap each preview's resourc
 4. Removing the label or closing the PR tears the preview down.
 5. PRs from forks never get a preview.
 
+### Wait for a preview
+
+A CI job or an agent can wait until a PR's preview is ready at its commit, or learn at once why it never will be, instead of sleeping. Generate a read token (e.g. `openssl rand -hex 32`) as `BADIL_READ_TOKEN`, add it to the badil Secret as `read-token` and restart badil. The deploy token is accepted too, but it also grants deploys.
+
+```bash
+kubectl patch secret badil -n badil --type merge \
+  -p "{\"stringData\":{\"read-token\":\"$BADIL_READ_TOKEN\"}}"
+kubectl rollout restart deployment/badil -n badil
+```
+
+Then, where the job runs:
+
+```bash
+go install github.com/badilhq/badil/cmd/badil@latest
+export BADIL_SERVER=https://badil.example.com BADIL_TOKEN="$BADIL_READ_TOKEN"
+badil wait --repo acme/backend-1 --pr 42 --sha "$HEAD_SHA"   # or: badil wait --slug feature-pricing
+```
+
+`badil wait` exits 0 when the preview is ready or the PR needs none, 1 when it failed or was refused, 2 when `--timeout` (default `15m`) passes first, and 3 on an error. `badil list` lists the previews. Details: [`GET /v1/wait`](API.md#get-v1wait) and [`badil wait`](API.md#badil-wait).
+
 ## 9. Preview URLs (optional)
 
 Set `preview.domain` in `badil.yaml`, create a wildcard DNS record `*.<domain>` pointing to the ingress controller, and list the services under `expose`. Details: [Per-preview URLs](CONFIGURATION.md#per-preview-urls).

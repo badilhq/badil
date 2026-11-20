@@ -24,19 +24,41 @@ const actionUnlabeled = "unlabeled"
 // was already deployed as it would be written.
 const alreadyDeployedReason = "already deployed"
 
-// noServiceReason is the skip reason of a reconcile whose PR changes no
-// service of its repo: no changed file matches their paths.
-const noServiceReason = "no service changed"
-
-// previewLimitReason is the skip reason of a reconcile refused because
-// creating its preview would exceed preview.maxPreviews.
-const previewLimitReason = "preview limit reached"
+// Skip reasons of a reconcile.
+const (
+	// NoServiceReason is the skip reason of a reconcile whose PR changes no
+	// service of its repo: no changed file matches their paths.
+	NoServiceReason = "no service changed"
+	// PreviewLimitReason is the skip reason of a reconcile refused because
+	// creating its preview would exceed preview.maxPreviews.
+	PreviewLimitReason = "preview limit reached"
+	// NotLabeledReason is the skip reason of an opened, reopened or
+	// synchronize event of a PR without a preview label.
+	NotLabeledReason = "not labeled"
+	// OtherLabelReason is the skip reason of a labeled or unlabeled event of
+	// a label that is not a preview label.
+	OtherLabelReason = "other label"
+	// ForkPRReason is the skip reason of a fork PR.
+	ForkPRReason = "fork pr"
+	// RepoNotInCatalogReason is the skip reason of a PR of a repo with no
+	// service in the catalog.
+	RepoNotInCatalogReason = "repo not in catalog"
+	// ServiceHeldReason is the skip reason of a reconcile refused because
+	// another PR pins one of its services in its target preview.
+	ServiceHeldReason = "service held by another pr"
+	// LabelConflictReason is the skip reason of an open PR whose named
+	// preview labels conflict.
+	LabelConflictReason = "conflicting preview labels"
+)
 
 // Reconcile outcomes, the outcome label of Recorder.Reconcile.
 const (
-	outcomeDeployed = "deployed"
-	outcomeSkipped  = "skipped"
-	outcomeTornDown = "torn_down"
+	// OutcomeDeployed is the outcome of a reconcile that wrote a service.
+	OutcomeDeployed = "deployed"
+	// OutcomeSkipped is the outcome of a skipped reconcile, with its reason.
+	OutcomeSkipped = "skipped"
+	// OutcomeTornDown is the outcome of a reconcile that only tore down.
+	OutcomeTornDown = "torn_down"
 	// OutcomeFailed is the outcome of a reconcile that failed.
 	OutcomeFailed = "failed"
 )
@@ -75,6 +97,9 @@ type Event struct {
 	Label string
 	// Labels holds the names of the PR's labels in the payload.
 	Labels []string
+	// HeadSHA is the PR's head SHA in the payload, or in the listing of a
+	// catch-up event.
+	HeadSHA string
 }
 
 // ReconcilePR brings the preview in line with the PR's current state on
@@ -113,29 +138,34 @@ type Event struct {
 // or when the commit of a PR open with a target can't be pushed;
 // otherwise skipped (with its reason) when the reconcile was skipped;
 // otherwise deployed when a service was written; otherwise torn_down. It
-// returns that outcome and reason.
+// returns that outcome and reason, with the head SHA of the PR it read, or
+// ev's when it read none.
 func ReconcilePR(ctx context.Context, api ReconcileAPI, ev Event) ReconcileResult {
-	o, r := reconcile(ctx, api, ev)
+	head := ev.HeadSHA
+	o, r := reconcile(ctx, api, ev, &head)
 	api.Recorder.Reconcile(o, r)
-	return ReconcileResult{Outcome: o, Reason: r}
+	return ReconcileResult{Outcome: o, Reason: r, HeadSHA: head}
 }
 
-// ReconcileResult is the outcome ReconcilePR records and, when it is skipped,
-// the reason ("" otherwise).
+// ReconcileResult is the outcome ReconcilePR records, the reason when it is
+// skipped ("" otherwise), and the head SHA of the PR it reconciled: the one
+// GetPullRequest read when that read succeeded, else the event's.
 type ReconcileResult struct {
 	Outcome string
 	Reason  string
+	HeadSHA string
 }
 
 // reconcile is ReconcilePR without the recording. It returns the outcome and,
-// when the outcome is skipped, the reason ("" otherwise).
-func reconcile(ctx context.Context, api ReconcileAPI, ev Event) (string, string) {
+// when the outcome is skipped, the reason ("" otherwise). Once the PR is
+// read, its head SHA is stored in headSHA.
+func reconcile(ctx context.Context, api ReconcileAPI, ev Event, headSHA *string) (string, string) {
 	closed := ev.Action == "closed"
 	catalog, err := api.Store.FetchServiceCatalog(ctx)
 	if err != nil {
 		if closed {
 			payloadTeardown(ctx, api.teardownAPI(), ev, store.DefaultLabel, err)
-			return outcomeTornDown, ""
+			return OutcomeTornDown, ""
 		}
 		return reconcileFailed(ctx, ev, err)
 	}
@@ -145,26 +175,27 @@ func reconcile(ctx context.Context, api ReconcileAPI, ev Event) (string, string)
 			return reconcileSkipped(ctx, ev, reason)
 		}
 		if len(services) == 0 {
-			return reconcileSkipped(ctx, ev, "repo not in catalog")
+			return reconcileSkipped(ctx, ev, RepoNotInCatalogReason)
 		}
 	}
 	pr, err := api.Forge.GetPullRequest(ctx, ev.Owner, ev.Repo, ev.Number)
 	if err != nil {
 		if closed {
 			payloadTeardown(ctx, api.teardownAPI(), ev, catalog.Label, err)
-			return outcomeTornDown, ""
+			return OutcomeTornDown, ""
 		}
 		return reconcileFailed(ctx, ev, err)
 	}
+	*headSHA = pr.HeadSHA
 
 	t := preview.ResolveTarget(pr.Labels, pr.HeadRef, catalog.Label)
 	logIgnored(ctx, ev, t)
 	deploy := pr.Open && t.Slug != ""
 	if (deploy || !closed) && pr.Fork() {
-		return reconcileSkipped(ctx, ev, "fork pr")
+		return reconcileSkipped(ctx, ev, ForkPRReason)
 	}
 	if deploy && len(services) == 0 {
-		return reconcileSkipped(ctx, ev, "repo not in catalog")
+		return reconcileSkipped(ctx, ev, RepoNotInCatalogReason)
 	}
 	p := &reconcilePlan{
 		ev: ev, pr: pr, t: t, catalog: catalog, deploy: deploy, repoServices: services,
@@ -260,7 +291,7 @@ func (p *reconcilePlan) change(tree *store.Tree) (store.Summary, error) {
 	switch {
 	case !p.deploy, p.listErr != nil:
 	case len(p.services) == 0:
-		p.noService = &teardownStep{tt: p.target(p.t.Slug), reason: noServiceReason, trigger: triggerWebhook}
+		p.noService = &teardownStep{tt: p.target(p.t.Slug), reason: NoServiceReason, trigger: triggerWebhook}
 		p.noService.run(tree)
 	default:
 		vals, err := tree.GetPreview(p.t.Slug)
@@ -394,7 +425,7 @@ func (p *reconcilePlan) finish(
 		if err := api.Forge.UpsertComment(ctx, p.ev.Owner, p.ev.Repo, p.ev.Number, body); err != nil {
 			conflictCommentFailed(ctx, p.ev, err)
 		}
-		return reconcileSkipped(ctx, p.ev, noServiceReason)
+		return reconcileSkipped(ctx, p.ev, NoServiceReason)
 	}
 	if p.listErr != nil {
 		return reconcileFailed(ctx, p.ev, p.listErr)
@@ -412,12 +443,12 @@ func (p *reconcilePlan) finish(
 		if o, r := postLabelConflict(ctx, tapi, p.ev, p.pr, p.catalog.Label, p.t); o != "" {
 			return o, r
 		}
-		return outcomeTornDown, ""
+		return OutcomeTornDown, ""
 	}
 	if o, r := p.refusal(ctx, api); o != "" {
 		return o, r
 	}
-	outcome, reason := outcomeTornDown, ""
+	outcome, reason := OutcomeTornDown, ""
 	if p.deploy {
 		outcome, reason = p.afterDeploy(ctx, api, res)
 	}
@@ -436,10 +467,10 @@ func (p *reconcilePlan) refusal(ctx context.Context, api ReconcileAPI) (string, 
 	switch {
 	case p.held != nil:
 		body = preview.BuildServiceHeldSummary(p.t.Slug, p.held.service, p.held.holder, p.catalog.Label)
-		o, r = reconcileSkipped(ctx, p.ev, "service held by another pr", slog.String("holder", p.held.holder))
+		o, r = reconcileSkipped(ctx, p.ev, ServiceHeldReason, slog.String("holder", p.held.holder))
 	case p.limited:
 		body = preview.BuildPreviewLimitSummary(p.t.Slug, p.catalog.MaxPreviews)
-		o, r = reconcileSkipped(ctx, p.ev, previewLimitReason, slog.Int("max_previews", p.catalog.MaxPreviews))
+		o, r = reconcileSkipped(ctx, p.ev, PreviewLimitReason, slog.Int("max_previews", p.catalog.MaxPreviews))
 	default:
 		return "", ""
 	}
@@ -591,7 +622,7 @@ func postLabelConflict(
 	if err := api.Forge.UpsertComment(ctx, ev.Owner, ev.Repo, ev.Number, body); err != nil {
 		conflictCommentFailed(ctx, ev, err)
 	}
-	return reconcileSkipped(ctx, ev, "conflicting preview labels")
+	return reconcileSkipped(ctx, ev, LabelConflictReason)
 }
 
 // payloadTeardown tears down a closed PR from its payload alone, after err
@@ -625,11 +656,11 @@ func payloadSkipReason(ev Event, label string) string {
 	switch ev.Action {
 	case "labeled", actionUnlabeled:
 		if !previewLabel(ev.Label, label) {
-			return "other label"
+			return OtherLabelReason
 		}
 	case "opened", "reopened", "synchronize":
 		if !hasPreviewLabel(ev.Labels, label) {
-			return "not labeled"
+			return NotLabeledReason
 		}
 	}
 	return ""
@@ -652,7 +683,7 @@ func hasPreviewLabel(labels []string, label string) bool {
 // handles the unpin of the PR's untouched services (afterTeardown, its
 // summary left to the deploy's when a service was written), logs each
 // service, records a created preview, and posts the preview's summary once
-// on its open PRs. It returns, as reconcile does, outcomeDeployed when at
+// on its open PRs. It returns, as reconcile does, OutcomeDeployed when at
 // least one service was written, OutcomeFailed when none was and at least
 // one failed, and otherwise, every service being unchanged, the skip of
 // reconcileSkipped with reason alreadyDeployedReason.
@@ -698,7 +729,7 @@ func (p *reconcilePlan) afterDeploy(ctx context.Context, api ReconcileAPI, res s
 				slog.String("err", fanErr.Error()),
 			)
 		}
-		return outcomeDeployed, ""
+		return OutcomeDeployed, ""
 	case failed:
 		return OutcomeFailed, ""
 	}
@@ -718,7 +749,7 @@ func reconcileSkipped(ctx context.Context, ev Event, reason string, extra ...slo
 		args = append(args, a)
 	}
 	slog.InfoContext(ctx, "preview reconcile skipped", args...)
-	return outcomeSkipped, reason
+	return OutcomeSkipped, reason
 }
 
 func conflictCommentFailed(ctx context.Context, ev Event, err error) {

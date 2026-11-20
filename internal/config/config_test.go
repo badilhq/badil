@@ -265,6 +265,27 @@ func TestLoad_StatusToken(t *testing.T) {
 	}
 }
 
+func TestLoad_ReadToken(t *testing.T) {
+	setEnv(t, validEnv())
+	t.Setenv("BADIL_READ_TOKEN", "")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.ReadToken != "" {
+		t.Errorf("ReadToken = %q, want empty when unset", cfg.ReadToken)
+	}
+
+	t.Setenv("BADIL_READ_TOKEN", "read-secret")
+	cfg, err = config.Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.ReadToken != "read-secret" {
+		t.Errorf("ReadToken = %q, want %q", cfg.ReadToken, "read-secret")
+	}
+}
+
 func TestLoad_GitOpsCloneDir(t *testing.T) {
 	setEnv(t, validEnv())
 	t.Setenv("GITOPS_CLONE_DIR", "")

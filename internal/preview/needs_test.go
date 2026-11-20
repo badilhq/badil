@@ -164,3 +164,52 @@ func TestApplyCatalog_Needs(t *testing.T) {
 		})
 	}
 }
+
+func TestNeedsClosure(t *testing.T) {
+	cyclic := needsCatalog()
+	cyclic.Needs = map[string][]string{"front": {"backend"}, "backend": {"front", "postgres"}}
+	noNeeds := needsCatalog()
+	noNeeds.Needs = nil
+	tests := []struct {
+		name    string
+		catalog preview.Catalog
+		roots   []string
+		want    map[string]bool
+	}{
+		{
+			name:    "transitive needs",
+			catalog: needsCatalog(),
+			roots:   []string{"front"},
+			want:    map[string]bool{"front": true, "backend": true, "postgres": true, "redis": true},
+		},
+		{
+			name:    "several roots",
+			catalog: needsCatalog(),
+			roots:   []string{"search", "payments"},
+			want: map[string]bool{
+				"search": true, "elasticsearch": true, "payments": true, "backend": true,
+				"kafka": true, "postgres": true, "redis": true,
+			},
+		},
+		{
+			name:    "cycle followed once",
+			catalog: cyclic,
+			roots:   []string{"front"},
+			want:    map[string]bool{"front": true, "backend": true, "postgres": true},
+		},
+		{
+			name:    "no needs declared",
+			catalog: noNeeds,
+			roots:   []string{"front", "search"},
+			want:    map[string]bool{"front": true, "search": true},
+		},
+		{name: "no roots", catalog: needsCatalog(), want: map[string]bool{}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.catalog.NeedsClosure(tc.roots); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("NeedsClosure(%v) = %v, want %v", tc.roots, got, tc.want)
+			}
+		})
+	}
+}
