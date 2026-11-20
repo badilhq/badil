@@ -199,8 +199,10 @@ badil_gitops_push_conflicts_total{op="sweep"} 2
 func TestMetrics_SpinUp(t *testing.T) {
 	m := metrics.New()
 	m.SpinUp("backend-1", 45*time.Second)
-	m.ArgoCDEventIgnored()
-	m.ArgoCDEventIgnored()
+	m.StatusEvent("ready", "recorded")
+	m.StatusEvent("degraded", "ignored")
+	m.StatusEvent("degraded", "ignored")
+	m.StatusEvent("progressing", "error")
 
 	assertGathered(t, m, `
 # HELP badil_preview_spinup_seconds Time from badil's gitops write to the service's Argo CD Application being synced and Healthy.
@@ -217,11 +219,12 @@ badil_preview_spinup_seconds_bucket{catalog_service="backend-1",le="1800"} 1
 badil_preview_spinup_seconds_bucket{catalog_service="backend-1",le="+Inf"} 1
 badil_preview_spinup_seconds_sum{catalog_service="backend-1"} 45
 badil_preview_spinup_seconds_count{catalog_service="backend-1"} 1
-# HELP badil_argocd_events_total Argo CD notification events, by whether they were recorded as a spin-up.
-# TYPE badil_argocd_events_total counter
-badil_argocd_events_total{result="ignored"} 2
-badil_argocd_events_total{result="recorded"} 1
-`, "badil_preview_spinup_seconds", "badil_argocd_events_total")
+# HELP badil_status_events_total Renderer status events, by reported status and by whether they were recorded, ignored or failed.
+# TYPE badil_status_events_total counter
+badil_status_events_total{result="error",status="progressing"} 1
+badil_status_events_total{result="ignored",status="degraded"} 2
+badil_status_events_total{result="recorded",status="ready"} 1
+`, "badil_preview_spinup_seconds", "badil_status_events_total")
 }
 
 func TestMetrics_ProcessAndGoCollectors(t *testing.T) {
@@ -246,7 +249,7 @@ func TestMetrics_NilIsSafe(t *testing.T) {
 	m.GitopsOp("write", "ok", time.Second)
 	m.SweepRun(true, time.Now())
 	m.SpinUp("backend-1", time.Minute)
-	m.ArgoCDEventIgnored()
+	m.StatusEvent("ready", "recorded")
 	m.CatchUpReconcile()
 
 	rec := httptest.NewRecorder()

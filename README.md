@@ -7,7 +7,7 @@
 
 Per-pull-request preview environments for teams running Kubernetes and ArgoCD. Self-hosted, open source.
 
-Every branch gets its own isolated, full-stack environment: the services changed in the PR run at their PR version, every other service runs at its branch (default `main`). badil writes the desired state to your gitops repo; your ArgoCD deploys it. badil never touches your cluster directly.
+Every branch gets its own isolated, full-stack environment: the services changed in the PR run at their PR version, every other service runs at its branch (default `main`). badil writes the desired state to your gitops repo; your ArgoCD deploys it. badil never touches your previews directly: its only cluster access is its own status ConfigMaps (`badil-status-<slug>`), in its own namespace.
 
 ## Why
 
@@ -15,7 +15,7 @@ When code is written at machine speed, the bottleneck is validating and integrat
 
 - One isolated preview per branch, or per `preview:<name>` label, across repos: PRs on the same branch, or with the same `preview:<name>` label, share one preview.
 - Changed services run at their PR commit, everything else at their branch (default `main`).
-- CI builds once; badil only writes desired state. It never builds images and never touches the cluster.
+- CI builds once; badil only writes desired state. It never builds images and never reads or writes preview namespaces: it writes only its own status ConfigMaps, in its own namespace.
 - Argo CD deploys from git.
 - Previews are torn down when their PR closes or the label is removed, and swept so they don't accumulate: the sweep also unpins open PRs whose label moved, conflicts or is gone.
 
@@ -73,7 +73,7 @@ The gitops repo can start from the template [`badilhq/gitops-template`](https://
 
 Pre-1.0, and the v1 scope is complete. The full loop (label a PR, preview deployed by Argo CD, URLs tested, merge, teardown) runs end to end on a k3d testbed with a four-service demo.
 
-Working: label-triggered previews per branch or per `preview:<name>` label across repos, per-service chart overrides, upstream chart dependencies, teardown when a PR closes or loses its label, a cleanup sweep with optional TTL (in the server or as a CronJob), the manual `/v1/deploy` endpoint, previews synced when `badil.yaml` changes (push webhook, or `/v1/sync`), PR comments with preview links, Prometheus metrics and a Grafana dashboard, preview spin-up time and GitHub deployments through Argo CD notifications.
+Working: label-triggered previews per branch or per `preview:<name>` label across repos, per-service chart overrides, upstream chart dependencies, teardown when a PR closes or loses its label, a cleanup sweep with optional TTL (in the server or as a CronJob), the manual `/v1/deploy` endpoint, previews synced when `badil.yaml` changes (push webhook, or `/v1/sync`), PR comments with preview links, Prometheus metrics and a Grafana dashboard, preview status and spin-up time from the renderer's status callback, and GitHub deployments through Argo CD notifications.
 
 Until 1.0, env vars, metric names, annotations and chart values can still change between minor releases; the [CHANGELOG](CHANGELOG.md) marks breaking changes.
 
@@ -112,7 +112,7 @@ Install: [docs/INSTALL.md](docs/INSTALL.md); ArgoCD wiring: [examples/argocd](ex
 - [Pull request events](docs/EVENTS.md): what badil does on a pull request delivery
 - [Services and dependencies](docs/SERVICES.md): path filters, `needs`, service modes, dependencies and preview file writes
 - [Cleanup and config sync](docs/CLEANUP.md): teardown, the cleanup sweep and config sync
-- [Operations reference](docs/OPERATIONS.md): metrics, spin-up time, preview deployments on GitHub and the dashboard
+- [Operations reference](docs/OPERATIONS.md): metrics, preview status, spin-up time, preview deployments on GitHub and the dashboard
 - [Preview contract](docs/CONTRACT.md): the `badil.dev/v1beta1` preview file, its schema and conformance fixtures, and what a renderer must do
 
 ## License

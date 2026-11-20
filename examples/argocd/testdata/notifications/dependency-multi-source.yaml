@@ -1,8 +1,9 @@
 # Expected results of the triggers in ../../notifications-values.yaml and
 # ../../github-deployments-values.yaml.
 # A dependency Application with valueFiles: spec.sources and no spec.source,
-# and an empty revision annotation. Degraded with a failed sync, it still
-# triggers nothing. Its history entry has Argo CD's multi-source shape:
+# and an empty revision annotation. Degraded with a failed sync, it triggers
+# none of the GitHub deployments triggers, and fires on-status-degraded and
+# on-status-sync-failed. Its history entry has Argo CD's multi-source shape:
 # sources and revisions, an empty source and no revision.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -20,6 +21,12 @@ metadata:
     test.badil.dev/on-preview-sync-error: "false"
     test.badil.dev/on-preview-unpinned: "false"
     test.badil.dev/on-preview-healthy: "false"
+    test.badil.dev/on-status-progressing: "false"
+    test.badil.dev/on-status-ready: "false"
+    test.badil.dev/on-status-degraded: "true"
+    test.badil.dev/on-status-sync-failed: "true"
+    test.badil.dev/status: "sync-failed"
+    test.badil.dev/revision: "16.4.2,0123456789abcdef0123456789abcdef01234567"
 spec:
   project: feature-x
   sources:

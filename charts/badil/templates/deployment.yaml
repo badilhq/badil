@@ -15,6 +15,9 @@ spec:
         {{- include "badil.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "badil.fullname" . }}
+      # The server reads and writes its status ConfigMaps (role.yaml); the
+      # ServiceAccount itself mounts no token, so the CronJob gets none.
+      automountServiceAccountToken: true
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -37,12 +40,16 @@ spec:
             {{- end }}
           env:
             {{- include "badil.env" . | nindent 12 }}
-            - name: ARGOCD_WEBHOOK_TOKEN
+            - name: BADIL_STATUS_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.existingSecret }}
-                  key: argocd-webhook-token
+                  key: status-token
                   optional: true
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             - name: METRICS_ADDR
               value: {{ ternary (printf ":%v" .Values.metrics.port) "" .Values.metrics.enabled | quote }}
             {{- if not .Values.cleanup.enabled }}

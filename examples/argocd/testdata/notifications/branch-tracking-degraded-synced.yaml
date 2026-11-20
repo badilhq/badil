@@ -1,0 +1,36 @@
+# Expected results of the triggers in ../../notifications-values.yaml and
+# ../../github-deployments-values.yaml.
+# A branch-tracking service Degraded after a successful sync of its branch
+# head.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: feature-x-api
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/instance: feature-x
+  annotations:
+    preview.badil.dev/vcs.ref.revision: ""
+    test.badil.dev/on-preview-deployed: "false"
+    test.badil.dev/on-preview-degraded: "false"
+    test.badil.dev/on-preview-sync-error: "false"
+    test.badil.dev/on-preview-unpinned: "false"
+    test.badil.dev/on-preview-healthy: "false"
+    test.badil.dev/on-status-progressing: "false"
+    test.badil.dev/on-status-ready: "false"
+    test.badil.dev/on-status-degraded: "true"
+    test.badil.dev/on-status-sync-failed: "false"
+    test.badil.dev/status: "degraded"
+    test.badil.dev/revision: "3333333333333333333333333333333333333333"
+spec:
+  project: feature-x
+  source:
+    repoURL: https://github.com/acme/api.git
+    targetRevision: "main"
+    path: k8s/
+status:
+  reconciledAt: "2026-11-17T04:22:29Z"
+  health: {status: Degraded, lastTransitionTime: "2026-11-17T04:22:27Z"}
+  sync: {status: Synced, revision: "3333333333333333333333333333333333333333", comparedTo: {source: {targetRevision: "main"}}}
+  operationState: {phase: Succeeded, startedAt: "2026-11-17T04:22:23Z", finishedAt: "2026-11-17T04:22:28Z", syncResult: {revision: "3333333333333333333333333333333333333333"}}

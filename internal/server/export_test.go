@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"sync"
-	"time"
 )
 
 // LogCapture is a minimal slog.Handler retaining every record. It is exported
@@ -33,6 +32,3 @@ func (h *LogCapture) Records() []slog.Record {
 	defer h.mu.Unlock()
 	return append([]slog.Record(nil), h.entries...)
 }
-
-// SetNow replaces the clock spin-up durations are measured against.
-func (s *Server) SetNow(now func() time.Time) { s.now = now }

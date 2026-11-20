@@ -21,4 +21,4 @@ A starting point for the gitops repo of [badil](https://github.com/badilhq/badil
 
    Re-apply them after a chart bump: Argo CD does not manage the ApplicationSet.
 7. Continue the badil install at [§4 Public URL for badil](https://github.com/badilhq/badil/blob/{{VERSION}}/docs/INSTALL.md#4-public-url-for-badil).
-8. Optional: preview spin-up time and GitHub deployments through Argo CD notifications, set up as [Spin-up time](https://github.com/badilhq/badil/blob/{{VERSION}}/docs/INSTALL.md#spin-up-time-optional) and [Preview deployments on GitHub](https://github.com/badilhq/badil/blob/{{VERSION}}/docs/INSTALL.md#preview-deployments-on-github-optional) describe.
+8. Optional: preview status, spin-up time and GitHub deployments through Argo CD notifications, set up as [Preview status](https://github.com/badilhq/badil/blob/{{VERSION}}/docs/INSTALL.md#preview-status-optional) and [Preview deployments on GitHub](https://github.com/badilhq/badil/blob/{{VERSION}}/docs/INSTALL.md#preview-deployments-on-github-optional) describe.

@@ -22,9 +22,11 @@ To give each preview its own URL, uncomment the `preview` block in `badil.yaml` 
 
 Preview Namespace labels and annotations go in `namespace` of `badil.yaml`. For per-preview limits on top of them, see the Kyverno example in [`../kyverno/`](../kyverno/README.md).
 
-## Spin-up time
+## Preview status
 
-[`notifications-values.yaml`](notifications-values.yaml): Argo CD notifications that report each preview service's spin-up time to badil (`/webhooks/argocd`); see [INSTALL](../../docs/INSTALL.md#spin-up-time-optional).
+[`notifications-values.yaml`](notifications-values.yaml): Argo CD notifications that send badil's status callback (`/webhooks/status`) for every preview service and dependency: `progressing`, `ready`, `degraded` or `sync-failed`, with the revision it is about. badil keeps the latest status and records each pinned service's spin-up time from it. See [INSTALL](../../docs/INSTALL.md#preview-status-optional) and the [Status callback](../../docs/CONTRACT.md#status-callback) contract.
+
+The fixtures in [`testdata/notifications/`](testdata/notifications) carry, for each trigger, the result it must give (`test.badil.dev/<trigger>`) and, when a status trigger fires, the `status` and `revision` the `badil-status` template must send (`test.badil.dev/status` and `test.badil.dev/revision`). The Charts workflow checks both.
 
 ## Adapt to your org
 

@@ -1,0 +1,36 @@
+# Expected results of the triggers in ../../notifications-values.yaml and
+# ../../github-deployments-values.yaml.
+# The sync of a branch-tracking service's new branch head failed; the pods of
+# the previous head are still Healthy.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: feature-x-api
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/instance: feature-x
+  annotations:
+    preview.badil.dev/vcs.ref.revision: ""
+    test.badil.dev/on-preview-deployed: "false"
+    test.badil.dev/on-preview-degraded: "false"
+    test.badil.dev/on-preview-sync-error: "false"
+    test.badil.dev/on-preview-unpinned: "false"
+    test.badil.dev/on-preview-healthy: "false"
+    test.badil.dev/on-status-progressing: "false"
+    test.badil.dev/on-status-ready: "false"
+    test.badil.dev/on-status-degraded: "false"
+    test.badil.dev/on-status-sync-failed: "true"
+    test.badil.dev/status: "sync-failed"
+    test.badil.dev/revision: "4444444444444444444444444444444444444444"
+spec:
+  project: feature-x
+  source:
+    repoURL: https://github.com/acme/api.git
+    targetRevision: "main"
+    path: k8s/
+status:
+  reconciledAt: "2026-11-17T04:22:29Z"
+  health: {status: Healthy, lastTransitionTime: "2026-11-17T04:01:10Z"}
+  sync: {status: OutOfSync, revision: "4444444444444444444444444444444444444444", comparedTo: {source: {targetRevision: "main"}}}
+  operationState: {phase: Failed, startedAt: "2026-11-17T04:22:23Z", finishedAt: "2026-11-17T04:22:28Z", syncResult: {revision: "4444444444444444444444444444444444444444"}}

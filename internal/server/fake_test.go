@@ -48,6 +48,10 @@ type fakeGitops struct {
 	fanOutErr  error
 	applyGate  chan struct{}
 	applyPanic bool
+	// getPreviewErr, when set, fails GetPreview.
+	getPreviewErr error
+	// afterGetPreview, when set, runs after each GetPreview.
+	afterGetPreview func()
 
 	// pr is what GetPullRequest returns, unless prErr is set.
 	pr      *forge.PullRequest
@@ -250,6 +254,18 @@ func (f *fakeGitops) FetchServiceCatalogSHA(ctx context.Context) (*store.Service
 }
 
 func (f *fakeGitops) FullName() string { return "acme/gitops" }
+
+// GetPreview reads the preview from the fake's store, or fails with
+// getPreviewErr when set, then runs afterGetPreview when set.
+func (f *fakeGitops) GetPreview(ctx context.Context, slug string) (*preview.PreviewValues, string, error) {
+	if f.afterGetPreview != nil {
+		defer f.afterGetPreview()
+	}
+	if f.getPreviewErr != nil {
+		return nil, "", f.getPreviewErr
+	}
+	return f.st.GetPreview(ctx, slug)
+}
 
 func (f *fakeGitops) Invalidate() {
 	f.syncMu.Lock()

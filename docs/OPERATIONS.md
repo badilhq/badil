@@ -1,6 +1,6 @@
 # Operations reference
 
-This page lists what badil exposes to run it: its metrics, the spin-up time sent by Argo CD, the preview deployments Argo CD posts on GitHub, and the Grafana dashboard. Their setup is in [Install](INSTALL.md#spin-up-time-optional).
+This page lists what badil exposes to run it: its metrics, the preview status and spin-up time the renderer reports, the preview deployments Argo CD posts on GitHub, and the Grafana dashboard. Their setup is in [Install](INSTALL.md#preview-status-optional).
 
 ## Metrics
 
@@ -23,9 +23,9 @@ Every label has a closed set of values. Go runtime (`go_*`) and process (`proces
 | `badil_sweep_previews_deleted_total` | counter | `rule` | Previews deleted by the sweep: `no_pin` (rule 1) or `ttl` (rule 2). |
 | `badil_previews_synced_total` | counter | | Previews rewritten to match `badil.yaml`, by a sweep (step 4 of the in-server sweep), a push or `/v1/sync` (see [Config sync](CLEANUP.md#config-sync)). |
 | `badil_previews` | gauge | | Previews in the gitops repo: listed at server startup, incremented when a deploy creates a preview, decremented when a teardown or sweep deletes one, and reset by each in-server sweep. |
-| `badil_preview_spinup_seconds` | histogram | `catalog_service` | Spin-up time of a pinned service, from badil's gitops write to its Application synced and Healthy (see [Spin-up time](#spin-up-time)). Buckets: 15, 30, 60, 120, 180, 300, 600, 900, 1800 s. `catalog_service` is a catalog service; it is not named `service` because that collides with the `service` target label Prometheus adds when scraping through a ServiceMonitor. |
+| `badil_preview_spinup_seconds` | histogram | `catalog_service` | Spin-up time of a pinned service, from badil's gitops write to the renderer's first `ready` at that revision (see [Spin-up time](#spin-up-time)). Buckets: 15, 30, 60, 120, 180, 300, 600, 900, 1800 s. `catalog_service` is a catalog service; it is not named `service` because that collides with the `service` target label Prometheus adds when scraping through a ServiceMonitor. |
 | `badil_catchup_reconciles_total` | counter | | Reconciles started by [catch-up](EVENTS.md#catch-up), at server start and after each in-server sweep. Each is also counted in `badil_reconciles_total` once it runs. |
-| `badil_argocd_events_total` | counter | `result` | Events accepted by `/webhooks/argocd`: `recorded` (a spin-up was observed) or `ignored`. 400 and 401 answers are not counted. |
+| `badil_status_events_total` | counter | `status`, `result` | Valid, authorized events of [`/webhooks/status`](API.md#post-webhooksstatus). `status` is the reported status: `ready`, `progressing`, `degraded` or `sync-failed`. `result` is `recorded`, `ignored` (unknown preview, unknown service or stale) or `error` (the preview read failed: answered 503). 400 and 401 answers are not counted. |
 
 ### Gauges and the CronJob
 
@@ -35,19 +35,33 @@ Every label has a closed set of values. Go runtime (`go_*`) and process (`proces
 
 Deletions made by the `badil cleanup` CronJob show only after the next server restart or in-server sweep.
 
-## Spin-up time
+## Preview status
 
-badil never reads the cluster, so Argo CD's notifications controller tells it when a preview service is up. It POSTs to [`/webhooks/argocd`](API.md#post-webhooksargocd) when a service's Application is synced and Healthy at a new revision, once per revision. Configuration: [`examples/argocd/notifications-values.yaml`](../examples/argocd/notifications-values.yaml).
+badil never reads preview namespaces, so the renderer tells it how each preview service is doing, through the [status callback](CONTRACT.md#status-callback). Argo CD's notifications controller is the reference sender: it POSTs to [`/webhooks/status`](API.md#post-webhooksstatus) when a service's or dependency's Application starts a sync (`progressing`), is synced and Healthy (`ready`), turns Degraded (`degraded`) or fails to sync or render (`sync-failed`) at its current target. Configuration: [`examples/argocd/notifications-values.yaml`](../examples/argocd/notifications-values.yaml).
+
+badil keeps the latest status per preview and service:
+
+- **In memory**, the source of truth for reads. A read never calls the Kubernetes API.
+- **In one ConfigMap per preview** in badil's namespace (`POD_NAMESPACE`): `badil-status-<slug>`, labelled `app.kubernetes.io/managed-by: badil` and `badil.dev/preview: <slug>`, one `data` key per service holding `{"revision", "status", "at"}`. Writes are coalesced: each preview's ConfigMap is written at most once every 5 s, with the full status of the preview, and once more on graceful shutdown. A failed write is logged and retried at the next flush.
+- **On start**, before it listens, badil lists those ConfigMaps and rebuilds memory from them. A failed listing stops the server.
+
+When a preview is deleted, its status and ConfigMap go: at once when the server's own commit deleted it, and otherwise (`badil cleanup`, a manual deletion) after the next fetch of the gitops repo that moves its head, and at start.
+
+The chart's Role lets badil get, list, create, update and delete ConfigMaps in its namespace, nothing else. Outside a cluster, or without `POD_NAMESPACE`, the status is kept in memory only and badil logs `status persistence disabled` at start.
+
+Only `badil serve` keeps status; `badil cleanup` has no Kubernetes access.
+
+## Spin-up time
 
 ### What is measured
 
-Spin-up is `now − updatedAt`. `updatedAt` is the Application's `preview.badil.dev/updated-at` annotation: the time badil wrote the service to the gitops repo.
+Spin-up is `at − updated-at`: `at` is the time of the renderer's first `ready` for a pinned service at its pinned revision (a `revision` starting with `commitSha`), and `updated-at` the service's `metadata.updated-at` in the preview file, the time badil wrote the service to the gitops repo. It is recorded once per service and revision in a server process, when it is between 0 and 24h.
 
-It runs from that write to the Application synced and Healthy at that revision. It therefore includes the ApplicationSet poll and any wait for CI to push the image.
+It runs from that write to the service synced and Healthy at that revision. It therefore includes the ApplicationSet poll and any wait for CI to push the image. Branch-tracking services and dependencies are never pinned and record no spin-up time.
 
 ### Health after the sync
 
-The trigger waits for health computed after the sync. Either of these counts:
+The `on-status-ready` trigger waits for health computed after the sync. Either of these counts:
 
 - a status refresh later than the sync's end: `status.reconciledAt` later than `status.operationState.finishedAt`;
 - a health change after the sync's start: `status.health.lastTransitionTime` later than `status.operationState.startedAt`.
@@ -56,10 +70,11 @@ Argo CD records the sync's result before it refreshes health. Until then, health
 
 ### Late samples
 
-The notifications controller also sends the trigger in two other cases:
+A `ready` can also come long after the write:
 
 - for already-Healthy pinned Applications, the first time the configuration is applied;
-- after a failed delivery (badil restarting, a 5xx), as a re-send.
+- after a badil restart, the first `ready` at a revision records a sample again;
+- a recovery at the same revision sends `ready` again (once per health transition), which records a sample when it is the first `ready` the process sees at that revision.
 
 Each is recorded as the time since `updated-at`, up to the 24h bound, so it usually lands in `+Inf`. Read samples above the top bucket (1800 s) as backfill or retries, not real spin-ups.
 
@@ -174,21 +189,21 @@ These limitations apply:
     - the unpin itself ran no sync.
 
     The last history `id` is then unchanged, its key is already stored, and the deployment stays `inactive`.
-16. `success`, and the spin-up sample of `notifications-values.yaml`, can come late. Argo CD records times to the second, and a time equal to the sync's end or start counts as stale.
+16. `success`, and the `ready` status and spin-up sample of `notifications-values.yaml`, can come late. Argo CD records times to the second, and a time equal to the sync's end or start counts as stale.
 
     A sync that changes no pod keeps health `Healthy` with no transition after its start, so it waits for a status refresh in a later second than its end; when the refresh that follows the sync lands in the same second, it waits for the next full refresh.
 
     A full refresh comes every `timeout.reconciliation` plus up to `timeout.reconciliation.jitter`. The wait is at worst about two periods plus jitter: about 5 minutes with the defaults (120 s and 60 s). It has no bound when `timeout.reconciliation` is `0s`.
 
     A pin rarely leaves pods unchanged, since it changes the image tag.
-17. `success`, and the spin-up sample, can come early: any health change after the sync's start counts, even one that does not come from the new pods.
+17. `success`, and the `ready` status and spin-up sample, can come early: any health change after the sync's start counts, even one that does not come from the new pods.
 
     This happens in two cases:
 
     - the previous SHA's rollout turns Healthy while the next SHA's sync runs (pushes seconds apart);
     - the chart orders its resources in sync waves. Argo CD applies a wave only once the earlier waves are Healthy, and marks the sync as succeeded as soon as the last wave is applied. An earlier wave turning Healthy (a migration Job, another Deployment) is then a health change after the start, while the last wave's pods still start.
 
-    Either way, `success` and the spin-up sample for the new SHA can come before its pods are Healthy, and are not sent again when they turn Healthy.
+    Either way, `success`, `ready` and the spin-up sample for the new SHA can come before its pods are Healthy, and are not sent again when they turn Healthy.
 
 ## Dashboard
 
@@ -207,7 +222,7 @@ It picks its Prometheus data source through a `datasource` variable.
 
 With `dashboard.enabled`, the chart renders it as a ConfigMap labelled `dashboard.labels` (default `grafana_dashboard: "1"`), which the Grafana sidecar of kube-prometheus-stack loads. The JSON also imports on its own.
 
-Last successful sweep needs `cleanup.interval`, and the spin-up panels need the Argo CD notifications callback.
+Last successful sweep needs `cleanup.interval`, and the spin-up panels need the [status callback](#preview-status).
 
 ## Demo setup
 

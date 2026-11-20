@@ -25,6 +25,7 @@ import (
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/server"
+	"github.com/badilhq/badil/internal/status"
 	"github.com/badilhq/badil/internal/store"
 )
 
@@ -126,14 +127,19 @@ func serveCmd() *cobra.Command {
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
-			st, f, err := newStoreAndForge(ctx, app, cfg, store.WithMetrics(m))
+			previewStatus, err := loadStatus(ctx, status.InCluster(ctx))
+			if err != nil {
+				return err
+			}
+			st, f, err := newStoreAndForge(ctx, app, cfg, append(statusHooks(previewStatus), store.WithMetrics(m))...)
 			if err != nil {
 				return err
 			}
 			defer closeStore(ctx, st)
+			previewStatus.Start(ctx, st)
 
 			srv := server.NewServer(f, st, cfg.DeployToken,
-				server.WithMetrics(m), server.WithArgoCDToken(cfg.ArgoCDWebhookToken))
+				server.WithMetrics(m), server.WithStatus(cfg.StatusToken, previewStatus))
 			catchUp := lifecycle.NewCatchUp(catchUpAPI(st, f, m), srv.QueueReconcile)
 			httpSrv := &http.Server{
 				Addr:              cfg.ListenAddr,
@@ -154,11 +160,33 @@ func serveCmd() *cobra.Command {
 			slog.InfoContext(ctx, "shutting down server")
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 			defer cancel()
-			if shutdownErr := shutdownServers(shutdownCtx, httpSrv, metricsSrv); shutdownErr != nil {
-				return shutdownErr
+			shutdownErr := shutdownServers(shutdownCtx, httpSrv, metricsSrv)
+			if shutdownErr == nil {
+				shutdownErr = srv.WaitBackground(shutdownCtx)
 			}
-			return srv.WaitBackground(shutdownCtx)
+			previewStatus.Close(shutdownCtx)
+			return shutdownErr
 		},
+	}
+}
+
+// loadStatus reads the previews' status back into s (status.Store.Load),
+// before the server listens. A failed read is returned.
+func loadStatus(ctx context.Context, s *status.Store) (*status.Store, error) {
+	if err := s.Load(ctx); err != nil {
+		return nil, fmt.Errorf("loading preview status: %w", err)
+	}
+	return s, nil
+}
+
+// statusHooks returns the store options that keep s in step with the gitops
+// repo: the status of the previews a landed push deleted is deleted, and
+// every fetch that moves the head collects the status of the previews no
+// longer there.
+func statusHooks(s *status.Store) []store.Option {
+	return []store.Option{
+		store.WithApplied(func(res store.Result) { s.Delete(res.Deleted...) }),
+		store.WithHeadMoved(s.CollectGarbage),
 	}
 }
 

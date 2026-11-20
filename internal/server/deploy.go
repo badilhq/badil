@@ -27,6 +27,9 @@ type storeAPI interface {
 	lifecycle.ReconcileStore
 	lifecycle.SyncStore
 	FullName() string
+	// GetPreview reads previews/<slug>/values.yaml, store.ErrNotFound when
+	// it does not exist.
+	GetPreview(ctx context.Context, slug string) (*preview.PreviewValues, string, error)
 	// Invalidate makes the next read check the gitops remote at once.
 	Invalidate()
 }

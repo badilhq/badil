@@ -59,12 +59,15 @@ type Op struct {
 // Result is the outcome of a successful Apply. NoOp is true when the last
 // attempt's Change changed nothing: nothing was committed, and Commit is the
 // remote head it ran on. Otherwise Commit is the pushed commit. Subject is
-// Commit's subject line, URL its GitHub URL.
+// Commit's subject line, URL its GitHub URL. Deleted holds the sorted slugs
+// of the previews whose previews/<slug>/values.yaml the pushed commit
+// deleted, empty when none.
 type Result struct {
 	NoOp    bool
 	Commit  string
 	Subject string
 	URL     string
+	Deleted []string
 }
 
 // Apply runs op on the gitops repo as one commit. Operations are serialised
@@ -75,7 +78,9 @@ type Result struct {
 // fetch is a conflict: it is counted, and the next attempt starts again from
 // a new fetch, after a backoff, up to maxAttempts attempts. Any other push
 // failure is returned, as ErrUnauthorized when the remote refused the
-// credentials. Its duration, retries included, is observed as op.Kind.
+// credentials. Its duration, retries included, is observed as op.Kind. Once
+// a push landed, Apply calls the store's WithApplied callback with its
+// result.
 //
 // An Apply waiting for the one before it gives up when ctx is done, with
 // ctx's error and nothing run, observed as a failed op.Kind.
@@ -88,6 +93,9 @@ func (c *GitHubStore) Apply(ctx context.Context, op Op) (Result, error) {
 	start := time.Now()
 	res, err := c.apply(ctx, op)
 	c.observe(op.Kind, start, err)
+	if err == nil && !res.NoOp && c.applied != nil {
+		c.applied(res)
+	}
 	return res, err
 }
 
@@ -176,7 +184,9 @@ func (c *GitHubStore) attempt(ctx context.Context, op Op) (Result, plumbing.Hash
 	if err = c.clone.advance(parent, commit); err != nil {
 		return Result{}, parent, err
 	}
-	return Result{Commit: commit.String(), Subject: summary.Subject, URL: c.commitURL(commit)}, parent, nil
+	return Result{
+		Commit: commit.String(), Subject: summary.Subject, URL: c.commitURL(commit), Deleted: tree.deleted(),
+	}, parent, nil
 }
 
 // noop returns the result of an attempt that changed nothing on parent.

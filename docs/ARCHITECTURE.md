@@ -1,6 +1,6 @@
 # Architecture
 
-Self-hosted, single-tenant. Everything runs in the user's cluster; badil talks to GitHub through the user's own GitHub App and never touches the cluster directly: ArgoCD does the deploys.
+Self-hosted, single-tenant. Everything runs in the user's cluster; badil talks to GitHub through the user's own GitHub App and never touches preview namespaces: ArgoCD does the deploys. badil's only Kubernetes access is the status ConfigMaps of its own namespace (see [Preview status](#preview-status)).
 
 ```mermaid
 flowchart LR
@@ -11,6 +11,7 @@ flowchart LR
   pr -->|webhook| badil
   badil -.->|PR comment| pr
   argo -.->|deployment status| pr
+  argo -.->|status callback| badil
 
   classDef github stroke:#8c959f,stroke-width:2px
   classDef badil stroke:#1a7f37,stroke-width:2px
@@ -26,6 +27,7 @@ flowchart LR
 
 - Each service repo's CI builds and pushes its images, and makes no deploy call.
 - The deployment status is optional: Argo CD's notifications controller posts it as GitHub Deployments, through its own GitHub App (see [Preview deployments on GitHub](#preview-deployments-on-github)).
+- The status callback is optional: the same controller reports each preview service's status to badil (see [Preview status](#preview-status)).
 - Closing or unlabelling a PR, and the [cleanup sweep](#cleanup-sweep), unpin services or delete preview files; a push changing `badil.yaml`, or `POST /v1/sync`, resyncs every preview (see [Config sync](#config-sync)); Argo CD prunes what was removed.
 - `POST /v1/deploy` and `POST /v1/sync` exist only when `BADIL_DEPLOY_TOKEN` is set.
 
@@ -35,13 +37,13 @@ badil is a few binaries and charts. Each service repo adds its own chart.
 
 | Component | Where | Role |
 |---|---|---|
-| `badil serve` | this repo | chi HTTP server: GitHub and Argo CD webhooks, and the optional deploy and sync endpoints. See the [HTTP API reference](API.md). |
+| `badil serve` | this repo | chi HTTP server: the GitHub webhook, the renderer's status callback, and the optional deploy and sync endpoints. Keeps each preview's status in memory and in a ConfigMap of its namespace. See the [HTTP API reference](API.md). |
 | `badil cleanup` | this repo | One-shot [cleanup sweep](#cleanup-sweep), run by a CronJob (hourly). |
 | `badil bootstrap-app` / `verify-app` | this repo | Create a GitHub App via the manifest flow / check credentials. |
 | `preview-apps` chart | this repo, [`charts/preview-apps`](../charts/preview-apps) | The [renderer](CONTRACT.md#preview-contract) badil ships: an AppProject, a Namespace, and one Argo CD Application per service and per dependency. Application annotations `preview.badil.dev/*` carry the PR metadata. |
 | ApplicationSet | this repo, [`examples/argocd`](../examples/argocd) | Git directory generator on `previews/*`. |
 | Service chart | each service repo | Built on the `app` chart, [`charts/app`](../charts/app). See the [Service repo contract](CONFIGURATION.md#service-repo-contract). |
-| `badil` chart | this repo, [`charts/badil`](../charts/badil) | Installs `badil serve` (Deployment, Service, optional Ingress) and the cleanup CronJob (off by default). |
+| `badil` chart | this repo, [`charts/badil`](../charts/badil) | Installs `badil serve` (Deployment, Service, optional Ingress, and a Role for the ConfigMaps of its namespace) and the cleanup CronJob (off by default). |
 
 ## How a preview flows
 
@@ -140,9 +142,30 @@ Rules: [Config sync](CLEANUP.md#config-sync).
 
 ## Preview deployments on GitHub
 
-Argo CD, not badil, knows whether a preview service is healthy. So Argo CD's notifications controller, not badil, posts GitHub Deployments for pinned services, through its own GitHub App. The same controller sends badil the spin-up time of each service.
+Argo CD, not badil, knows whether a preview service is healthy. So Argo CD's notifications controller, not badil, posts GitHub Deployments for pinned services, through its own GitHub App.
 
 Triggers and limitations: [Preview deployments on GitHub](OPERATIONS.md#preview-deployments-on-github).
+
+## Preview status
+
+The renderer, not badil, sees the cluster. It reports each preview service's status through the [status callback](CONTRACT.md#status-callback), `POST /webhooks/status`; Argo CD's notifications controller is the reference sender.
+
+```mermaid
+flowchart LR
+  argo["Argo CD<br/>notifications"] -->|POST /webhooks/status| badil["badil serve"]
+  badil -->|read preview file| repo[("gitops repo")]
+  badil -->|memory| mem["latest status<br/>per service"]
+  mem -.->|every 5 s at most| cm["ConfigMap<br/>badil-status-&lt;slug&gt;"]
+  cm -.->|on start| mem
+```
+
+- badil records an event only for a preview and a service the gitops repo has, and only when it is not older than the stored status.
+- Memory is the source of truth for reads. Each preview's status is written to one ConfigMap of badil's namespace, coalesced, and read back on start, so a restart keeps it.
+- A deleted preview loses its status and ConfigMap: at once when the server's own commit deleted it, and otherwise once a fetch moves the gitops repo's head past the deletion (`badil cleanup`, a manual deletion).
+- badil's Kubernetes access is limited to its own namespace's ConfigMaps (a Role with get, list, create, update and delete). It never reads or writes preview namespaces; the renderer still does every deploy and deletion.
+- The first `ready` of a pinned service at its pinned revision gives its spin-up time.
+
+Details: [Preview status](OPERATIONS.md#preview-status).
 
 ## Preview data
 
