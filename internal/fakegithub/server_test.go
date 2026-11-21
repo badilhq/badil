@@ -3,6 +3,7 @@ package fakegithub_test
 import (
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -170,13 +171,8 @@ func TestUnknownRoutes(t *testing.T) {
 		"DELETE /repos/acme/web/pulls/1":             1,
 		"GET /repos/{owner}/{repo}/pulls/{number}":   1,
 	}
-	if len(stats) != len(want) {
+	if !maps.Equal(stats, want) {
 		t.Errorf("stats = %v, want %v", stats, want)
-	}
-	for k, v := range want {
-		if stats[k] != v {
-			t.Errorf("stats[%q] = %d, want %d (stats %v)", k, stats[k], v, stats)
-		}
 	}
 }
 

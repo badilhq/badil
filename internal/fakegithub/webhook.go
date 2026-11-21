@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -13,6 +12,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // delivery is the outcome of a webhook delivery, as a control call reports
@@ -61,7 +62,7 @@ func (s *Server) post(ctx context.Context, event string, payload any) (int, erro
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Github-Event", event)
-	req.Header.Set("X-Github-Delivery", newUUID())
+	req.Header.Set("X-Github-Delivery", uuid.NewString())
 	req.Header.Set("X-Hub-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)))
 	resp, err := s.webhook.Do(req)
 	if err != nil {
@@ -70,23 +71,4 @@ func (s *Server) post(ctx context.Context, event string, payload any) (int, erro
 	_, _ = io.Copy(io.Discard, resp.Body)
 	_ = resp.Body.Close()
 	return resp.StatusCode, nil
-}
-
-// UUID version 4 bits: the version nibble of byte 6 and the variant bits of
-// byte 8.
-const (
-	uuidVersionMask = 0x0f
-	uuidVersion4    = 0x40
-	uuidVariantMask = 0x3f
-	uuidVariantRFC  = 0x80
-)
-
-// newUUID returns a random (version 4) UUID.
-func newUUID() string {
-	var b [16]byte
-	_, _ = rand.Read(b[:])
-	b[6] = b[6]&uuidVersionMask | uuidVersion4
-	b[8] = b[8]&uuidVariantMask | uuidVariantRFC
-	h := hex.EncodeToString(b[:])
-	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
 }

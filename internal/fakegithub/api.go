@@ -2,9 +2,9 @@ package fakegithub
 
 import (
 	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"slices"
@@ -26,9 +26,6 @@ const (
 
 // appOwner is the login of the App's owner and of its installation's account.
 const appOwner = "badil"
-
-// tokenBytes is the number of random bytes of an installation token.
-const tokenBytes = 20
 
 // routeAPI registers the API routes under apiPrefix. Each route counts its
 // calls under its pattern, before auth; any other path 404s.
@@ -96,7 +93,7 @@ func (s *Server) requireToken(next http.HandlerFunc) http.HandlerFunc {
 		s.mu.Lock()
 		expiry, issued := s.tokens[t]
 		s.mu.Unlock()
-		if t == "" || !issued || !time.Now().Before(expiry) {
+		if !issued || !time.Now().Before(expiry) {
 			badCredentials(w)
 			return
 		}
@@ -111,9 +108,7 @@ func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
 		notFound(w)
 		return
 	}
-	b := make([]byte, tokenBytes)
-	_, _ = rand.Read(b)
-	token := "ghs_" + hex.EncodeToString(b)
+	token := "ghs_" + rand.Text()
 	expiry := time.Now().Add(s.cfg.TokenTTL)
 	s.mu.Lock()
 	s.tokens[token] = expiry
@@ -153,21 +148,14 @@ func (s *Server) getUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.botUser())
 }
 
-// listPulls answers GET /repos/{owner}/{repo}/pulls: the pull requests in
-// state (default open, or closed, or all), by number.
+// listPulls answers GET /repos/{owner}/{repo}/pulls: the open pull requests,
+// by number.
 func (s *Server) listPulls(w http.ResponseWriter, r *http.Request) {
-	state := r.URL.Query().Get("state")
 	s.mu.Lock()
 	repo := s.repo(r.PathValue("owner"), r.PathValue("repo"))
-	numbers := make([]int, 0, len(repo.pulls))
-	for n := range repo.pulls {
-		numbers = append(numbers, n)
-	}
-	slices.Sort(numbers)
 	var out []*gh.PullRequest
-	for _, n := range numbers {
-		pr := repo.pulls[n]
-		if state == "all" || (state == "closed") != pr.open {
+	for _, n := range slices.Sorted(maps.Keys(repo.pulls)) {
+		if pr := repo.pulls[n]; pr.open {
 			out = append(out, s.pullJSON(repo, pr))
 		}
 	}
@@ -364,11 +352,7 @@ func writePage[T any](w http.ResponseWriter, r *http.Request, items []T) {
 	if end < len(items) {
 		q.Set("page", strconv.Itoa(page+1))
 		q.Set("per_page", strconv.Itoa(perPage))
-		scheme := "http"
-		if r.TLS != nil {
-			scheme = "https"
-		}
-		next := url.URL{Scheme: scheme, Host: r.Host, Path: r.URL.Path, RawQuery: q.Encode()}
+		next := url.URL{Scheme: "http", Host: r.Host, Path: r.URL.Path, RawQuery: q.Encode()}
 		w.Header().Set("Link", "<"+next.String()+`>; rel="next"`)
 	}
 	out := items[start:end]

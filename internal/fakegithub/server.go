@@ -100,7 +100,6 @@ func New(cfg Config) *Server {
 	if cfg.TokenTTL == 0 {
 		cfg.TokenTTL = defaultTokenTTL
 	}
-	cfg.WebURL = strings.TrimSuffix(cfg.WebURL, "/")
 	s := &Server{
 		cfg:     cfg,
 		webhook: &http.Client{Timeout: webhookTimeout},
