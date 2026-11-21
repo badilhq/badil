@@ -6,9 +6,10 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/badilhq/badil/internal/store"
 )
 
 // Config holds all application configuration.
@@ -106,12 +107,11 @@ func Load() (*Config, error) {
 }
 
 // validateRepoURL checks raw is an http(s) URL with a host, no user info, query
-// or fragment, and a path of at least two non-empty segments once its leading
-// "/", a trailing "/" and then a trailing ".git" are removed. Its error reads
-// after the setting's name.
+// or fragment, and a path store.RepoFullName accepts. Its error reads after the
+// setting's name.
 func validateRepoURL(raw string) error {
 	u, err := url.Parse(raw)
-	if ue := (*url.Error)(nil); errors.As(err, &ue) {
+	if ue, ok := errors.AsType[*url.Error](err); ok {
 		// The URL itself stays out of the error: it may hold credentials.
 		err = ue.Err
 	}
@@ -129,10 +129,7 @@ func validateRepoURL(raw string) error {
 	case strings.Contains(raw, "#"):
 		return errors.New("must not have a fragment")
 	}
-	p := strings.TrimPrefix(u.Path, "/")
-	p = strings.TrimSuffix(strings.TrimSuffix(p, "/"), ".git")
-	segments := strings.Split(p, "/")
-	if len(segments) < 2 || slices.Contains(segments, "") {
+	if _, ok := store.RepoFullName(u.Path); !ok {
 		return fmt.Errorf("must have a repository path of at least two segments, got %q", u.Path)
 	}
 	return nil
