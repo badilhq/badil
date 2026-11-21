@@ -188,6 +188,7 @@ func TestLoad_InvalidGitOpsRepoURL(t *testing.T) {
 		{"file:///srv/acme/gitops.git", `GITOPS_REPO_URL must be an https or http URL, got scheme "file"`},
 		{"github.com/acme/gitops.git", `GITOPS_REPO_URL must be an https or http URL, got scheme ""`},
 		{"https:///acme/gitops.git", "GITOPS_REPO_URL must have a host"},
+		{"https://:443/acme/gitops.git", "GITOPS_REPO_URL must have a host"},
 		{
 			"https://x-access-token:secret@github.com/acme/gitops.git",
 			"GITOPS_REPO_URL must not contain credentials: set GITOPS_REPO_TOKEN",

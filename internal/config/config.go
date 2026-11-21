@@ -120,7 +120,7 @@ func validateRepoURL(raw string) error {
 		return fmt.Errorf("must be a URL: %w", err)
 	case u.Scheme != "https" && u.Scheme != "http":
 		return fmt.Errorf("must be an https or http URL, got scheme %q", u.Scheme)
-	case u.Host == "":
+	case u.Hostname() == "":
 		return errors.New("must have a host")
 	case u.User != nil:
 		return errors.New("must not contain credentials: set GITOPS_REPO_TOKEN")
