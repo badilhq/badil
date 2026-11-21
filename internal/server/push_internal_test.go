@@ -27,6 +27,8 @@ var errUnexpected = errors.New("unexpected call")
 // sets before each delivery, so the push tests reach the handler without
 // signing.
 type pushForge struct {
+	storetest.GitHubURLs
+
 	event forge.Event
 }
 
@@ -34,16 +36,6 @@ func (f *pushForge) ParseWebhook(*http.Request) (forge.Event, error) { return f.
 
 func (*pushForge) GetPullRequest(context.Context, string, string, int) (*forge.PullRequest, error) {
 	return nil, errUnexpected
-}
-
-// ParseRepoURL is the default GitHub rule (storetest.GitHubForge).
-func (*pushForge) ParseRepoURL(u string) (string, string, bool) {
-	return storetest.GitHubForge.ParseRepoURL(u)
-}
-
-// ParsePRURL is the default GitHub rule (storetest.GitHubForge).
-func (*pushForge) ParsePRURL(u string) (string, string, int, bool) {
-	return storetest.GitHubForge.ParsePRURL(u)
 }
 
 func (*pushForge) ListChangedFiles(context.Context, string, string, int) ([]forge.ChangedFile, error) {

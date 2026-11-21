@@ -51,6 +51,7 @@ type fanOut struct {
 // "owner/repo#n". Each push first runs beforePush when set, whose error fails
 // the push. Metrics records the outcomes; nil records nothing.
 type fakeAPI struct {
+	storetest.GitHubURLs
 	*metrics.Metrics
 
 	noCatalog  bool
@@ -112,16 +113,6 @@ func (f *fakeAPI) ListOpenPullRequests(context.Context, string, string) ([]forge
 
 func (f *fakeAPI) ParseWebhook(*http.Request) (forge.Event, error) {
 	return forge.Event{}, errors.New("unexpected ParseWebhook")
-}
-
-// ParseRepoURL is the default GitHub rule (storetest.GitHubForge).
-func (*fakeAPI) ParseRepoURL(u string) (string, string, bool) {
-	return storetest.GitHubForge.ParseRepoURL(u)
-}
-
-// ParsePRURL is the default GitHub rule (storetest.GitHubForge).
-func (*fakeAPI) ParsePRURL(u string) (string, string, int, bool) {
-	return storetest.GitHubForge.ParsePRURL(u)
 }
 
 // api is the lifecycle.SweepAPI over f: its store, forge and recorder, with

@@ -18,7 +18,7 @@ const DefaultAPIURL = "https://api.github.com/"
 // the host itself writes, which the case-sensitive PR URL rule compares
 // against. Its error reads after the setting's name.
 func ParseWebURL(raw string) (string, error) {
-	u, err := parseBaseURL(raw)
+	u, err := ParseBaseURL(raw)
 	if err != nil {
 		return "", err
 	}
@@ -39,13 +39,17 @@ var defaultPorts = map[string]string{"https": "443", "http": "80"}
 // a host, no user info, query or fragment, and any path. Its error reads after
 // the setting's name.
 func ValidateAPIURL(raw string) error {
-	_, err := parseBaseURL(raw)
+	_, err := ParseBaseURL(raw)
 	return err
 }
 
-// parseBaseURL parses raw as an https or http URL with a host, no user info,
-// query or fragment. The URL stays out of its error: it may hold credentials.
-func parseBaseURL(raw string) (*url.URL, error) {
+// ErrUserInfo is ParseBaseURL's error for a URL with user info.
+var ErrUserInfo = errors.New("must not contain user info")
+
+// ParseBaseURL parses raw as an https or http URL with a host, no user info
+// (ErrUserInfo), query or fragment. The URL stays out of its error: it may
+// hold credentials. Its error reads after the setting's name.
+func ParseBaseURL(raw string) (*url.URL, error) {
 	u, err := url.Parse(raw)
 	if ue, ok := errors.AsType[*url.Error](err); ok {
 		err = ue.Err
@@ -58,7 +62,7 @@ func parseBaseURL(raw string) (*url.URL, error) {
 	case u.Hostname() == "":
 		return nil, errors.New("must have a host")
 	case u.User != nil:
-		return nil, errors.New("must not contain user info")
+		return nil, ErrUserInfo
 	case u.RawQuery != "" || u.ForceQuery:
 		return nil, errors.New("must not have a query")
 	case strings.Contains(raw, "#"):

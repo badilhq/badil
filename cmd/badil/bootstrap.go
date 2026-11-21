@@ -101,8 +101,9 @@ type bootstrapOpts struct {
 	owner         string
 	webhookURL    string
 	assumeYes     bool
-	// githubURL is GITHUB_URL without a trailing "/" and githubAPIURL is
-	// GITHUB_API_URL, validated (config.LoadGitHubURLs).
+	// githubURL is GITHUB_URL as the canonical base github.ParseWebURL
+	// returns and githubAPIURL is GITHUB_API_URL, validated
+	// (config.LoadGitHubURLs).
 	githubURL    string
 	githubAPIURL string
 }
@@ -185,7 +186,7 @@ func runBootstrap(ctx context.Context, stdin io.Reader, stdout io.Writer, opts b
 		return fmt.Errorf("timed out waiting for GitHub callback: %w", ctx.Err())
 	}
 
-	client, err := github.NewClient(nil, opts.githubAPIURL)
+	client, err := github.NewClient(opts.githubAPIURL)
 	if err != nil {
 		return fmt.Errorf("GITHUB_API_URL: %w", err)
 	}

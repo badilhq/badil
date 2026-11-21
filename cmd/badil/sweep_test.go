@@ -35,6 +35,7 @@ var errUnexpected = errors.New("unexpected call")
 // front, on acme/front, whose open PRs are openPRs, or openErr. Run counts
 // the catch-ups of a sweep loop.
 type loopFake struct {
+	storetest.GitHubURLs
 	*metrics.Metrics
 
 	slugs   []string
@@ -122,16 +123,6 @@ func (f *loopFake) ListOpenPullRequests(context.Context, string, string) ([]forg
 
 func (f *loopFake) ParseWebhook(*http.Request) (forge.Event, error) {
 	return forge.Event{}, errUnexpected
-}
-
-// ParseRepoURL is the default GitHub rule (storetest.GitHubForge).
-func (*loopFake) ParseRepoURL(u string) (string, string, bool) {
-	return storetest.GitHubForge.ParseRepoURL(u)
-}
-
-// ParsePRURL is the default GitHub rule (storetest.GitHubForge).
-func (*loopFake) ParsePRURL(u string) (string, string, int, bool) {
-	return storetest.GitHubForge.ParsePRURL(u)
 }
 
 // api is the lifecycle.SweepAPI over f: its store, forge and recorder, with
