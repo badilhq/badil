@@ -42,6 +42,7 @@ const fetchedSHA = "fe7c4ed0000000000000000000000000000000ff"
 // whose error fails the push. calls logs, in order, "files", "apply",
 // "upsert" and "fanout". Metrics records the outcomes; nil records nothing.
 type reconcileFake struct {
+	storetest.GitHubURLs
 	*metrics.Metrics
 
 	badil       string
@@ -129,16 +130,6 @@ func (f *reconcileFake) UpsertComment(_ context.Context, _, _ string, _ int, bod
 
 func (f *reconcileFake) ParseWebhook(*http.Request) (forge.Event, error) {
 	return forge.Event{}, errors.New("unexpected ParseWebhook")
-}
-
-// ParseRepoURL is the default GitHub rule (storetest.GitHubForge).
-func (*reconcileFake) ParseRepoURL(u string) (string, string, bool) {
-	return storetest.GitHubForge.ParseRepoURL(u)
-}
-
-// ParsePRURL is the default GitHub rule (storetest.GitHubForge).
-func (*reconcileFake) ParsePRURL(u string) (string, string, int, bool) {
-	return storetest.GitHubForge.ParsePRURL(u)
 }
 
 // fanOut records body as posted on the open PRs of a preview.
