@@ -29,7 +29,7 @@ type Forge struct {
 	gh             *gh.Client
 	app            *ghapp.App
 	installationID int64
-	// webURL is GITHUB_URL without a trailing "/".
+	// webURL is GITHUB_URL as the canonical base ghapp.ParseWebURL returns.
 	webURL string
 	// prURL matches a pull request URL of webURL: owner, repo and number.
 	prURL *regexp.Regexp

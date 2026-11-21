@@ -41,7 +41,7 @@ func NewApp(cfg AppConfig) (*App, error) {
 	if isDefaultAPIURL(cfg.APIURL) {
 		return app, nil
 	}
-	c, err := NewClient(nil, cfg.APIURL)
+	c, err := NewClient(cfg.APIURL)
 	if err != nil {
 		return nil, fmt.Errorf("GitHub API URL: %w", err)
 	}
@@ -86,17 +86,13 @@ func (a *App) Client(rt http.RoundTripper) *gh.Client {
 	return c
 }
 
-// NewClient returns a go-github client over rt, http.DefaultTransport when
-// nil, on the API base apiURL: gh.NewClient's default when apiURL is "" or
-// DefaultAPIURL, else WithEnterpriseURLs(apiURL, apiURL), which appends
-// "api/v3/" to a base whose path does not end with it and whose host neither
-// starts with "api." nor contains ".api.".
-func NewClient(rt http.RoundTripper, apiURL string) (*gh.Client, error) {
-	var hc *http.Client
-	if rt != nil {
-		hc = &http.Client{Transport: rt}
-	}
-	c := gh.NewClient(hc)
+// NewClient returns an unauthenticated go-github client on the API base
+// apiURL: gh.NewClient's default when apiURL is "" or DefaultAPIURL, else
+// WithEnterpriseURLs(apiURL, apiURL), which appends "api/v3/" to a base whose
+// path does not end with it and whose host neither starts with "api." nor
+// contains ".api.".
+func NewClient(apiURL string) (*gh.Client, error) {
+	c := gh.NewClient(nil)
 	if isDefaultAPIURL(apiURL) {
 		return c, nil
 	}
