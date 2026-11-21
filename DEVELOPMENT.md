@@ -116,6 +116,100 @@ B='{"zen":"manual test","hook_id":1}'; hook ping "$(sign "$B")" "$B"     # 200 +
 
 A signed-but-unparseable delivery is authentic and there is nothing to re-queue, so it is logged and answered with 200; a non-2xx would only flag it as failed in Recent Deliveries.
 
+## Run badil against a mock GitHub
+
+`cmd/fakegithub` answers, from memory, the GitHub API calls badil makes (under `/api/v3/`), and sends badil a signed webhook for each call to its control API (under `/_mock/`): open a PR, label or unlabel it, push a new head SHA, close or reopen it, push to a repo. badil then runs without github.com, a GitHub App or a tunnel. A throwaway Gitea hosts the gitops repo. It needs Docker, `curl`, `jq` and `openssl`, and ports 3000, 8080 and 8090 free.
+
+Terminal 1: start Gitea, create the user `dev`, its token and the `gitops` repo, push a `badil.yaml` with one service `demo`, and write the settings the other terminals share:
+
+```bash
+docker run -d --name badil-gitea -p 3000:3000 -e GITEA__security__INSTALL_LOCK=true docker.gitea.com/gitea:28.4.0
+until curl -sf http://localhost:3000/api/healthz >/dev/null; do sleep 1; done
+
+docker exec -u git badil-gitea gitea admin user create \
+  --username dev --password dev-password --email dev@example.com --admin --must-change-password=false
+GITEA_TOKEN=$(docker exec -u git badil-gitea gitea admin user generate-access-token \
+  --username dev --token-name badil --scopes all --raw)
+
+curl -sf -X POST http://localhost:3000/api/v1/user/repos \
+  -H "Authorization: token $GITEA_TOKEN" -H 'Content-Type: application/json' -d '{"name":"gitops"}' >/dev/null
+
+seed=$(mktemp -d)
+cat > "$seed/badil.yaml" <<'EOF'
+services:
+  demo:
+    repo: http://localhost:3000/dev/demo.git
+EOF
+git -C "$seed" init -q -b main
+git -C "$seed" add badil.yaml
+git -C "$seed" -c user.name=dev -c user.email=dev@example.com commit -qm "seed badil.yaml"
+git -C "$seed" push -q "http://dev:$GITEA_TOKEN@localhost:3000/dev/gitops.git" main
+
+cat > /tmp/badil-mock.env <<EOF
+export FAKEGITHUB_WEBHOOK_SECRET=$(openssl rand -hex 32)
+export GITEA_TOKEN=$GITEA_TOKEN
+EOF
+```
+
+Still in terminal 1, start the mock. Its PR and repo URLs are on Gitea (`--web-url`), and its webhooks go to badil:
+
+```bash
+source /tmp/badil-mock.env
+go run ./cmd/fakegithub --web-url http://localhost:3000 --webhook-url http://localhost:8080/webhooks/github
+```
+
+Terminal 2: start badil on the mock's API, with `GITHUB_URL` equal to the mock's `--web-url`, `GITHUB_INSTALLATION_ID` equal to its `--installation-id` (default `1`) and the same webhook secret. The mock does not verify the App JWT, so any App ID and a throwaway key do:
+
+```bash
+source /tmp/badil-mock.env
+GITHUB_APP_ID=1 \
+GITHUB_PRIVATE_KEY="$(openssl genrsa 2048 2>/dev/null)" \
+GITHUB_WEBHOOK_SECRET=$FAKEGITHUB_WEBHOOK_SECRET \
+GITHUB_INSTALLATION_ID=1 \
+GITHUB_URL=http://localhost:3000 \
+GITHUB_API_URL=http://localhost:8090/api/v3/ \
+GITOPS_REPO_URL=http://localhost:3000/dev/gitops.git \
+GITOPS_REPO_TOKEN=$GITEA_TOKEN \
+go run ./cmd/badil serve
+```
+
+Terminal 3: open PR 1 on `dev/demo`, add the label `preview`, then wait for badil's comment. Each control call answers with the PR and `webhook`, badil's answer to the delivery (`"status": 200`, or `"error"` when badil is unreachable):
+
+```bash
+curl -s -X POST http://localhost:8090/_mock/repos/dev/demo/pulls \
+  -d '{"head_ref":"feature/demo","head_sha":"0000000000000000000000000000000000000001"}' | jq .webhook
+curl -s -X POST http://localhost:8090/_mock/repos/dev/demo/pulls/1/labels -d '{"name":"preview"}' | jq .webhook
+
+for i in $(seq 60); do
+  comments=$(curl -s http://localhost:8090/_mock/repos/dev/demo/pulls/1/comments)
+  [ "$(jq length <<<"$comments")" -gt 0 ] && break
+  sleep 1
+done
+jq -r '.[].body' <<<"$comments"
+```
+
+The other control calls:
+
+| Call | Body | Webhook |
+|---|---|---|
+| `POST /_mock/repos/{o}/{r}/pulls` | `{"head_ref", "head_sha", "number"?, "base"?, "author"?, "labels"?, "fork"?, "files"?: [{"filename", "status"?, "previous_filename"?}]}` | `pull_request` `opened` |
+| `POST /_mock/repos/{o}/{r}/pulls/{n}/labels` | `{"name"}` | `labeled` |
+| `DELETE /_mock/repos/{o}/{r}/pulls/{n}/labels/{name}` | | `unlabeled` |
+| `POST /_mock/repos/{o}/{r}/pulls/{n}/push` | `{"head_sha", "files"?}` | `synchronize` |
+| `POST /_mock/repos/{o}/{r}/pulls/{n}/close` | `{"merged"?}` | `closed` |
+| `POST /_mock/repos/{o}/{r}/pulls/{n}/reopen` | | `reopened` |
+| `POST /_mock/repos/{o}/{r}/push` | `{"after", "ref"?, "deleted"?}` | `push` |
+| `GET /_mock/repos/{o}/{r}/pulls/{n}/comments` | | none: the comments badil posted |
+| `GET /_mock/stats` | | none: the API calls per route |
+| `POST /_mock/reset` | | none: clears the repos, PRs, comments and counters |
+
+To stop, press Ctrl-C in terminals 1 and 2, then remove Gitea and the settings:
+
+```bash
+docker rm -f badil-gitea
+rm /tmp/badil-mock.env
+```
+
 ## Appendix A — common failures
 
 | Symptom | Cause | Fix |
