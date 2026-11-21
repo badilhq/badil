@@ -46,6 +46,14 @@ Server environment.
 - name: GITOPS_REPO_USERNAME
   value: {{ . | quote }}
 {{- end }}
+{{- with .Values.config.githubURL }}
+- name: GITHUB_URL
+  value: {{ . | quote }}
+{{- end }}
+{{- with .Values.config.githubAPIURL }}
+- name: GITHUB_API_URL
+  value: {{ . | quote }}
+{{- end }}
 - name: LISTEN_ADDR
   value: ":{{ .Values.service.port }}"
 - name: GITOPS_CLONE_DIR

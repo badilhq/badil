@@ -73,7 +73,11 @@ func TestStatusHooks(t *testing.T) {
 	if err := loadStatus(ctx, previewStatus); err != nil {
 		t.Fatal(err)
 	}
-	st, err := store.Open(ctx, store.CloneConfig{URL: remote.URL()}, storetest.Identity,
+	st, err := store.Open(
+		ctx,
+		store.CloneConfig{URL: remote.URL()},
+		storetest.Identity,
+		storetest.GitHubForge.ParsePRURL,
 		statusHooks(previewStatus, server.NewWake())...)
 	if err != nil {
 		t.Fatal(err)

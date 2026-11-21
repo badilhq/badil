@@ -34,7 +34,7 @@ func TestSync(t *testing.T) {
 			name: "added service", files: []string{pinnedFile()},
 			catalog: func(c *store.ServiceCatalog) {
 				c.Services = []string{"backend-1", "front", "backend-2"}
-				c.Repos["front"] = "https://github.com/acme/front.git"
+				c.Catalog.Repos["front"] = "https://github.com/acme/front.git"
 			},
 			wantChanged: true, wantNotify: true, wantPuts: 1,
 			want: func(v *preview.PreviewValues) {

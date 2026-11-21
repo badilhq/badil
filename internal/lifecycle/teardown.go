@@ -218,7 +218,8 @@ func afterTeardown(
 		return true
 	}
 	summary := preview.BuildSummary(
-		tt.Slug, result.Values, result.Catalog.URLs, result.Catalog.ArgoCDURL, result.Excluded, res.Subject, res.URL,
+		api.Forge.ParsePRURL, tt.Slug, result.Values, result.Catalog.URLs, result.Catalog.ArgoCDURL,
+		result.Excluded, res.Subject, res.URL,
 	)
 	if fanErr := api.FanOut(ctx, api.Forge, result.Values, summary); fanErr != nil {
 		teardownCommentFailed(ctx, tt, fanErr)

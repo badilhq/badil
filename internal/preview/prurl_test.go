@@ -3,33 +3,24 @@ package preview_test
 import (
 	"testing"
 
+	forgegithub "github.com/badilhq/badil/internal/forge/github"
 	"github.com/badilhq/badil/internal/preview"
 )
 
-func TestParsePRURL(t *testing.T) {
-	cases := []struct {
-		name      string
-		in        string
-		wantOwner string
-		wantRepo  string
-		wantNum   int
-		wantOK    bool
-	}{
-		{"valid", "https://github.com/acme/backend-1/pull/42", "acme", "backend-1", 42, true},
-		{"trailing path", "https://github.com/acme/backend-1/pull/42/files", "acme", "backend-1", 42, true},
-		{"non-github host", "https://gitlab.com/acme/backend-1/pull/42", "", "", 0, false},
-		{"missing number", "https://github.com/acme/backend-1/pull/", "", "", 0, false},
-		{"number overflow", "https://github.com/acme/backend-1/pull/99999999999999999999", "", "", 0, false},
+// githubForge returns the GitHub forge on webURL, for its URL rules only.
+func githubForge(t *testing.T, webURL string) *forgegithub.Forge {
+	t.Helper()
+	f, err := forgegithub.New(nil, nil, 0, webURL)
+	if err != nil {
+		t.Fatalf("forgegithub.New(%q): %v", webURL, err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			owner, repo, num, ok := preview.ParsePRURL(tc.in)
-			if owner != tc.wantOwner || repo != tc.wantRepo || num != tc.wantNum || ok != tc.wantOK {
-				t.Errorf("ParsePRURL(%q) = (%q, %q, %d, %v), want (%q, %q, %d, %v)",
-					tc.in, owner, repo, num, ok, tc.wantOwner, tc.wantRepo, tc.wantNum, tc.wantOK)
-			}
-		})
-	}
+	return f
+}
+
+// parsePR is the default GitHub pull request URL rule.
+func parsePR(t *testing.T) preview.PRURLParser {
+	t.Helper()
+	return githubForge(t, "https://github.com").ParsePRURL
 }
 
 func TestMatchesPR(t *testing.T) {
@@ -49,9 +40,19 @@ func TestMatchesPR(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := preview.MatchesPR(tc.url, "acme", "front", 7); got != tc.want {
+			if got := preview.MatchesPR(parsePR(t), tc.url, "acme", "front", 7); got != tc.want {
 				t.Errorf("MatchesPR(%q, acme, front, 7) = %v, want %v", tc.url, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestMatchesPR_CustomHost(t *testing.T) {
+	parse := githubForge(t, "http://gitea.local:3000").ParsePRURL
+	if !preview.MatchesPR(parse, "http://gitea.local:3000/acme/front/pull/7", "acme", "front", 7) {
+		t.Error("MatchesPR on gitea.local = false for its own PR URL, want true")
+	}
+	if preview.MatchesPR(parse, "https://github.com/acme/front/pull/7", "acme", "front", 7) {
+		t.Error("MatchesPR on gitea.local = true for a github.com PR URL, want false")
 	}
 }

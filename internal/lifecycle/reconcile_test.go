@@ -131,6 +131,16 @@ func (f *reconcileFake) ParseWebhook(*http.Request) (forge.Event, error) {
 	return forge.Event{}, errors.New("unexpected ParseWebhook")
 }
 
+// ParseRepoURL is the default GitHub rule (storetest.GitHubForge).
+func (*reconcileFake) ParseRepoURL(u string) (string, string, bool) {
+	return storetest.GitHubForge.ParseRepoURL(u)
+}
+
+// ParsePRURL is the default GitHub rule (storetest.GitHubForge).
+func (*reconcileFake) ParsePRURL(u string) (string, string, int, bool) {
+	return storetest.GitHubForge.ParsePRURL(u)
+}
+
 // fanOut records body as posted on the open PRs of a preview.
 func (f *reconcileFake) fanOut(_ context.Context, _ forge.Forge, _ preview.PreviewValues, body string) error {
 	f.calls = append(f.calls, "fanout")
@@ -532,7 +542,7 @@ func TestReconcile_OpLabels(t *testing.T) {
 			m := metrics.New()
 			remote := storetest.NewRemote(t, map[string]string{"badil.yaml": reconcileServices})
 			st, err := store.Open(context.Background(), store.CloneConfig{URL: remote.URL()},
-				storetest.Identity, store.WithMetrics(m))
+				storetest.Identity, storetest.GitHubForge.ParsePRURL, store.WithMetrics(m))
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}

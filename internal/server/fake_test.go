@@ -254,6 +254,16 @@ func (f *fakeGitops) ParseWebhook(*http.Request) (forge.Event, error) {
 	return forge.Event{}, errors.New("unexpected ParseWebhook")
 }
 
+// ParseRepoURL is the default GitHub rule (storetest.GitHubForge).
+func (*fakeGitops) ParseRepoURL(u string) (string, string, bool) {
+	return storetest.GitHubForge.ParseRepoURL(u)
+}
+
+// ParsePRURL is the default GitHub rule (storetest.GitHubForge).
+func (*fakeGitops) ParsePRURL(u string) (string, string, int, bool) {
+	return storetest.GitHubForge.ParsePRURL(u)
+}
+
 func (f *fakeGitops) FetchServiceCatalogSHA(ctx context.Context) (*store.ServiceCatalog, string, error) {
 	f.syncMu.Lock()
 	f.catalogInvalidations = f.invalidations

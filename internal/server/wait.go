@@ -187,7 +187,7 @@ func (s *Server) evalPR(ctx context.Context, q prQuery) (*WaitResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(catalog.ServicesForRepo(q.owner, q.repo)) == 0 {
+	if len(catalog.ServicesForRepo(s.forge.ParseRepoURL, q.owner, q.repo)) == 0 {
 		return newWaitResponse(stateRefused, lifecycle.RepoNotInCatalogReason, "", q.sha), nil
 	}
 	key := lifecycle.PRKey(lifecycle.Target{Owner: q.owner, Repo: q.repo, Number: q.number})
@@ -202,7 +202,7 @@ func (s *Server) evalPR(ctx context.Context, q prQuery) (*WaitResponse, error) {
 	}
 	byPR := func(svc *preview.ServiceEntry) bool {
 		return svc.CommitSha != "" && svc.Metadata != nil &&
-			preview.MatchesPR(svc.Metadata.PRURL, q.owner, q.repo, q.number)
+			preview.MatchesPR(s.forge.ParsePRURL, svc.Metadata.PRURL, q.owner, q.repo, q.number)
 	}
 	for _, v := range views {
 		for i := range v.vals.Services {

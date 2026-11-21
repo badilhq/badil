@@ -345,11 +345,25 @@ func TestOpen_RejectsEmptyIdentity(t *testing.T) {
 		{Name: storetest.Identity.Name},
 		{},
 	} {
-		st, err := store.Open(context.Background(), store.CloneConfig{URL: remote.URL()}, id)
+		st, err := store.Open(
+			context.Background(),
+			store.CloneConfig{URL: remote.URL()},
+			id,
+			storetest.GitHubForge.ParsePRURL,
+		)
 		if err == nil {
 			_ = st.Close()
 			t.Errorf("Open with identity %+v = nil error, want one", id)
 		}
+	}
+}
+
+func TestOpen_RejectsNilPRURLParser(t *testing.T) {
+	remote := newRemote(t, applyFiles)
+	st, err := store.Open(context.Background(), store.CloneConfig{URL: remote.URL()}, storetest.Identity, nil)
+	if err == nil {
+		_ = st.Close()
+		t.Fatal("Open with a nil pull request URL parser = nil error, want one")
 	}
 }
 

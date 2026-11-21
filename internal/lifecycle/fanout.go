@@ -15,7 +15,7 @@ type FanOutFunc func(ctx context.Context, f forge.Forge, vals preview.PreviewVal
 
 // FanOutPRComments posts (or updates) the same markdown body as badil's
 // comment (forge.Forge.UpsertComment) on every open PR referenced in
-// vals.Services.Metadata.pr-url. Closed PRs are skipped, so a stale summary
+// vals.Services.Metadata.pr-url, parsed with f.ParsePRURL. Closed PRs are skipped, so a stale summary
 // never overwrites their teardown comment. Failures on individual services
 // (including a PR state lookup) are collected but do not abort the loop —
 // best-effort delivery.
@@ -26,7 +26,7 @@ func FanOutPRComments(ctx context.Context, f forge.Forge, vals preview.PreviewVa
 			continue
 		}
 		prURL := svc.Metadata.PRURL
-		owner, repo, prNumber, ok := preview.ParsePRURL(prURL)
+		owner, repo, prNumber, ok := f.ParsePRURL(prURL)
 		if !ok {
 			errs = append(errs, fmt.Errorf("service %s: unrecognized pr-url %q", svc.Name, prURL))
 			continue

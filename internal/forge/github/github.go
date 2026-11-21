@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 
 	gh "github.com/google/go-github/v71/github"
@@ -21,21 +22,37 @@ const prCommentMarker = "<!-- badil:preview -->"
 // perPage is the page size of the list calls, GitHub's maximum.
 const perPage = 100
 
-// Forge is the GitHub forge: pull requests and comments through client, and
+// Forge is the GitHub forge: pull requests and comments through client,
 // webhook deliveries signed with app's secret from the installation
-// installationID.
+// installationID, and the repo and pull request URLs of its web URL.
 type Forge struct {
 	gh             *gh.Client
 	app            *ghapp.App
 	installationID int64
+	// webURL is GITHUB_URL without a trailing "/".
+	webURL string
+	// prURL matches a pull request URL of webURL: owner, repo and number.
+	prURL *regexp.Regexp
 }
 
 var _ forge.Forge = (*Forge)(nil)
 
 // New returns the GitHub forge over client. Webhook deliveries are validated
-// with app and accepted only from the installation installationID.
-func New(client *gh.Client, app *ghapp.App, installationID int64) *Forge {
-	return &Forge{gh: client, app: app, installationID: installationID}
+// with app and accepted only from the installation installationID. Repo and
+// pull request URLs are those of webURL (GITHUB_URL), which must pass
+// ghapp.ParseWebURL.
+func New(client *gh.Client, app *ghapp.App, installationID int64, webURL string) (*Forge, error) {
+	web, err := ghapp.ParseWebURL(webURL)
+	if err != nil {
+		return nil, fmt.Errorf("GITHUB_URL %w", err)
+	}
+	return &Forge{
+		gh:             client,
+		app:            app,
+		installationID: installationID,
+		webURL:         web,
+		prURL:          regexp.MustCompile(`^` + regexp.QuoteMeta(web) + `/([^/]+)/([^/]+)/pull/(\d+)`),
+	}, nil
 }
 
 // classifyHTTPError translates a go-github response into the forge sentinel

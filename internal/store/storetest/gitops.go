@@ -8,9 +8,23 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	forgegithub "github.com/badilhq/badil/internal/forge/github"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
 )
+
+// GitHubForge is the GitHub forge on the default GITHUB_URL,
+// https://github.com, without a client: its ParsePRURL and ParseRepoURL are
+// the default repo and pull request URL rules.
+var GitHubForge = newGitHubForge() //nolint:gochecknoglobals // test fixture
+
+func newGitHubForge() *forgegithub.Forge {
+	f, err := forgegithub.New(nil, nil, 0, "https://github.com")
+	if err != nil {
+		panic(err)
+	}
+	return f
+}
 
 // GitopsURL is the git URL of the gitops repo of the stores Gitops opens,
 // acme/gitops: their full name, commit links and preview files' gitopsRepoURL
@@ -71,6 +85,7 @@ func Gitops(
 		context.Background(),
 		store.CloneConfig{URL: remote.URL()},
 		Identity,
+		GitHubForge.ParsePRURL,
 		append([]store.Option{store.WithRepoURL(GitopsURL)}, opts...)...)
 	if err != nil {
 		t.Fatalf("open store: %v", err)

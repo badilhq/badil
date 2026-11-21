@@ -362,7 +362,7 @@ func TestDeploy_PushUnauthorized(t *testing.T) {
 	st, err := store.Open(
 		context.Background(),
 		store.CloneConfig{URL: srv.URL + "/acme/gitops.git"},
-		storetest.Identity,
+		storetest.Identity, storetest.GitHubForge.ParsePRURL,
 	)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
