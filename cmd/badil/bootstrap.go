@@ -101,8 +101,9 @@ type bootstrapOpts struct {
 	owner         string
 	webhookURL    string
 	assumeYes     bool
-	// githubURL is GITHUB_URL without a trailing "/" and githubAPIURL is
-	// GITHUB_API_URL, validated (config.LoadGitHubURLs).
+	// githubURL is GITHUB_URL as the canonical base github.ParseWebURL
+	// returns and githubAPIURL is GITHUB_API_URL, validated
+	// (config.LoadGitHubURLs).
 	githubURL    string
 	githubAPIURL string
 }

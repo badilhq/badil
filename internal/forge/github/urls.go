@@ -5,12 +5,11 @@ import (
 	"strings"
 )
 
-// ParseRepoURL returns the owner and repo, lowercased, of u when u, lowercased
-// and with a trailing "/" then ".git" removed, is <web URL>/<owner>/<repo>:
-// two non-empty segments after the forge's web URL, lowercased. Any other URL
-// (another host, SSH, a deeper path) returns ok false.
+// ParseRepoURL returns the lowercased owner and repo of u when u, lowercased
+// and without a trailing "/" then ".git", is <web URL>/<owner>/<repo>. Any
+// other URL (another host, SSH, a deeper path) returns ok false.
 func (f *Forge) ParseRepoURL(u string) (string, string, bool) {
-	path, ok := strings.CutPrefix(normalizeRepoURL(u), strings.ToLower(f.webURL)+"/")
+	path, ok := strings.CutPrefix(normalizeRepoURL(u), f.webURL+"/")
 	if !ok {
 		return "", "", false
 	}

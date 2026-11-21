@@ -44,8 +44,8 @@ type Config struct {
 	// GitOpsCloneDir is the directory of the gitops repo clone, "" for a
 	// temporary directory of the process.
 	GitOpsCloneDir string
-	// GitHubURL is the web base of the GitHub host (GITHUB_URL), without a
-	// trailing "/".
+	// GitHubURL is the web base of the GitHub host (GITHUB_URL), the
+	// canonical base github.ParseWebURL returns.
 	GitHubURL string
 	// GitHubAPIURL is the API base of the GitHub host (GITHUB_API_URL).
 	GitHubAPIURL string
@@ -123,7 +123,8 @@ func Load() (*Config, error) {
 // LoadGitHubURLs reads and validates GITHUB_URL (github.ParseWebURL, default
 // DefaultGitHubURL) and GITHUB_API_URL (github.ValidateAPIURL, default
 // github.DefaultAPIURL); unset or empty means the default. It returns the web
-// base without a trailing "/" and the API base as set.
+// base as the canonical base github.ParseWebURL returns, and the API base as
+// set.
 func LoadGitHubURLs() (string, string, error) {
 	webURL := DefaultGitHubURL
 	if raw := os.Getenv("GITHUB_URL"); raw != "" {
