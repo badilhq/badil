@@ -147,7 +147,12 @@ func TestRepoNames_FromCloneURL(t *testing.T) {
 	srv := httptest.NewServer(remote.HTTPHandler(http.StatusForbidden))
 	t.Cleanup(srv.Close)
 	repoURL := srv.URL + "/acme/gitops.git"
-	st, err := store.Open(context.Background(), store.CloneConfig{URL: repoURL}, storetest.Identity)
+	st, err := store.Open(
+		context.Background(),
+		store.CloneConfig{URL: repoURL},
+		storetest.Identity,
+		storetest.GitHubForge.ParsePRURL,
+	)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -260,7 +265,7 @@ func TestDeploy_FreshCreateUsesCatalog(t *testing.T) {
 	f := newFileFake(t, "previews/fresh-slug/values.yaml", nil, 0, nil)
 	c := f.open(t)
 	catalog := testCatalog("backend-1", "backend-2", "front")
-	catalog.Repos["front"] = "https://github.com/acme/front"
+	catalog.Catalog.Repos["front"] = "https://github.com/acme/front"
 	catalog.Branches = map[string]string{"backend-2": "develop"}
 	result, _, err := deploy(c, "fresh-slug", catalog, "backend-1", "abc1234567890", sampleInputs(), false)
 	if err != nil {
@@ -427,12 +432,15 @@ func TestDeploy_SkipUnchanged(t *testing.T) {
 		{
 			name:  "catalog repo url change",
 			files: []string{pinnedFile()}, skipUnchanged: true, wantPuts: 1,
-			catalog: func(c *store.ServiceCatalog) { c.Repos["backend-2"] = "https://github.com/acme/b2.git" },
+			catalog: func(c *store.ServiceCatalog) { c.Catalog.Repos["backend-2"] = "https://github.com/acme/b2.git" },
 		},
 		{
 			name:  "service removed from the catalog",
 			files: []string{pinnedFile()}, skipUnchanged: true, wantPuts: 1,
-			catalog: func(c *store.ServiceCatalog) { delete(c.Repos, "backend-2"); c.Services = c.Services[:1] },
+			catalog: func(c *store.ServiceCatalog) {
+				delete(c.Catalog.Repos, "backend-2")
+				c.Services = c.Services[:1]
+			},
 		},
 		{
 			name: "file without apiVersion",

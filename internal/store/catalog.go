@@ -19,7 +19,8 @@ import (
 // ServiceCatalog is the parsed badil.yaml of the gitops repo. Its Catalog
 // holds the services and dependencies, in file order, and their settings;
 // GitopsRepoURL is left empty, set by the store when it projects a preview
-// file. A map or slice of it is nil when no entry sets it.
+// file. A map or slice of it is nil when no entry sets it. The Repos method
+// hides the embedded Catalog.Repos map, read as c.Catalog.Repos.
 type ServiceCatalog struct {
 	preview.Catalog
 
@@ -45,52 +46,43 @@ type ServiceCatalog struct {
 // DefaultLabel is the preview label when preview.label is absent.
 const DefaultLabel = "preview"
 
-// ServicesForRepo returns, in catalog order, the services whose git URL is
-// https://github.com/<owner>/<repo>, compared lowercased and with a trailing
-// "/" then ".git" removed. Other URL forms (SSH, GitHub Enterprise) never
-// match.
-func (c *ServiceCatalog) ServicesForRepo(owner, repo string) []string {
-	want := strings.ToLower("https://github.com/" + owner + "/" + repo)
+// RepoURLParser returns the owner and repo of a git URL of a repository on
+// the forge, ok false for any other URL: forge.Forge.ParseRepoURL.
+type RepoURLParser func(string) (owner, repo string, ok bool)
+
+// ServicesForRepo returns, in catalog order, the services whose git URL parse
+// accepts with owner and repo, compared case-insensitively. URLs parse
+// rejects (another host, SSH) never match.
+func (c *ServiceCatalog) ServicesForRepo(parse RepoURLParser, owner, repo string) []string {
 	var out []string
 	for _, name := range c.Services {
-		if normalizeRepoURL(c.Repos[name]) == want {
+		o, r, ok := parse(c.Catalog.Repos[name])
+		if ok && strings.EqualFold(o, owner) && strings.EqualFold(r, repo) {
 			out = append(out, name)
 		}
 	}
 	return out
 }
 
-// GitHubRepo is a GitHub repository, owner/repo.
-type GitHubRepo struct {
+// Repo is a repository of the forge, owner/repo.
+type Repo struct {
 	Owner string
 	Repo  string
 }
 
-// GitHubRepos returns, in catalog order and once each, the repositories of
-// the services whose git URL ServicesForRepo matches: owner and repo of
-// https://github.com/<owner>/<repo>, lowercased.
-func (c *ServiceCatalog) GitHubRepos() []GitHubRepo {
-	var out []GitHubRepo
+// Repos returns, in catalog order and once each, the repositories of the
+// services whose git URL parse accepts: owner and repo as parse returns them.
+func (c *ServiceCatalog) Repos(parse RepoURLParser) []Repo {
+	var out []Repo
 	for _, name := range c.Services {
-		path, ok := strings.CutPrefix(normalizeRepoURL(c.Repos[name]), "https://github.com/")
-		if !ok {
-			continue
-		}
-		owner, repo, ok := strings.Cut(path, "/")
-		r := GitHubRepo{Owner: owner, Repo: repo}
-		if !ok || owner == "" || repo == "" || strings.Contains(repo, "/") || slices.Contains(out, r) {
+		owner, repo, ok := parse(c.Catalog.Repos[name])
+		r := Repo{Owner: owner, Repo: repo}
+		if !ok || slices.Contains(out, r) {
 			continue
 		}
 		out = append(out, r)
 	}
 	return out
-}
-
-// normalizeRepoURL lowercases url and removes a trailing "/" then ".git".
-func normalizeRepoURL(url string) string {
-	u := strings.ToLower(url)
-	u = strings.TrimSuffix(u, "/")
-	return strings.TrimSuffix(u, ".git")
 }
 
 // errMalformedPreview is wrapped by every preview block validation error.
@@ -316,14 +308,14 @@ func parseServiceEntries(n *yaml.Node, c *ServiceCatalog) error {
 		return errors.New("'services' must not be empty")
 	}
 	c.Services = make([]string, 0, len(n.Content)/pairStride)
-	c.Repos = make(map[string]string, len(n.Content)/pairStride)
+	c.Catalog.Repos = make(map[string]string, len(n.Content)/pairStride)
 	return eachKey("services", n, func(name string, val *yaml.Node) error {
 		spec, err := serviceEntry(name, val)
 		if err != nil {
 			return err
 		}
 		c.Services = append(c.Services, name)
-		c.Repos[name] = spec.repo
+		c.Catalog.Repos[name] = spec.repo
 		if spec.branch != "" {
 			c.Branches = setKey(c.Branches, name, spec.branch)
 		}
@@ -677,7 +669,7 @@ func parseDependencies(n *yaml.Node, c *ServiceCatalog) error {
 		return errors.New("dependencies must be a mapping")
 	}
 	return eachKey("dependencies", n, func(name string, val *yaml.Node) error {
-		if _, isService := c.Repos[name]; isService {
+		if _, isService := c.Catalog.Repos[name]; isService {
 			return fmt.Errorf("dependencies.%s: %q is already a service", name, name)
 		}
 		dep, needs, err := dependencyEntry(name, val)

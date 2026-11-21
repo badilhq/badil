@@ -282,6 +282,144 @@ func (_c *MockForge_ListOpenPullRequests_Call) RunAndReturn(run func(ctx context
 	return _c
 }
 
+// ParsePRURL provides a mock function for the type MockForge
+func (_mock *MockForge) ParsePRURL(u string) (string, string, int, bool) {
+	ret := _mock.Called(u)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ParsePRURL")
+	}
+
+	var r0 string
+	var r1 string
+	var r2 int
+	var r3 bool
+	if returnFunc, ok := ret.Get(0).(func(string) (string, string, int, bool)); ok {
+		return returnFunc(u)
+	}
+	if returnFunc, ok := ret.Get(0).(func(string) string); ok {
+		r0 = returnFunc(u)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+	if returnFunc, ok := ret.Get(1).(func(string) string); ok {
+		r1 = returnFunc(u)
+	} else {
+		r1 = ret.Get(1).(string)
+	}
+	if returnFunc, ok := ret.Get(2).(func(string) int); ok {
+		r2 = returnFunc(u)
+	} else {
+		r2 = ret.Get(2).(int)
+	}
+	if returnFunc, ok := ret.Get(3).(func(string) bool); ok {
+		r3 = returnFunc(u)
+	} else {
+		r3 = ret.Get(3).(bool)
+	}
+	return r0, r1, r2, r3
+}
+
+// MockForge_ParsePRURL_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ParsePRURL'
+type MockForge_ParsePRURL_Call struct {
+	*mock.Call
+}
+
+// ParsePRURL is a helper method to define mock.On call
+//   - u string
+func (_e *MockForge_Expecter) ParsePRURL(u any) *MockForge_ParsePRURL_Call {
+	return &MockForge_ParsePRURL_Call{Call: _e.mock.On("ParsePRURL", u)}
+}
+
+func (_c *MockForge_ParsePRURL_Call) Run(run func(u string)) *MockForge_ParsePRURL_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockForge_ParsePRURL_Call) Return(owner string, repo string, number int, ok bool) *MockForge_ParsePRURL_Call {
+	_c.Call.Return(owner, repo, number, ok)
+	return _c
+}
+
+func (_c *MockForge_ParsePRURL_Call) RunAndReturn(run func(u string) (string, string, int, bool)) *MockForge_ParsePRURL_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ParseRepoURL provides a mock function for the type MockForge
+func (_mock *MockForge) ParseRepoURL(u string) (string, string, bool) {
+	ret := _mock.Called(u)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ParseRepoURL")
+	}
+
+	var r0 string
+	var r1 string
+	var r2 bool
+	if returnFunc, ok := ret.Get(0).(func(string) (string, string, bool)); ok {
+		return returnFunc(u)
+	}
+	if returnFunc, ok := ret.Get(0).(func(string) string); ok {
+		r0 = returnFunc(u)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+	if returnFunc, ok := ret.Get(1).(func(string) string); ok {
+		r1 = returnFunc(u)
+	} else {
+		r1 = ret.Get(1).(string)
+	}
+	if returnFunc, ok := ret.Get(2).(func(string) bool); ok {
+		r2 = returnFunc(u)
+	} else {
+		r2 = ret.Get(2).(bool)
+	}
+	return r0, r1, r2
+}
+
+// MockForge_ParseRepoURL_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ParseRepoURL'
+type MockForge_ParseRepoURL_Call struct {
+	*mock.Call
+}
+
+// ParseRepoURL is a helper method to define mock.On call
+//   - u string
+func (_e *MockForge_Expecter) ParseRepoURL(u any) *MockForge_ParseRepoURL_Call {
+	return &MockForge_ParseRepoURL_Call{Call: _e.mock.On("ParseRepoURL", u)}
+}
+
+func (_c *MockForge_ParseRepoURL_Call) Run(run func(u string)) *MockForge_ParseRepoURL_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockForge_ParseRepoURL_Call) Return(owner string, repo string, ok bool) *MockForge_ParseRepoURL_Call {
+	_c.Call.Return(owner, repo, ok)
+	return _c
+}
+
+func (_c *MockForge_ParseRepoURL_Call) RunAndReturn(run func(u string) (string, string, bool)) *MockForge_ParseRepoURL_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ParseWebhook provides a mock function for the type MockForge
 func (_mock *MockForge) ParseWebhook(r *http.Request) (forge.Event, error) {
 	ret := _mock.Called(r)

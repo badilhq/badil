@@ -370,7 +370,7 @@ Set `preview.domain` in `badil.yaml`, create a wildcard DNS record `*.<domain>` 
 | Deliveries return 403 `installation not allowed` | `config.githubInstallationId` is wrong, or the repo is under another account | Set the ID listed by `badil verify-app`; install the App on repos of that account only |
 | Deliveries time out or fail to connect | The ingress or DNS is unreachable from GitHub | Expose the host publicly over https and check `/healthz` from outside |
 | `preview reconcile failed … badil.yaml: …` in `kubectl logs -n badil deploy/badil` | `badil.yaml` is malformed; the error names the key | Fix that key in `badil.yaml` |
-| `preview reconcile skipped … reason="repo not in catalog"` | The `services.<name>.repo` URL isn't `https://github.com/<owner>/<repo>[.git]` | Fix the URL in `badil.yaml` |
+| `preview reconcile skipped … reason="repo not in catalog"` | The `services.<name>.repo` URL isn't `<GITHUB_URL>/<owner>/<repo>[.git]` (`GITHUB_URL` defaults to `https://github.com`) | Fix the URL in `badil.yaml` |
 | `preview reconcile skipped … reason="fork pr"` | The PR comes from a fork | Expected: fork PRs never get a preview |
 | `preview reconcile skipped … reason="no service changed"` | No changed file of the PR matches any `paths` of its repo's services | Fix `paths` in `badil.yaml` |
 | No comment after labeling | The App isn't installed on that repo, or the label differs from `preview.label` | Install the App on the repo, or use the configured label |

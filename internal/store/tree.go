@@ -20,6 +20,9 @@ import (
 type Tree struct {
 	root    *object.Tree
 	repoURL string
+	// parsePR is the forge's pull request URL rule, which Teardown and
+	// UnpinServices match pr-urls with.
+	parsePR preview.PRURLParser
 
 	// files holds the content put at a path, nil when the path was deleted.
 	files map[string][]byte
@@ -28,9 +31,13 @@ type Tree struct {
 }
 
 // newTree returns a Tree over root, the tree of the remote head, whose
-// previews are projected with the gitops repo URL repoURL.
-func newTree(root *object.Tree, repoURL string) *Tree {
-	return &Tree{root: root, repoURL: repoURL, files: map[string][]byte{}, changes: map[string][]string{}}
+// previews are projected with the gitops repo URL repoURL and whose pr-urls
+// are parsed with parsePR.
+func newTree(root *object.Tree, repoURL string, parsePR preview.PRURLParser) *Tree {
+	return &Tree{
+		root: root, repoURL: repoURL, parsePR: parsePR,
+		files: map[string][]byte{}, changes: map[string][]string{},
+	}
 }
 
 // staged reports whether the operation put or deleted a file.
@@ -262,7 +269,8 @@ type TeardownResult struct {
 }
 
 // Teardown unpins every service of previews/<slug>/values.yaml deployed by
-// the PR owner/repo#prNumber. The file is deleted when no pin remains,
+// the PR owner/repo#prNumber, its pr-url parsed with the store's pull request
+// URL rule. The file is deleted when no pin remains,
 // recorded as "delete". Otherwise it is put, projected on the tree's
 // badil.yaml after the unpin (applyCatalog), so that an unpinned entry gets
 // its branch-tracking imageTag in the same commit, recorded as one "unpin
@@ -271,7 +279,7 @@ type TeardownResult struct {
 // TeardownResult and a nil error.
 func (t *Tree) Teardown(slug, owner, repo string, prNumber int) (*TeardownResult, error) {
 	return t.unpin("teardown", slug, func(vals preview.PreviewValues) (preview.PreviewValues, []string, bool) {
-		return preview.UnpinPR(vals, owner, repo, prNumber)
+		return preview.UnpinPR(vals, t.parsePR, owner, repo, prNumber)
 	}, false)
 }
 
@@ -282,7 +290,7 @@ func (t *Tree) Teardown(slug, owner, repo string, prNumber int) (*TeardownResult
 // badil.yaml, even when no pin remains, so Deleted is always false.
 func (t *Tree) UnpinServices(slug, owner, repo string, prNumber int, services []string) (*TeardownResult, error) {
 	return t.unpin("unpin", slug, func(vals preview.PreviewValues) (preview.PreviewValues, []string, bool) {
-		return preview.UnpinPRServices(vals, owner, repo, prNumber, services)
+		return preview.UnpinPRServices(vals, t.parsePR, owner, repo, prNumber, services)
 	}, true)
 }
 

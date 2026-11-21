@@ -33,7 +33,10 @@ func newMetricsServer(t *testing.T) (*server.Server, *metrics.Metrics) {
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
 	m := metrics.New()
-	f := forgegithub.New(nil, app, testInstallationID)
+	f, err := forgegithub.New(nil, app, testInstallationID, "https://github.com")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	return server.NewServer(f, nil, "test-deploy-token", server.WithMetrics(m)), m
 }
 

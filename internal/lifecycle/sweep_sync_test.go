@@ -141,8 +141,16 @@ func TestSweep_SyncComments(t *testing.T) {
 			if tc.wantFanOuts == 1 {
 				c := f.g.pushed()[0]
 				written := *f.g.file("feature-x")
-				want := preview.BuildSummary("feature-x", written, preview.URLConfig{}, "", nil,
-					c.Subject(), commitURL(c))
+				want := preview.BuildSummary(
+					storetest.GitHubForge.ParsePRURL,
+					"feature-x",
+					written,
+					preview.URLConfig{},
+					"",
+					nil,
+					c.Subject(),
+					commitURL(c),
+				)
 				if f.fanOuts[0].body != want || !preview.Equal(f.fanOuts[0].vals, written) {
 					t.Errorf("fanOut = %+v, want the summary of the written file", f.fanOuts[0])
 				}

@@ -382,7 +382,7 @@ func TestUnpinPR(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			in := preview.PreviewValues{Services: tc.services}
-			got, removed, stillPinned := preview.UnpinPR(in, tc.owner, tc.repo, tc.number)
+			got, removed, stillPinned := preview.UnpinPR(in, parsePR(t), tc.owner, tc.repo, tc.number)
 			if !slices.Equal(removed, tc.wantRemoved) {
 				t.Errorf("removed = %v, want %v", removed, tc.wantRemoved)
 			}
@@ -417,7 +417,7 @@ func TestUnpinPR_DoesNotMutateInput(t *testing.T) {
 		pinned("backend-1", "abc", prURL),
 		{Name: "front"},
 	}}
-	got, removed, _ := preview.UnpinPR(in, "acme", "backend-1", 42)
+	got, removed, _ := preview.UnpinPR(in, parsePR(t), "acme", "backend-1", 42)
 	if len(removed) != 1 || got.Services[0].CommitSha != "" {
 		t.Fatalf("UnpinPR did not unpin: removed = %v, got = %+v", removed, got)
 	}
@@ -565,7 +565,7 @@ func TestUnpinPR_KeepsHost(t *testing.T) {
 	entry.Host = host
 	in := preview.PreviewValues{Services: []preview.ServiceEntry{entry}}
 
-	got, removed, _ := preview.UnpinPR(in, "acme", "backend-1", 42)
+	got, removed, _ := preview.UnpinPR(in, parsePR(t), "acme", "backend-1", 42)
 
 	if len(removed) != 1 {
 		t.Fatalf("removed = %v, want [backend-1]", removed)
@@ -727,7 +727,7 @@ func TestUnpinPR_KeepsAPIVersionAndFacts(t *testing.T) {
 	b2.RepoURL, b2.Branch = "https://github.com/acme/backend-2.git", "develop"
 	in := preview.PreviewValues{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{b1, b2}}
 
-	got, removed, stillPinned := preview.UnpinPR(in, "acme", "backend-1", 42)
+	got, removed, stillPinned := preview.UnpinPR(in, parsePR(t), "acme", "backend-1", 42)
 
 	if !slices.Equal(removed, []string{"backend-1"}) || !stillPinned {
 		t.Fatalf("removed = %v, pinned = %v, want [backend-1], true", removed, stillPinned)
@@ -1026,7 +1026,7 @@ func TestUnpinPRServices(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, removed, stillPinned := preview.UnpinPRServices(in, "acme", "platform", 42, tc.services)
+			got, removed, stillPinned := preview.UnpinPRServices(in, parsePR(t), "acme", "platform", 42, tc.services)
 			if !reflect.DeepEqual(removed, tc.wantRemoved) {
 				t.Errorf("removed = %v, want %v", removed, tc.wantRemoved)
 			}

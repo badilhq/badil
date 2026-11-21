@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
@@ -29,6 +31,56 @@ func TestPrintPlanListsEvents(t *testing.T) {
 	printPlan(&out, bootstrapOpts{appName: "badil-dev"}, "https://d.example.com/webhooks/github")
 	if want := "pull_request, push"; !strings.Contains(out.String(), want) {
 		t.Errorf("plan = %q, want it to contain %q", out.String(), want)
+	}
+}
+
+// TestPrintPlanGitHubHost checks the plan's browser step names the App
+// creation page on the host of GITHUB_URL.
+func TestPrintPlanGitHubHost(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct{ githubURL, want string }{
+		{"https://github.com", "  2. Open a browser tab to github.com/settings/apps/new and submit the manifest\n"},
+		{
+			"http://gitea.local:3000",
+			"  2. Open a browser tab to gitea.local:3000/settings/apps/new and submit the manifest\n",
+		},
+	}
+	for _, tc := range cases {
+		var out bytes.Buffer
+		printPlan(
+			&out,
+			bootstrapOpts{appName: "badil-dev", githubURL: tc.githubURL},
+			"https://d.example.com/webhooks/github",
+		)
+		if !strings.Contains(out.String(), "\n"+tc.want) {
+			t.Errorf("plan with GITHUB_URL %s = %q, want the line %q", tc.githubURL, out.String(), tc.want)
+		}
+	}
+}
+
+// TestBootstrapMuxFormAction checks the manifest form posts to the App
+// creation page of GITHUB_URL, for a personal account or an organization.
+func TestBootstrapMuxFormAction(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct{ githubURL, org, want string }{
+		{"https://github.com", "", `action="https://github.com/settings/apps/new?state=s1"`},
+		{"https://github.com", "acme", `action="https://github.com/organizations/acme/settings/apps/new?state=s1"`},
+		{"http://gitea.local:3000", "", `action="http://gitea.local:3000/settings/apps/new?state=s1"`},
+		{
+			"http://gitea.local:3000", "acme",
+			`action="http://gitea.local:3000/organizations/acme/settings/apps/new?state=s1"`,
+		},
+	}
+	for _, tc := range cases {
+		mux := bootstrapMux("{}", "s1", tc.org, tc.githubURL, make(chan string, 1), make(chan error, 1))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/start", nil))
+		if !strings.Contains(rec.Body.String(), tc.want) {
+			t.Errorf("start page with GITHUB_URL %s, org %q = %q, want it to contain %s",
+				tc.githubURL, tc.org, rec.Body.String(), tc.want)
+		}
 	}
 }
 

@@ -169,7 +169,7 @@ func reconcile(ctx context.Context, api ReconcileAPI, ev Event, headSHA *string)
 		}
 		return reconcileFailed(ctx, ev, err)
 	}
-	services := catalog.ServicesForRepo(ev.Owner, ev.Repo)
+	services := catalog.ServicesForRepo(api.Forge.ParseRepoURL, ev.Owner, ev.Repo)
 	if !closed {
 		if reason := payloadSkipReason(ev, catalog.Label); reason != "" {
 			return reconcileSkipped(ctx, ev, reason)
@@ -198,7 +198,7 @@ func reconcile(ctx context.Context, api ReconcileAPI, ev Event, headSHA *string)
 		return reconcileSkipped(ctx, ev, RepoNotInCatalogReason)
 	}
 	p := &reconcilePlan{
-		ev: ev, pr: pr, t: t, catalog: catalog, deploy: deploy, repoServices: services,
+		parsePR: api.Forge.ParsePRURL, ev: ev, pr: pr, t: t, catalog: catalog, deploy: deploy, repoServices: services,
 		cleanupSlugs: cleanupSlugs(t, pr, ev, catalog.Label), cleanupReason: cleanupReason(t, pr, ev, catalog.Label),
 		timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
@@ -222,6 +222,8 @@ func reconcile(ctx context.Context, api ReconcileAPI, ev Event, headSHA *string)
 // Apply attempts; the fields below the line hold the last attempt's
 // outcome, which finish acts on.
 type reconcilePlan struct {
+	// parsePR is the forge's pull request URL rule.
+	parsePR       preview.PRURLParser
 	ev            Event
 	pr            *forge.PullRequest
 	t             preview.Resolution
@@ -300,7 +302,7 @@ func (p *reconcilePlan) change(tree *store.Tree) (store.Summary, error) {
 			break
 		}
 		if vals != nil {
-			if service, holder, held := heldBy(vals, p.services, p.ev.Target); held {
+			if service, holder, held := heldBy(p.parsePR, vals, p.services, p.ev.Target); held {
 				p.held = &heldPin{service: service, holder: holder}
 				break
 			}
@@ -338,7 +340,7 @@ func (p *reconcilePlan) untouchedUnpin(vals *preview.PreviewValues) *teardownSte
 	untouched := slices.DeleteFunc(slices.Clone(p.repoServices), func(name string) bool {
 		return slices.Contains(p.services, name)
 	})
-	_, names, _ := preview.UnpinPRServices(*vals, p.ev.Owner, p.ev.Repo, p.ev.Number, untouched)
+	_, names, _ := preview.UnpinPRServices(*vals, p.parsePR, p.ev.Owner, p.ev.Repo, p.ev.Number, untouched)
 	if len(names) == 0 {
 		return nil
 	}
@@ -586,14 +588,16 @@ func touches(patterns []string, files []forge.ChangedFile) bool {
 }
 
 // heldBy returns the first entry of vals, in file order, that pins one of
-// services for a PR other than self: its service, its holder's PR URL and
-// true. It returns false when there is none.
-func heldBy(vals *preview.PreviewValues, services []string, self Target) (string, string, bool) {
+// services for a PR other than self, its pr-url parsed with parse: its
+// service, its holder's PR URL and true. It returns false when there is none.
+func heldBy(
+	parse preview.PRURLParser, vals *preview.PreviewValues, services []string, self Target,
+) (string, string, bool) {
 	for _, svc := range vals.Services {
 		if !slices.Contains(services, svc.Name) || svc.CommitSha == "" || svc.Metadata == nil {
 			continue
 		}
-		owner, repo, number, ok := preview.ParsePRURL(svc.Metadata.PRURL)
+		owner, repo, number, ok := parse(svc.Metadata.PRURL)
 		if !ok {
 			continue
 		}
@@ -719,7 +723,7 @@ func (p *reconcilePlan) afterDeploy(ctx context.Context, api ReconcileAPI, res s
 	case len(written) > 0:
 		last := written[len(written)-1].result
 		summary := preview.BuildSummary(
-			p.t.Slug, last.Values, p.catalog.URLs, p.catalog.ArgoCDURL, last.Excluded, res.Subject, res.URL,
+			p.parsePR, p.t.Slug, last.Values, p.catalog.URLs, p.catalog.ArgoCDURL, last.Excluded, res.Subject, res.URL,
 		)
 		if fanErr := api.FanOut(ctx, api.Forge, last.Values, summary); fanErr != nil {
 			slog.WarnContext(ctx, "preview deploy comment failed",

@@ -31,7 +31,11 @@ func newForge(t *testing.T, srv *httptest.Server) *forgegithub.Forge {
 	c := gh.NewClient(nil)
 	c.BaseURL = u
 	c.UploadURL = u
-	return forgegithub.New(c, nil, 0)
+	f, err := forgegithub.New(c, nil, 0, "https://github.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f
 }
 
 func TestGetPullRequest(t *testing.T) {

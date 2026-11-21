@@ -8,6 +8,7 @@ import (
 
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
+	"github.com/badilhq/badil/internal/store/storetest"
 )
 
 // catalogServices is a services block of four lines, so that a preview
@@ -450,8 +451,8 @@ func TestParseCatalog_Services(t *testing.T) {
 		"backend-2": "https://github.com/acme/backend-2.git",
 		"backend-1": "https://github.com/acme/backend-1.git",
 	}
-	if !reflect.DeepEqual(got.Repos, wantRepos) {
-		t.Errorf("Repos = %v, want %v", got.Repos, wantRepos)
+	if !reflect.DeepEqual(got.Catalog.Repos, wantRepos) {
+		t.Errorf("Repos = %v, want %v", got.Catalog.Repos, wantRepos)
 	}
 	if want := map[string]string{"backend-2": "develop"}; !reflect.DeepEqual(got.Branches, want) {
 		t.Errorf("Branches = %#v, want %#v", got.Branches, want)
@@ -665,25 +666,26 @@ func TestServicesForRepo(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := catalog.ServicesForRepo(tt.owner, tt.repo); !reflect.DeepEqual(got, tt.want) {
+			got := catalog.ServicesForRepo(storetest.GitHubForge.ParseRepoURL, tt.owner, tt.repo)
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("ServicesForRepo(%q, %q) = %v, want %v", tt.owner, tt.repo, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestGitHubRepos(t *testing.T) {
+func TestRepos(t *testing.T) {
 	catalog, err := store.ParseCatalog([]byte(reposCatalog))
 	if err != nil {
 		t.Fatalf("ParseCatalog: %v", err)
 	}
-	want := []store.GitHubRepo{
+	want := []store.Repo{
 		{Owner: "acme", Repo: "monorepo"},
 		{Owner: "acme", Repo: "front"},
 		{Owner: "acme", Repo: "web"},
 	}
-	if got := catalog.GitHubRepos(); !reflect.DeepEqual(got, want) {
-		t.Errorf("GitHubRepos = %v, want %v", got, want)
+	if got := catalog.Repos(storetest.GitHubForge.ParseRepoURL); !reflect.DeepEqual(got, want) {
+		t.Errorf("Repos = %v, want %v", got, want)
 	}
 }
 

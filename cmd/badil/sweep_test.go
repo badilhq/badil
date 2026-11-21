@@ -22,6 +22,7 @@ import (
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/server"
 	"github.com/badilhq/badil/internal/store"
+	"github.com/badilhq/badil/internal/store/storetest"
 )
 
 var errUnexpected = errors.New("unexpected call")
@@ -121,6 +122,16 @@ func (f *loopFake) ListOpenPullRequests(context.Context, string, string) ([]forg
 
 func (f *loopFake) ParseWebhook(*http.Request) (forge.Event, error) {
 	return forge.Event{}, errUnexpected
+}
+
+// ParseRepoURL is the default GitHub rule (storetest.GitHubForge).
+func (*loopFake) ParseRepoURL(u string) (string, string, bool) {
+	return storetest.GitHubForge.ParseRepoURL(u)
+}
+
+// ParsePRURL is the default GitHub rule (storetest.GitHubForge).
+func (*loopFake) ParsePRURL(u string) (string, string, int, bool) {
+	return storetest.GitHubForge.ParsePRURL(u)
 }
 
 // api is the lifecycle.SweepAPI over f: its store, forge and recorder, with

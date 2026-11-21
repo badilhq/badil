@@ -86,7 +86,7 @@ func Sweep(ctx context.Context, api SweepAPI, now time.Time, ttl time.Duration) 
 		slog.InfoContext(ctx, "cleanup finished", slog.Int("previews", 0), slog.Int("failed", 0))
 		return nil
 	}
-	p := &sweepPlan{now: now, ttl: ttl, states: prStates(ctx, api, slugs)}
+	p := &sweepPlan{now: now, ttl: ttl, states: prStates(ctx, api, slugs), parsePR: api.Forge.ParsePRURL}
 	res, err := api.Store.Apply(ctx, store.Op{Kind: store.OpSweep, Change: p.change})
 	if err != nil {
 		for _, s := range p.steps {
@@ -116,7 +116,7 @@ func prStates(ctx context.Context, api SweepAPI, slugs []string) map[string]*for
 		if err != nil {
 			continue
 		}
-		for _, t := range pinnedPRs(slug, *vals) {
+		for _, t := range pinnedPRs(api.Forge.ParsePRURL, slug, *vals) {
 			key := PRKey(t)
 			if tried[key] {
 				continue
@@ -151,6 +151,8 @@ type sweepPlan struct {
 	now    time.Time
 	ttl    time.Duration
 	states map[string]*forge.PullRequest
+	// parsePR is the forge's pull request URL rule.
+	parsePR preview.PRURLParser
 
 	catalogErr error
 	deleted    []sweepDelete
@@ -221,7 +223,7 @@ func (p *sweepPlan) sweepPreview(tree *store.Tree, slug string, catalog *store.S
 	if catalog != nil {
 		label = catalog.Label
 	}
-	for _, t := range pinnedPRs(slug, *vals) {
+	for _, t := range pinnedPRs(p.parsePR, slug, *vals) {
 		pr, ok := p.states[PRKey(t)]
 		if !ok {
 			continue
@@ -389,7 +391,7 @@ func afterSync(
 		return
 	}
 	body := preview.BuildSummary(
-		slug, result.Values, catalog.URLs, catalog.ArgoCDURL, result.Excluded, res.Subject, res.URL,
+		f.ParsePRURL, slug, result.Values, catalog.URLs, catalog.ArgoCDURL, result.Excluded, res.Subject, res.URL,
 	)
 	if fanErr := fanOut(ctx, f, result.Values, body); fanErr != nil {
 		slog.WarnContext(ctx, "preview sync comment failed",
@@ -418,15 +420,15 @@ func expired(vals preview.PreviewValues, cutoff time.Time) bool {
 
 // pinnedPRs returns one Target per distinct PR referenced by a pinned entry of
 // vals, in file order. PRs compare on lowercase owner/repo and number. Entries
-// without metadata or with an unparsable pr-url are skipped.
-func pinnedPRs(slug string, vals preview.PreviewValues) []Target {
+// without metadata or with a pr-url parse rejects are skipped.
+func pinnedPRs(parse preview.PRURLParser, slug string, vals preview.PreviewValues) []Target {
 	var targets []Target
 	seen := map[string]bool{}
 	for _, svc := range vals.Services {
 		if svc.CommitSha == "" || svc.Metadata == nil {
 			continue
 		}
-		owner, repo, number, ok := preview.ParsePRURL(svc.Metadata.PRURL)
+		owner, repo, number, ok := parse(svc.Metadata.PRURL)
 		if !ok {
 			continue
 		}

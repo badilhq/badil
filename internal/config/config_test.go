@@ -433,3 +433,72 @@ func TestLoad_GitOpsCloneDir(t *testing.T) {
 		t.Errorf("GitOpsCloneDir = %q, want %q", cfg.GitOpsCloneDir, "/var/lib/badil/gitops")
 	}
 }
+
+func TestLoad_GitHubURLs(t *testing.T) {
+	cases := []struct {
+		name, webURL, apiURL string
+		wantWeb, wantAPI     string
+	}{
+		{name: "defaults", wantWeb: "https://github.com", wantAPI: "https://api.github.com/"},
+		{
+			name: "gitea", webURL: "http://gitea.local:3000", apiURL: "http://gitea.local:3000/api/v1/",
+			wantWeb: "http://gitea.local:3000", wantAPI: "http://gitea.local:3000/api/v1/",
+		},
+		{
+			name: "trailing slash", webURL: "https://ghe.example.com/", apiURL: "https://ghe.example.com",
+			wantWeb: "https://ghe.example.com", wantAPI: "https://ghe.example.com",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := validEnv()
+			env["GITHUB_URL"] = tc.webURL
+			env["GITHUB_API_URL"] = tc.apiURL
+			setEnv(t, env)
+			cfg, err := config.Load()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if cfg.GitHubURL != tc.wantWeb || cfg.GitHubAPIURL != tc.wantAPI {
+				t.Errorf("GitHubURL, GitHubAPIURL = %q, %q; want %q, %q",
+					cfg.GitHubURL, cfg.GitHubAPIURL, tc.wantWeb, tc.wantAPI)
+			}
+		})
+	}
+}
+
+func TestLoad_InvalidGitHubURLs(t *testing.T) {
+	cases := []struct {
+		key, value, want string
+	}{
+		{"GITHUB_URL", "https://ghe.example.com/github", `GITHUB_URL must not have a path, got "/github"`},
+		{"GITHUB_URL", "https://ghe.example.com//", `GITHUB_URL must not have a path, got "//"`},
+		{"GITHUB_URL", "https://user:s3cret@ghe.example.com", "GITHUB_URL must not contain user info"},
+		{"GITHUB_URL", "https://ghe.example.com?x=1", "GITHUB_URL must not have a query"},
+		{"GITHUB_URL", "https://ghe.example.com?", "GITHUB_URL must not have a query"},
+		{"GITHUB_URL", "https://ghe.example.com#f", "GITHUB_URL must not have a fragment"},
+		{"GITHUB_URL", "ssh://ghe.example.com", `GITHUB_URL must be an https or http URL, got scheme "ssh"`},
+		{"GITHUB_URL", "ghe.example.com", `GITHUB_URL must be an https or http URL, got scheme ""`},
+		{"GITHUB_URL", "https://", "GITHUB_URL must have a host"},
+		{"GITHUB_URL", "https://ghe.example.com/%zz", `GITHUB_URL must be a URL: invalid URL escape "%zz"`},
+		{"GITHUB_API_URL", "https://user@ghe.example.com/api/v3/", "GITHUB_API_URL must not contain user info"},
+		{"GITHUB_API_URL", "https://ghe.example.com/api/v3/?x=1", "GITHUB_API_URL must not have a query"},
+		{"GITHUB_API_URL", "https://ghe.example.com/api/v3/#f", "GITHUB_API_URL must not have a fragment"},
+		{
+			"GITHUB_API_URL", "ftp://ghe.example.com/api/v3/",
+			`GITHUB_API_URL must be an https or http URL, got scheme "ftp"`,
+		},
+		{"GITHUB_API_URL", "http:///api/v3/", "GITHUB_API_URL must have a host"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.key+" "+tc.value, func(t *testing.T) {
+			env := validEnv()
+			env[tc.key] = tc.value
+			setEnv(t, env)
+			_, err := config.Load()
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}

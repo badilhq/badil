@@ -69,7 +69,11 @@ func newWebhookServerForInstallation(t *testing.T, allowedInstallationID int64) 
 	slog.SetDefault(slog.New(capture))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
-	return server.NewServer(forgegithub.New(nil, app, allowedInstallationID), nil, "test-deploy-token"), capture.Records
+	f, err := forgegithub.New(nil, app, allowedInstallationID, "https://github.com")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return server.NewServer(f, nil, "test-deploy-token"), capture.Records
 }
 
 // signedRequest builds a POST to /webhooks/github with a valid HMAC-SHA256

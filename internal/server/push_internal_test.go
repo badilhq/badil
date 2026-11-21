@@ -16,6 +16,7 @@ import (
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store/storetest"
 )
 
 // errUnexpected is returned by the pushForge methods the push tests do not
@@ -33,6 +34,16 @@ func (f *pushForge) ParseWebhook(*http.Request) (forge.Event, error) { return f.
 
 func (*pushForge) GetPullRequest(context.Context, string, string, int) (*forge.PullRequest, error) {
 	return nil, errUnexpected
+}
+
+// ParseRepoURL is the default GitHub rule (storetest.GitHubForge).
+func (*pushForge) ParseRepoURL(u string) (string, string, bool) {
+	return storetest.GitHubForge.ParseRepoURL(u)
+}
+
+// ParsePRURL is the default GitHub rule (storetest.GitHubForge).
+func (*pushForge) ParsePRURL(u string) (string, string, int, bool) {
+	return storetest.GitHubForge.ParsePRURL(u)
 }
 
 func (*pushForge) ListChangedFiles(context.Context, string, string, int) ([]forge.ChangedFile, error) {

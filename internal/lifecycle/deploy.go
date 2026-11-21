@@ -88,7 +88,7 @@ func DeployPR(
 	}
 	result := &DeployResult{Commit: res}
 	summary := preview.BuildSummary(
-		slug, write.Values, catalog.URLs, catalog.ArgoCDURL, write.Excluded, res.Subject, res.URL,
+		api.Forge.ParsePRURL, slug, write.Values, catalog.URLs, catalog.ArgoCDURL, write.Excluded, res.Subject, res.URL,
 	)
 	return result, api.FanOut(ctx, api.Forge, write.Values, summary), nil
 }
