@@ -32,6 +32,27 @@ func TestPrintPlanListsEvents(t *testing.T) {
 	}
 }
 
+func TestRenderEnvGitopsRepoURL(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		value, want string
+	}{
+		{"https://github.com/acme/gitops.git", "export GITOPS_REPO_URL=https://github.com/acme/gitops.git\n"},
+		{
+			"",
+			"export GITOPS_REPO_URL= # set this — the clone URL of your gitops repository, " +
+				"e.g. https://github.com/<owner>/<repo>.git\n",
+		},
+	}
+	for _, tc := range cases {
+		env := renderEnv(envValues{AppID: 1, PEMPath: "dev.private-key.pem", GitOpsRepoURL: tc.value})
+		if !strings.Contains(env, "\n"+tc.want) {
+			t.Errorf("renderEnv(%q) = %q, want the line %q", tc.value, env, tc.want)
+		}
+	}
+}
+
 func TestResolveWebhookURL(t *testing.T) {
 	t.Parallel()
 

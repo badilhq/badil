@@ -263,7 +263,9 @@ func (f *fakeGitops) FetchServiceCatalogSHA(ctx context.Context) (*store.Service
 	return catalog, f.catalogSHA, err
 }
 
-func (f *fakeGitops) FullName() string { return "acme/gitops" }
+// FullName is the full name of the fake's store, derived from
+// storetest.GitopsURL: acme/gitops.
+func (f *fakeGitops) FullName() string { return f.st.FullName() }
 
 // GetPreview reads the preview from the fake's store, or fails with
 // getPreviewErr when set, then runs afterGetPreview when set.

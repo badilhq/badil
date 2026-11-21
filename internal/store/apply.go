@@ -226,9 +226,9 @@ func (c *GitHubStore) message(summary Summary, tree *Tree) string {
 	return msg
 }
 
-// commitURL returns the GitHub URL of the gitops repo's commit h.
+// commitURL returns the web URL of the gitops repo's commit h.
 func (c *GitHubStore) commitURL(h plumbing.Hash) string {
-	return "https://github.com/" + c.owner + "/" + c.repo + "/commit/" + h.String()
+	return c.webBase + "/commit/" + h.String()
 }
 
 // backoff returns the wait before attempt n+1: firstWait doubled n-1 times,

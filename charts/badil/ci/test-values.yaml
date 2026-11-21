@@ -1,5 +1,5 @@
 config:
   githubAppId: "1"
   githubInstallationId: "1"
-  gitopsRepo: example/gitops
+  gitopsRepoURL: https://github.com/example/gitops.git
 existingSecret: badil

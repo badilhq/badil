@@ -48,15 +48,15 @@ Flags worth knowing:
 |---|---|---|
 | `--name` | `badil-dev-<6 random hex chars>` | App name (must be globally unique on GitHub) |
 | `--owner` | (your personal account) | Org login if the App should live in an org |
-| `--gitops-repo` | (empty) | Pre-fills `GITOPS_REPO` in `.env` |
+| `--gitops-repo-url` | (empty) | Pre-fills `GITOPS_REPO_URL` in `.env` |
 | `--env-file` | `.env` | Where to write env vars |
 | `--pem-file` | `dev.private-key.pem` | Where to write the private key |
 | `--webhook-url` | (the ngrok tunnel) | Public base URL of badil; `/webhooks/github` is appended |
 
-The `Makefile` target forwards `GITOPS_REPO` if set, otherwise the `.env` is written with `GITOPS_REPO=` and a comment reminding you to fill it in:
+The `Makefile` target forwards `GITOPS_REPO_URL` if set, otherwise the `.env` is written with `GITOPS_REPO_URL=` and a comment reminding you to fill it in:
 
 ```bash
-GITOPS_REPO=myorg/my-gitops make dev-bootstrap
+GITOPS_REPO_URL=https://github.com/myorg/my-gitops.git make dev-bootstrap
 ```
 
 ## Smoke the deploy endpoint
@@ -149,7 +149,7 @@ If `make dev-bootstrap` doesn't work in your environment, create the App by hand
    export GITHUB_PRIVATE_KEY_PATH=./dev.private-key.pem
    export GITHUB_WEBHOOK_SECRET=<from step 1>
    export GITHUB_INSTALLATION_ID=<from the install URL>
-   export GITOPS_REPO=<your-org>/<your-gitops-repo>
+   export GITOPS_REPO_URL=https://github.com/<your-org>/<your-gitops-repo>.git
    export BADIL_DEPLOY_TOKEN=$(openssl rand -hex 32)
    export LISTEN_ADDR=:8080
    EOF

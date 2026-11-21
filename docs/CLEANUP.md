@@ -135,7 +135,7 @@ Two triggers run the sweep's step 4 outside the sweep, without its rules 1–3: 
 
 A verified `push` delivery is acted on only when all of these hold:
 
-- `repository.full_name` is `GITOPS_REPO` (case-insensitive);
+- `repository.full_name` is the full name of `GITOPS_REPO_URL` (case-insensitive), `acme/gitops` for `https://github.com/acme/gitops.git`;
 - `ref` is `refs/heads/<repository.default_branch>`;
 - `deleted` is false.
 

@@ -39,12 +39,12 @@ docker-build:
 # directory. The webhook goes to BADIL_WEBHOOK_URL (badil's public base
 # URL; /webhooks/github is appended) when set, otherwise to the ngrok tunnel,
 # which then must be running in another terminal (`ngrok http 8080`).
-# Pass GITOPS_REPO=<owner>/<repo> to prefill it in .env, otherwise edit .env
+# Pass GITOPS_REPO_URL=<clone URL> to prefill it in .env, otherwise edit .env
 # after the fact:
-#   GITOPS_REPO=myorg/my-gitops make dev-bootstrap
+#   GITOPS_REPO_URL=https://github.com/myorg/my-gitops.git make dev-bootstrap
 #   BADIL_WEBHOOK_URL=https://badil.example.com make dev-bootstrap
 dev-bootstrap:
-	go run $(CMD) bootstrap-app --gitops-repo "$(GITOPS_REPO)" --webhook-url "$(BADIL_WEBHOOK_URL)"
+	go run $(CMD) bootstrap-app --gitops-repo-url "$(GITOPS_REPO_URL)" --webhook-url "$(BADIL_WEBHOOK_URL)"
 
 # Sanity-check the App credentials currently in .env / dev.private-key.pem.
 dev-verify:

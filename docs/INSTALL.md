@@ -57,7 +57,7 @@ Choose the https host GitHub will call, e.g. `https://badil.example.com`, and cr
 
    ```bash
    APP_NAME=my-badil            # unique on GitHub
-   GITOPS=my-org/gitops            # owner/repo
+   GITOPS=https://github.com/my-org/gitops.git   # clone URL
    ORG=my-org                      # org that owns the repos
    ```
 
@@ -66,7 +66,7 @@ Choose the https host GitHub will call, e.g. `https://badil.example.com`, and cr
    ```bash
    badil bootstrap-app --name "$APP_NAME" \
      --webhook-url https://badil.example.com \
-     --gitops-repo "$GITOPS" --owner "$ORG"
+     --gitops-repo-url "$GITOPS" --owner "$ORG"
    ```
 
    Repos in your personal account:
@@ -74,7 +74,7 @@ Choose the https host GitHub will call, e.g. `https://badil.example.com`, and cr
    ```bash
    badil bootstrap-app --name "$APP_NAME" \
      --webhook-url https://badil.example.com \
-     --gitops-repo "$GITOPS"
+     --gitops-repo-url "$GITOPS"
    ```
 3. Install the App on the gitops repo and every service repo, all under that one account. badil accepts webhooks from that single installation only.
    The App subscribes to `pull_request` and `push`. An App created before `push` was added does not receive it: in the App settings, **Permissions & events** → **Subscribe to events**, tick **Push** and click **Save changes**. `push` needs Contents read, which the App already has, so installations approve nothing. Without it, a `badil.yaml` change reaches previews only at their next deploy or sweep, or through `POST /v1/sync`.
@@ -115,7 +115,7 @@ kubectl create secret generic badil -n badil \
 helm install badil oci://ghcr.io/badilhq/charts/badil -n badil \
   --set-string config.githubAppId="$GITHUB_APP_ID" \
   --set-string config.githubInstallationId="$GITHUB_INSTALLATION_ID" \
-  --set config.gitopsRepo="$GITOPS_REPO" \
+  --set config.gitopsRepoURL="$GITOPS_REPO_URL" \
   --set existingSecret=badil \
   --set ingress.enabled=true --set ingress.host=badil.example.com \
   -f values.yaml   # leave this line out on a local http cluster
@@ -123,6 +123,7 @@ helm install badil oci://ghcr.io/badilhq/charts/badil -n badil \
 
 - Without `--version`, Helm installs the latest chart. Add `--version X.Y.Z` to pin a release (do so in production), and take the step 3 example files from the same `vX.Y.Z` tag. The image tag defaults to the chart `appVersion`.
 - When the Secret has `deploy-token`, the Ingress also exposes `POST /v1/deploy`, the manual trigger, and `POST /v1/sync`, which syncs every preview (or one) with `badil.yaml` at once, both protected by that bearer token (see [README](../README.md)). `deploy-token` is optional: leave out the `--from-literal=deploy-token=...` line to turn both endpoints off (404). The Ingress also exposes `POST /webhooks/status`, the renderer's status callback, protected by the optional `status-token` bearer token (see [Preview status](#preview-status-optional)). When the Secret has `read-token` or `deploy-token`, the Ingress also exposes the read routes `GET /v1/previews` and `GET /v1/wait`, protected by either token (see [Wait for a preview](#wait-for-a-preview)).
+- badil's git calls to the gitops repo authenticate as the App installation. To use a token instead, add `--from-literal=gitops-repo-token=<token>` to the Secret, and `--set config.gitopsRepoUsername=<username>` when the host needs a username other than `x-access-token` (see [Gitops repo credentials](CONFIGURATION.md#gitops-repo-credentials)). Pushes then run as the token's owner.
 - `cleanup.ttl` (e.g. `168h`) is optional: it also deletes previews with no deploy for that long.
 - The cleanup sweep runs in the server every hour by default (`cleanup.interval`, `1h`): it deletes stale previews and rewrites every kept preview to match `badil.yaml`, and exports its metrics (with the Prometheus Operator, scrape them with `metrics.serviceMonitor.enabled=true` and `metrics.serviceMonitor.labels` matching its selector, e.g. `release: <kube-prometheus-stack release>`). `cleanup.enabled=true` switches it to an hourly CronJob without metrics and turns the in-server sweep off.
 - Keep `replicaCount: 1`.

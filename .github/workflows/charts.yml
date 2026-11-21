@@ -347,13 +347,25 @@ jobs:
             exit 1
           fi
 
+      - name: Render badil optional gitops repo token
+        run: |
+          out=$(helm template t charts/badil -f charts/badil/ci/test-values.yaml --set cleanup.enabled=true)
+          ref='select(.name == "GITOPS_REPO_TOKEN") | .valueFrom.secretKeyRef | .name + " " + .key + " " + (.optional | to_string)'
+          deploy=$(echo "$out" | yq -N "select(.kind == \"Deployment\") | .spec.template.spec.containers[0].env[] | $ref")
+          cron=$(echo "$out" | yq -N "select(.kind == \"CronJob\") | .spec.jobTemplate.spec.template.spec.containers[0].env[] | $ref")
+          if [ "$deploy" != 'badil gitops-repo-token true' ] || [ "$cron" != 'badil gitops-repo-token true' ]; then
+            echo '::error::expected GITOPS_REPO_TOKEN from optional key gitops-repo-token of Secret badil on the Deployment and the CronJob'
+            printf 'got: Deployment %s, CronJob %s\n' "$deploy" "$cron"
+            exit 1
+          fi
+
       - name: Render badil with numeric github ids
         run: |
           out=$(helm template t charts/badil -f - <<'EOF'
           config:
             githubAppId: 1234567
             githubInstallationId: 87654321
-            gitopsRepo: example/gitops
+            gitopsRepoURL: https://github.com/example/gitops.git
           existingSecret: badil
           EOF
           )
