@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.27.0](https://github.com/badilhq/badil/compare/v0.26.0...v0.27.0) (2026-11-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* GITOPS_REPO is replaced by GITOPS_REPO_URL, and the chart value config.gitopsRepo by config.gitopsRepoURL.
+
+### Features
+
+* add a mock GitHub server for local testing ([#124](https://github.com/badilhq/badil/issues/124)) ([d7def30](https://github.com/badilhq/badil/commit/d7def305844ac585af3e20c76e89d6264f1287ac))
+* configure the gitops repo by URL and token ([#120](https://github.com/badilhq/badil/issues/120)) ([6969dac](https://github.com/badilhq/badil/commit/6969dac22754ac3e560c91aaea14c3f130eb2f1a))
+* make the GitHub host configurable ([#122](https://github.com/badilhq/badil/issues/122)) ([eda2481](https://github.com/badilhq/badil/commit/eda24817187dc80dc0b64e2f53190295fb092f27))
+
 ## [0.26.0](https://github.com/badilhq/badil/compare/v0.25.3...v0.26.0) (2026-11-20)
 
 
