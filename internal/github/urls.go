@@ -13,8 +13,10 @@ const DefaultAPIURL = "https://api.github.com/"
 
 // ParseWebURL validates raw as a GITHUB_URL: an https or http URL with a
 // host, no user info, query or fragment, and no path other than "/". It
-// returns raw without a trailing "/". Its error reads after the setting's
-// name.
+// returns the canonical base: scheme and host lowercased, the scheme's
+// default port (443, 80) dropped and no trailing "/", the form of the URLs
+// the host itself writes, which the case-sensitive PR URL rule compares
+// against. Its error reads after the setting's name.
 func ParseWebURL(raw string) (string, error) {
 	u, err := parseBaseURL(raw)
 	if err != nil {
@@ -23,8 +25,15 @@ func ParseWebURL(raw string) (string, error) {
 	if u.Path != "" && u.Path != "/" || u.RawPath != "" {
 		return "", fmt.Errorf("must not have a path, got %q", u.EscapedPath())
 	}
-	return strings.TrimSuffix(raw, "/"), nil
+	host := strings.ToLower(u.Host)
+	if port := u.Port(); port == "" || port == defaultPorts[u.Scheme] {
+		host = strings.TrimSuffix(strings.TrimSuffix(host, port), ":")
+	}
+	return u.Scheme + "://" + host, nil
 }
+
+// defaultPorts are the ports ParseWebURL drops, by scheme.
+var defaultPorts = map[string]string{"https": "443", "http": "80"}
 
 // ValidateAPIURL validates raw as a GITHUB_API_URL: an https or http URL with
 // a host, no user info, query or fragment, and any path. Its error reads after

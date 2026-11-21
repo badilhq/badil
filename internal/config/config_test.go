@@ -448,6 +448,34 @@ func TestLoad_GitHubURLs(t *testing.T) {
 			name: "trailing slash", webURL: "https://ghe.example.com/", apiURL: "https://ghe.example.com",
 			wantWeb: "https://ghe.example.com", wantAPI: "https://ghe.example.com",
 		},
+		{
+			name: "uppercase scheme", webURL: "HTTPS://github.com",
+			wantWeb: "https://github.com", wantAPI: "https://api.github.com/",
+		},
+		{
+			name: "mixed-case host", webURL: "https://GHE.Example.com/",
+			wantWeb: "https://ghe.example.com", wantAPI: "https://api.github.com/",
+		},
+		{
+			name: "https default port", webURL: "https://ghe.example.com:443",
+			wantWeb: "https://ghe.example.com", wantAPI: "https://api.github.com/",
+		},
+		{
+			name: "http default port", webURL: "http://gitea.local:80/",
+			wantWeb: "http://gitea.local", wantAPI: "https://api.github.com/",
+		},
+		{
+			name: "other port kept", webURL: "https://ghe.example.com:80",
+			wantWeb: "https://ghe.example.com:80", wantAPI: "https://api.github.com/",
+		},
+		{
+			name: "empty port", webURL: "https://ghe.example.com:",
+			wantWeb: "https://ghe.example.com", wantAPI: "https://api.github.com/",
+		},
+		{
+			name: "ipv6 default port", webURL: "https://[::1]:443",
+			wantWeb: "https://[::1]", wantAPI: "https://api.github.com/",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

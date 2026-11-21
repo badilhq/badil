@@ -91,6 +91,10 @@ func TestParsePRURL(t *testing.T) {
 		{"http://gitea.local:3000", "http://gitea.local:3000/acme/front/pull/7", "acme", "front", 7, true},
 		{"http://gitea.local:3000", "https://github.com/acme/front/pull/7", "", "", 0, false},
 		{"http://gitea.local:3000", "http://gitea.localx3000/acme/front/pull/7", "", "", 0, false},
+		{"HTTPS://github.com", "https://github.com/acme/front/pull/7", "acme", "front", 7, true},
+		{"https://GHE.Example.com", "https://ghe.example.com/acme/front/pull/7", "acme", "front", 7, true},
+		{"https://ghe.example.com:443", "https://ghe.example.com/acme/front/pull/7", "acme", "front", 7, true},
+		{"http://gitea.local:80", "http://gitea.local/acme/front/pull/7", "acme", "front", 7, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.webURL+" "+tc.in, func(t *testing.T) {
