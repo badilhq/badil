@@ -117,7 +117,7 @@ func (f *gitopsFake) open(t *testing.T, opts ...store.Option) *store.GitHubStore
 func openStore(t *testing.T, remoteURL string, opts ...store.Option) *store.GitHubStore {
 	t.Helper()
 	st, err := store.Open(
-		context.Background(), store.CloneConfig{URL: remoteURL}, storetest.Identity,
+		context.Background(), store.CloneConfig{URL: remoteURL}, storetest.Identity, storetest.GitHubForge.ParsePRURL,
 		append([]store.Option{store.WithRepoURL(storetest.GitopsURL)}, opts...)...,
 	)
 	if err != nil {

@@ -19,8 +19,10 @@ import (
 	"strings"
 	"time"
 
-	gh "github.com/google/go-github/v71/github"
 	"github.com/spf13/cobra"
+
+	"github.com/badilhq/badil/internal/config"
+	"github.com/badilhq/badil/internal/github"
 )
 
 // Manifest flow constants. Values reflect dev defaults; nothing here is a
@@ -37,7 +39,8 @@ const (
 // bootstrapAppCmd creates a GitHub App via the manifest flow and writes its
 // credentials to dev.private-key.pem and .env in the current working
 // directory. The App's webhook URL comes from --webhook-url, or else from a
-// running ngrok tunnel on :8080.
+// running ngrok tunnel on :8080. The App is created on the GitHub host of
+// GITHUB_URL and GITHUB_API_URL (config.LoadGitHubURLs).
 //
 // Documented at https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest.
 func bootstrapAppCmd() *cobra.Command {
@@ -59,6 +62,10 @@ Prints a preflight plan describing what will be created, what files will
 be written, and what will be overwritten — then prompts for confirmation
 before doing anything (skip with --yes).`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			githubURL, githubAPIURL, err := config.LoadGitHubURLs()
+			if err != nil {
+				return err
+			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), manifestTimeout)
 			defer cancel()
 			return runBootstrap(ctx, cmd.InOrStdin(), cmd.OutOrStdout(), bootstrapOpts{
@@ -69,6 +76,8 @@ before doing anything (skip with --yes).`,
 				owner:         owner,
 				webhookURL:    webhookURL,
 				assumeYes:     assumeYes,
+				githubURL:     githubURL,
+				githubAPIURL:  githubAPIURL,
 			})
 		},
 	}
@@ -92,6 +101,10 @@ type bootstrapOpts struct {
 	owner         string
 	webhookURL    string
 	assumeYes     bool
+	// githubURL is GITHUB_URL without a trailing "/" and githubAPIURL is
+	// GITHUB_API_URL, validated (config.LoadGitHubURLs).
+	githubURL    string
+	githubAPIURL string
 }
 
 func runBootstrap(ctx context.Context, stdin io.Reader, stdout io.Writer, opts bootstrapOpts) error {
@@ -148,7 +161,7 @@ func runBootstrap(ctx context.Context, stdin io.Reader, stdout io.Writer, opts b
 	codeCh := make(chan string, 1)
 	errCh := make(chan error, 1)
 	srv := &http.Server{
-		Handler:           bootstrapMux(string(manifestJSON), state, opts.owner, codeCh, errCh),
+		Handler:           bootstrapMux(string(manifestJSON), state, opts.owner, opts.githubURL, codeCh, errCh),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {
@@ -172,7 +185,10 @@ func runBootstrap(ctx context.Context, stdin io.Reader, stdout io.Writer, opts b
 		return fmt.Errorf("timed out waiting for GitHub callback: %w", ctx.Err())
 	}
 
-	client := gh.NewClient(nil)
+	client, err := github.NewClient(nil, opts.githubAPIURL)
+	if err != nil {
+		return fmt.Errorf("GITHUB_API_URL: %w", err)
+	}
 	conv, _, err := client.Apps.CompleteAppManifest(ctx, code)
 	if err != nil {
 		return fmt.Errorf("exchanging manifest code: %w", err)
@@ -238,7 +254,7 @@ func printPlan(w io.Writer, opts bootstrapOpts, webhookURL string) {
 	fmt.Fprintln(w, "       permissions: contents:write, pull_requests:write, metadata:read")
 	fmt.Fprintf(w, "       events:      %s (installation events fire automatically)\n", strings.Join(appEvents(), ", "))
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  2. Open a browser tab to github.com/settings/apps/new and submit the manifest")
+	fmt.Fprintf(w, "  2. Open a browser tab to %s/settings/apps/new and submit the manifest\n", webHost(opts.githubURL))
 	fmt.Fprintln(w, "     (one click on \"Create GitHub App\" required from you)")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  3. Write files locally (mode 0600):")
@@ -248,6 +264,15 @@ func printPlan(w io.Writer, opts bootstrapOpts, webhookURL string) {
 	fmt.Fprintln(w, "  4. Open the App install page in your browser so you can attach it to repos")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Nothing is sent to GitHub before step 2. Nothing is written to disk before step 3.")
+}
+
+// webHost returns the host of githubURL, with its port: an address to open.
+func webHost(githubURL string) string {
+	u, err := url.Parse(githubURL)
+	if err != nil {
+		return githubURL
+	}
+	return u.Host
 }
 
 // overwriteNote returns a parenthetical warning if path already exists.
@@ -274,14 +299,17 @@ func confirm(in io.Reader, w io.Writer) (bool, error) {
 	return answer == "y" || answer == "yes", nil
 }
 
-// bootstrapMux serves /start (renders the self-submitting manifest form) and
-// /callback (captures ?code= and validates state). Both routes are single-use.
-func bootstrapMux(manifest, state, org string, codeCh chan<- string, errCh chan<- error) http.Handler {
+// bootstrapMux serves /start (renders the self-submitting manifest form,
+// posted to the App creation page of githubURL) and /callback (captures
+// ?code= and validates state). Both routes are single-use.
+func bootstrapMux(
+	manifest, state, org, githubURL string, codeCh chan<- string, errCh chan<- error,
+) http.Handler {
 	mux := http.NewServeMux()
 
-	action := "https://github.com/settings/apps/new?state=" + state
+	action := githubURL + "/settings/apps/new?state=" + state
 	if org != "" {
-		action = fmt.Sprintf("https://github.com/organizations/%s/settings/apps/new?state=%s", org, state)
+		action = fmt.Sprintf("%s/organizations/%s/settings/apps/new?state=%s", githubURL, org, state)
 	}
 
 	startPage := template.Must(template.New("start").Parse(`<!doctype html>

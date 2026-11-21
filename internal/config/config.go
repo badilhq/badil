@@ -9,8 +9,12 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/badilhq/badil/internal/github"
 	"github.com/badilhq/badil/internal/store"
 )
+
+// DefaultGitHubURL is GITHUB_URL when it is unset.
+const DefaultGitHubURL = "https://github.com"
 
 // Config holds all application configuration.
 type Config struct {
@@ -42,6 +46,11 @@ type Config struct {
 	// GitOpsCloneDir is the directory of the gitops repo clone, "" for a
 	// temporary directory of the process.
 	GitOpsCloneDir string
+	// GitHubURL is the web base of the GitHub host (GITHUB_URL), without a
+	// trailing "/".
+	GitHubURL string
+	// GitHubAPIURL is the API base of the GitHub host (GITHUB_API_URL).
+	GitHubAPIURL string
 }
 
 // Load reads configuration from environment variables and validates it.
@@ -89,6 +98,11 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	githubURL, githubAPIURL, err := LoadGitHubURLs()
+	if err != nil {
+		return nil, err
+	}
+
 	return &Config{
 		AppID:              appID,
 		PrivateKey:         privateKey,
@@ -103,7 +117,31 @@ func Load() (*Config, error) {
 		MetricsAddr:        metricsAddr,
 		StatusToken:        os.Getenv("BADIL_STATUS_TOKEN"),
 		GitOpsCloneDir:     os.Getenv("GITOPS_CLONE_DIR"),
+		GitHubURL:          githubURL,
+		GitHubAPIURL:       githubAPIURL,
 	}, nil
+}
+
+// LoadGitHubURLs reads and validates GITHUB_URL (github.ParseWebURL, default
+// DefaultGitHubURL) and GITHUB_API_URL (github.ValidateAPIURL, default
+// github.DefaultAPIURL); unset or empty means the default. It returns the web
+// base without a trailing "/" and the API base as set.
+func LoadGitHubURLs() (string, string, error) {
+	webURL := DefaultGitHubURL
+	if raw := os.Getenv("GITHUB_URL"); raw != "" {
+		var err error
+		if webURL, err = github.ParseWebURL(raw); err != nil {
+			return "", "", fmt.Errorf("GITHUB_URL %w", err)
+		}
+	}
+	apiURL := github.DefaultAPIURL
+	if raw := os.Getenv("GITHUB_API_URL"); raw != "" {
+		if err := github.ValidateAPIURL(raw); err != nil {
+			return "", "", fmt.Errorf("GITHUB_API_URL %w", err)
+		}
+		apiURL = raw
+	}
+	return webURL, apiURL, nil
 }
 
 // validateRepoURL checks raw is an http(s) URL with a host, no user info, query

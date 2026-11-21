@@ -69,7 +69,7 @@ func TestApplyCatalog_DependencyShadowedByPinnedEntry(t *testing.T) {
 		t.Fatalf("services = %+v, want backend-1 then the kept postgres", got.Services)
 	}
 
-	unpinned, _, _ := preview.UnpinPR(got, "acme", "postgres", 1)
+	unpinned, _, _ := preview.UnpinPR(got, parsePR(t), "acme", "postgres", 1)
 	got = preview.ApplyCatalog(unpinned, cat).Values
 	if names := dependencyNames(got.Dependencies); !reflect.DeepEqual(names, []string{"postgres", "mailpit"}) {
 		t.Errorf("dependencies = %v, want [postgres mailpit] once the pinned entry is gone", names)

@@ -3,21 +3,24 @@ package preview
 import (
 	"fmt"
 	"net/url"
-	"regexp"
 	"strings"
 	"time"
 )
 
-var prURLOwnerRepo = regexp.MustCompile(`^(https://github\.com/[^/]+/[^/]+)/pull/`)
-
-// deriveCommitURL extracts owner/repo from a PR URL and returns the matching
-// commit URL for sha. Returns "" if prURL is not a recognizable PR URL.
-func deriveCommitURL(prURL, sha string) string {
-	m := prURLOwnerRepo.FindStringSubmatch(prURL)
-	if m == nil {
+// deriveCommitURL returns the commit URL of sha in the repository of prURL:
+// <scheme>://<host>/<owner>/<repo>/commit/<sha>, scheme and host (with its
+// port) those of prURL, owner and repo as parse returns them. It returns ""
+// when parse rejects prURL.
+func deriveCommitURL(parse PRURLParser, prURL, sha string) string {
+	owner, repo, _, ok := parse(prURL)
+	if !ok {
 		return ""
 	}
-	return m[1] + "/commit/" + sha
+	u, err := url.Parse(prURL)
+	if err != nil {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host + "/" + owner + "/" + repo + "/commit/" + sha
 }
 
 // pinnedImageNote is the paragraph BuildSummary adds when at least one
@@ -33,13 +36,14 @@ const pinnedImageNote = "> ⏳ A pinned service starts once CI has pushed the im
 // dependency follows, with its chart name and version and the link to its
 // written host, if any. When excluded is not empty, a line after the lists
 // names the catalog services and dependencies left out of the preview
-// (Projection.Excluded). When at least one service is pinned, a note follows
+// (Projection.Excluded). The commit link of a pinned service is derived from
+// its pr-url with parse (deriveCommitURL). When at least one service is pinned, a note follows
 // saying a pinned service starts once CI has pushed its image. When argocdURL
 // (the catalog's preview.argocdURL) is set, a line links to the Argo CD
 // application list filtered on the preview (ArgoCDAppsURL). The trailing line
 // links to the gitops commit that recorded the change.
 func BuildSummary(
-	slug string, values PreviewValues, urls URLConfig, argocdURL string, excluded []string,
+	parse PRURLParser, slug string, values PreviewValues, urls URLConfig, argocdURL string, excluded []string,
 	commitMessage, commitURL string,
 ) string {
 	var b strings.Builder
@@ -54,7 +58,7 @@ func BuildSummary(
 		if sha != "" {
 			pinned = true
 			shaShort := shortSHA(sha, shortSHALen8)
-			cURL := deriveCommitURL(prURL, sha)
+			cURL := deriveCommitURL(parse, prURL, sha)
 			commitPart := "📌 `" + shaShort + "`"
 			if cURL != "" {
 				commitPart = fmt.Sprintf("📌 [`%s`](%s)", shaShort, cURL)

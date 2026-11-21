@@ -77,7 +77,7 @@ type catchUpStats struct {
 }
 
 // Run lists the open pull requests of every repo of the catalog's services
-// (store.ServiceCatalog.GitHubRepos) and reconciles each one that needs it,
+// (store.ServiceCatalog.Repos, by the forge's repo URL rule) and reconciles each one that needs it,
 // decided in this order:
 //
 //  1. a PR without a preview label (the plain label, or a named one with a
@@ -107,7 +107,7 @@ func (c *CatchUp) Run(ctx context.Context) {
 		return
 	}
 	var stats catchUpStats
-	repos := catalog.GitHubRepos()
+	repos := catalog.Repos(c.api.Forge.ParseRepoURL)
 	stats.repos = len(repos)
 	for _, r := range repos {
 		if ctx.Err() != nil {
@@ -200,7 +200,7 @@ func (c *CatchUp) pinnedAtHead(ctx context.Context, slug string, pr forge.PullRe
 	owner, repo, _ := strings.Cut(pr.FullName, "/")
 	return slices.ContainsFunc(vals.Services, func(svc preview.ServiceEntry) bool {
 		return svc.Metadata != nil && svc.CommitSha == pr.HeadSHA &&
-			preview.MatchesPR(svc.Metadata.PRURL, owner, repo, pr.Number)
+			preview.MatchesPR(c.api.Forge.ParsePRURL, svc.Metadata.PRURL, owner, repo, pr.Number)
 	})
 }
 

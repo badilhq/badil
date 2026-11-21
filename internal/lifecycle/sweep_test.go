@@ -114,6 +114,16 @@ func (f *fakeAPI) ParseWebhook(*http.Request) (forge.Event, error) {
 	return forge.Event{}, errors.New("unexpected ParseWebhook")
 }
 
+// ParseRepoURL is the default GitHub rule (storetest.GitHubForge).
+func (*fakeAPI) ParseRepoURL(u string) (string, string, bool) {
+	return storetest.GitHubForge.ParseRepoURL(u)
+}
+
+// ParsePRURL is the default GitHub rule (storetest.GitHubForge).
+func (*fakeAPI) ParsePRURL(u string) (string, string, int, bool) {
+	return storetest.GitHubForge.ParsePRURL(u)
+}
+
 // api is the lifecycle.SweepAPI over f: its store, forge and recorder, with
 // the fan-out recorded in fanOuts.
 func (f *fakeAPI) api(t *testing.T) lifecycle.SweepAPI {

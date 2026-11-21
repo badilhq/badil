@@ -28,8 +28,8 @@ var (
 	ErrUnauthorized = errors.New("gitops: unauthorized")
 )
 
-// Forge reads pull requests, upserts badil's comment on them and parses
-// webhook deliveries.
+// Forge reads pull requests, upserts badil's comment on them, parses webhook
+// deliveries and owns the forge's repo and pull request URL rules.
 type Forge interface {
 	// GetPullRequest reads owner/repo#number. Lookup failures are returned
 	// as errors.
@@ -49,6 +49,12 @@ type Forge interface {
 	// Event has its Name, also with a parse error, or with ErrForbidden for a
 	// delivery from an installation that is not allowed.
 	ParseWebhook(r *http.Request) (Event, error)
+	// ParseRepoURL returns the owner and repo of u, a git URL of a repository
+	// on the forge's host. ok is false for any other URL.
+	ParseRepoURL(u string) (owner, repo string, ok bool)
+	// ParsePRURL returns the owner, repo and number of u, a pull request URL
+	// on the forge's host. ok is false for any other URL.
+	ParsePRURL(u string) (owner, repo string, number int, ok bool)
 }
 
 // PullRequest is the state of a pull request as read from the forge.

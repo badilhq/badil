@@ -41,7 +41,11 @@ func webhookForge(t *testing.T) *forgegithub.Forge {
 	if err != nil {
 		t.Fatalf("NewAppFromTransport: %v", err)
 	}
-	return forgegithub.New(nil, app, allowedInstallation)
+	f, err := forgegithub.New(nil, app, allowedInstallation, "https://github.com")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return f
 }
 
 func TestParseEvent(t *testing.T) {

@@ -27,7 +27,7 @@ func TestBuildSummary_PinnedAndMainTracking(t *testing.T) {
 	vals := preview.BuildPreviewValues(in.ServiceName, in.CommitSha, catalog, in)
 
 	got := preview.BuildSummary(
-		"feature-add-pricing", onMain(vals), preview.URLConfig{}, "", nil,
+		parsePR(t), "feature-add-pricing", onMain(vals), preview.URLConfig{}, "", nil,
 		"chore(preview): create feature-add-pricing preview",
 		"https://github.com/acme/gitops/commit/deadbeef",
 	)
@@ -46,6 +46,35 @@ func TestBuildSummary_PinnedAndMainTracking(t *testing.T) {
 	}
 }
 
+// TestBuildSummary_CustomHostCommitLink checks the commit link of a pinned
+// service derives from its PR URL on the forge's own host, and is left out for
+// a PR URL on another host.
+func TestBuildSummary_CustomHostCommitLink(t *testing.T) {
+	parse := githubForge(t, "http://gitea.local:3000").ParsePRURL
+	vals := preview.PreviewValues{Services: []preview.ServiceEntry{
+		{
+			Name: "front", Branch: "main", CommitSha: "abc1234567890",
+			Metadata: &preview.Metadata{PRURL: "http://gitea.local:3000/acme/front/pull/7", PRNumber: "7"},
+		},
+		{
+			Name: "back", Branch: "main", CommitSha: "def1234567890",
+			Metadata: &preview.Metadata{PRURL: "https://github.com/acme/back/pull/8", PRNumber: "8"},
+		},
+	}}
+
+	got := preview.BuildSummary(parse, "slug", vals, preview.URLConfig{}, "", nil, "m", "u")
+
+	for _, want := range []string{
+		"- **front** · 📌 [`abc12345`](http://gitea.local:3000/acme/front/commit/abc1234567890)" +
+			" · [PR #7](http://gitea.local:3000/acme/front/pull/7)\n",
+		"- **back** · 📌 `def12345` · [PR #8](https://github.com/acme/back/pull/8)\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("summary missing line:\n  want: %s\n  got:\n%s", want, got)
+		}
+	}
+}
+
 func TestBuildSummary_BranchBadge(t *testing.T) {
 	vals := preview.PreviewValues{Services: []preview.ServiceEntry{
 		{Name: "backend-1", Branch: "master"},
@@ -53,7 +82,7 @@ func TestBuildSummary_BranchBadge(t *testing.T) {
 		{Name: "front", Branch: "main"},
 	}}
 
-	got := preview.BuildSummary("slug", vals, preview.URLConfig{}, "", nil, "m", "u")
+	got := preview.BuildSummary(parsePR(t), "slug", vals, preview.URLConfig{}, "", nil, "m", "u")
 
 	want := "## 🚀 Preview: `slug`\n\n- **backend-1** · 🔄 `master`\n- **backend-2** · 📌 `abc12345`\n- **front** · 🔄 `main`\n\n" +
 		pinnedNote + "\n" +
@@ -70,7 +99,7 @@ func TestBuildSummary_ExactOutput(t *testing.T) {
 	vals := preview.BuildPreviewValues(in.ServiceName, in.CommitSha, catalog, in)
 
 	got := preview.BuildSummary(
-		"feature-add-pricing", onMain(vals), preview.URLConfig{}, "", nil,
+		parsePR(t), "feature-add-pricing", onMain(vals), preview.URLConfig{}, "", nil,
 		"chore(preview): create feature-add-pricing preview",
 		"https://github.com/acme/gitops/commit/deadbeef",
 	)
@@ -98,7 +127,7 @@ func TestBuildSummary_NoPinNoNote(t *testing.T) {
 		{Name: "front", Branch: "main"},
 	}}
 
-	got := preview.BuildSummary("slug", vals, preview.URLConfig{}, "", nil, "m", "u")
+	got := preview.BuildSummary(parsePR(t), "slug", vals, preview.URLConfig{}, "", nil, "m", "u")
 
 	want := "## 🚀 Preview: `slug`\n\n- **backend-1** · 🔄 `main`\n- **front** · 🔄 `main`\n\n---\n🔗 [m](u)"
 	if got != want {
@@ -147,7 +176,7 @@ func TestBuildSummary_ArgoCDLink(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			vals := preview.PreviewValues{Services: tt.services}
 			got := preview.BuildSummary(
-				"feature-x", vals, preview.URLConfig{}, "https://argocd.example.com", tt.excluded, "m", "u",
+				parsePR(t), "feature-x", vals, preview.URLConfig{}, "https://argocd.example.com", tt.excluded, "m", "u",
 			)
 			if got != tt.want {
 				t.Errorf("summary mismatch\n got:\n%s\nwant:\n%s", got, tt.want)
@@ -162,7 +191,7 @@ func TestBuildSummary_ShortShaForUnusualLengths(t *testing.T) {
 	in.CommitSha = "abc"
 	vals := preview.BuildPreviewValues(in.ServiceName, in.CommitSha, catalog, in)
 
-	got := preview.BuildSummary("slug", vals, preview.URLConfig{}, "", nil, "msg", "url")
+	got := preview.BuildSummary(parsePR(t), "slug", vals, preview.URLConfig{}, "", nil, "msg", "url")
 	// 3-char sha should appear in full (not truncated to 8).
 	if !strings.Contains(got, "`abc`") {
 		t.Errorf("expected raw short sha `abc` in summary, got:\n%s", got)
@@ -176,7 +205,7 @@ func TestBuildSummary_MissingPRURL(t *testing.T) {
 	in.PRURL = ""
 	in.PRNumber = ""
 	vals := preview.BuildPreviewValues(in.ServiceName, in.CommitSha, []string{"backend-1"}, in)
-	got := preview.BuildSummary("slug", vals, preview.URLConfig{}, "", nil, "m", "u")
+	got := preview.BuildSummary(parsePR(t), "slug", vals, preview.URLConfig{}, "", nil, "m", "u")
 
 	if !strings.Contains(got, "**backend-1** · 📌 `abc12345`\n") {
 		t.Errorf("expected unlinked sha and no PR suffix, got:\n%s", got)
@@ -203,7 +232,7 @@ func TestBuildSummary_PreviewURLs(t *testing.T) {
 	vals := preview.BuildPreviewValues(in.ServiceName, in.CommitSha, catalog, in)
 	vals = preview.ApplyHosts(onMain(vals), "feature-pricing", sharedURLFixture())
 
-	got := preview.BuildSummary("feature-pricing", vals, sharedURLFixture(), "", nil, "msg", "url")
+	got := preview.BuildSummary(parsePR(t), "feature-pricing", vals, sharedURLFixture(), "", nil, "msg", "url")
 
 	want := "## 🚀 Preview: `feature-pricing`\n" +
 		"\n" +
@@ -229,7 +258,7 @@ func TestBuildSummary_PreviewURLsDefaultToHTTPS(t *testing.T) {
 	urls.TLS = true // tls omitted defaults to true
 	vals = preview.ApplyHosts(vals, "feature-pricing", urls)
 
-	got := preview.BuildSummary("feature-pricing", vals, urls, "", nil, "msg", "url")
+	got := preview.BuildSummary(parsePR(t), "feature-pricing", vals, urls, "", nil, "msg", "url")
 
 	for _, want := range []string{
 		"(https://front-feature-pricing.127.0.0.1.nip.io/)",
@@ -268,7 +297,7 @@ func TestBuildSummary_PreviewURLPathEscaping(t *testing.T) {
 			urls := preview.URLConfig{Domain: "example.com", TLS: true, Expose: map[string]string{"front": tt.path}}
 			vals = preview.ApplyHosts(vals, "feature-pricing", urls)
 
-			got := preview.BuildSummary("feature-pricing", vals, urls, "", nil, "msg", "url")
+			got := preview.BuildSummary(parsePR(t), "feature-pricing", vals, urls, "", nil, "msg", "url")
 
 			if !strings.Contains(got, tt.want+"\n") {
 				t.Errorf("summary missing %q, got:\n%s", tt.want, got)
@@ -283,7 +312,7 @@ func TestBuildSummary_LinksWrittenHosts(t *testing.T) {
 		{Name: "backend-2", Branch: "main", Host: "backend-2-feature-pricing.127.0.0.1.nip.io"},
 	}}
 
-	got := preview.BuildSummary("feature-pricing", vals, sharedURLFixture(), "", nil, "msg", "url")
+	got := preview.BuildSummary(parsePR(t), "feature-pricing", vals, sharedURLFixture(), "", nil, "msg", "url")
 
 	for _, want := range []string{
 		"- **front** · 🔄 `main`\n",
@@ -439,7 +468,7 @@ func TestBuildSummary_Dependencies(t *testing.T) {
 		},
 	}
 
-	got := preview.BuildSummary("slug", vals, urls, "", nil, "m", "u")
+	got := preview.BuildSummary(parsePR(t), "slug", vals, urls, "", nil, "m", "u")
 
 	want := "## 🚀 Preview: `slug`\n\n" +
 		"- **front** · 🔄 `main`\n" +

@@ -1,32 +1,14 @@
 package preview
 
-import (
-	"regexp"
-	"strconv"
-	"strings"
-)
+import "strings"
 
-// prURLPattern extracts (owner, repo, number) from a github.com PR URL.
-var prURLPattern = regexp.MustCompile(`^https://github\.com/([^/]+)/([^/]+)/pull/(\d+)`)
+// PRURLParser returns the owner, repo and number of a pull request URL of the
+// forge, ok false for any other URL: forge.Forge.ParsePRURL.
+type PRURLParser func(string) (owner, repo string, number int, ok bool)
 
-// ParsePRURL extracts the owner, repo and PR number from a github.com pull
-// request URL. Trailing path segments (e.g. /files) are ignored. ok is false
-// when u is not a recognizable PR URL.
-func ParsePRURL(u string) (string, string, int, bool) {
-	m := prURLPattern.FindStringSubmatch(u)
-	if m == nil {
-		return "", "", 0, false
-	}
-	number, err := strconv.Atoi(m[3])
-	if err != nil {
-		return "", "", 0, false
-	}
-	return m[1], m[2], number, true
-}
-
-// MatchesPR reports whether prURL is a pull request URL (ParsePRURL) of
+// MatchesPR reports whether prURL is a pull request URL (parse) of
 // owner/repo#number, owner and repo compared case-insensitively.
-func MatchesPR(prURL, owner, repo string, number int) bool {
-	o, r, n, ok := ParsePRURL(prURL)
+func MatchesPR(parse PRURLParser, prURL, owner, repo string, number int) bool {
+	o, r, n, ok := parse(prURL)
 	return ok && n == number && strings.EqualFold(o, owner) && strings.EqualFold(r, repo)
 }

@@ -211,7 +211,7 @@ func (s *Server) previewJSON(v previewView) PreviewJSON {
 	for _, e := range entries(v) {
 		j := PreviewEntryJSON{Name: e.name, Kind: e.kind, Branch: e.branch, URL: e.url, Status: statusUnknown}
 		if e.pinned() {
-			j.Pinned = pinnedJSON(e.svc)
+			j.Pinned = pinnedJSON(s.forge.ParsePRURL, e.svc)
 		}
 		if st, ok := statuses[e.name]; ok {
 			j.Status, j.Revision, j.StatusAt = st.Status, st.Revision, st.At.UTC().Format(time.RFC3339)
@@ -221,15 +221,16 @@ func (s *Server) previewJSON(v previewView) PreviewJSON {
 	return out
 }
 
-// pinnedJSON returns the pin of the pinned entry svc.
-func pinnedJSON(svc *preview.ServiceEntry) *PinnedJSON {
+// pinnedJSON returns the pin of the pinned entry svc, its PR's repo and number
+// parsed from its pr-url with parse.
+func pinnedJSON(parse preview.PRURLParser, svc *preview.ServiceEntry) *PinnedJSON {
 	p := &PinnedJSON{SHA: svc.CommitSha}
 	if svc.Metadata == nil {
 		return p
 	}
 	p.Author = svc.Metadata.PRAuthor
 	p.PR.URL = svc.Metadata.PRURL
-	if owner, repo, number, ok := preview.ParsePRURL(svc.Metadata.PRURL); ok {
+	if owner, repo, number, ok := parse(svc.Metadata.PRURL); ok {
 		p.PR.Repo, p.PR.Number = owner+"/"+repo, number
 	}
 	return p

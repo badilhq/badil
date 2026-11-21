@@ -161,7 +161,7 @@ With `CLEANUP_INTERVAL` unset and no CronJob, it runs only at start. Each run, l
 
 ### Which PRs
 
-The repos are the distinct `https://github.com/<owner>/<repo>` of the services in `badil.yaml`, the URLs that match a delivery's repo (other URL forms never do). Each repo's open PRs are listed with `GET /repos/{owner}/{repo}/pulls?state=open&per_page=100`, every page: about one REST call per repo and page per run. A repo whose listing fails is logged (`catch-up list failed`, with `repo` and `err`) and skipped; the other repos go on.
+The repos are the distinct `<GITHUB_URL>/<owner>/<repo>` of the services in `badil.yaml` (`https://github.com/<owner>/<repo>` by default), the URLs that match a delivery's repo (URLs on another host and other URL forms never do). Each repo's open PRs are listed with `GET /repos/{owner}/{repo}/pulls?state=open&per_page=100`, every page: about one REST call per repo and page per run. A repo whose listing fails is logged (`catch-up list failed`, with `repo` and `err`) and skipped; the other repos go on.
 
 Each listed PR is decided in this order:
 

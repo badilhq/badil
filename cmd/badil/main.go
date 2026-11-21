@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -371,39 +372,64 @@ func shutdownServers(ctx context.Context, servers ...*http.Server) error {
 }
 
 // newStoreAndForge builds the gitops repo store and the GitHub forge from
-// cfg. One installation transport of the GitHub App backs both the API client
-// and the store's git credentials, so its cached installation token is shared.
-// The store commits as the App's bot (commitIdentity), clones the gitops repo
+// cfg (newForge). One installation transport of the GitHub App backs both the
+// API client and the store's git credentials, so its cached installation
+// token is shared. The store commits as the App's bot (commitIdentity),
+// matches pr-urls with the forge's rule, clones the gitops repo
 // cfg.GitOpsRepoURL into cfg.GitOpsCloneDir with the credentials of
 // gitopsCredentials and is configured by opts; an identity that can't be
 // resolved or a failed clone is an error.
 func newStoreAndForge(
 	ctx context.Context, app *github.App, cfg *config.Config, opts ...store.Option,
 ) (*store.GitHubStore, *forgegithub.Forge, error) {
-	itr := app.InstallationTransport(cfg.InstallationID)
-	client := gh.NewClient(&http.Client{Transport: itr})
-	appClient := gh.NewClient(&http.Client{Transport: app.AppsTransport()})
-	identity, err := commitIdentity(ctx, appClient, client)
+	itr, f, identity, err := newForge(ctx, app, cfg)
 	if err != nil {
-		return nil, nil, fmt.Errorf("gitops commit identity: %w", err)
+		return nil, nil, err
 	}
 	st, err := store.Open(ctx, store.CloneConfig{
 		URL:         cfg.GitOpsRepoURL,
 		Dir:         cfg.GitOpsCloneDir,
 		Credentials: gitopsCredentials(cfg, itr),
-	}, identity, opts...)
+	}, identity, f.ParsePRURL, opts...)
 	if err != nil {
 		return nil, nil, err
 	}
-	return st, forgegithub.New(client, app, cfg.InstallationID), nil
+	return st, f, nil
+}
+
+// newForge returns the transport of the installation cfg.InstallationID of
+// app, the GitHub forge of cfg.GitHubURL over a client on that transport, and
+// the App's bot as the gitops commit identity (commitIdentity). Every client
+// is on app's API base (github.App.Client).
+func newForge(
+	ctx context.Context, app *github.App, cfg *config.Config,
+) (*ghinstallation.Transport, *forgegithub.Forge, store.CommitIdentity, error) {
+	itr := app.InstallationTransport(cfg.InstallationID)
+	client := app.Client(itr)
+	identity, err := commitIdentity(ctx, app.Client(app.AppsTransport()), client, cfg.GitHubURL)
+	if err != nil {
+		return nil, nil, store.CommitIdentity{}, fmt.Errorf("gitops commit identity: %w", err)
+	}
+	f, err := forgegithub.New(client, app, cfg.InstallationID, cfg.GitHubURL)
+	if err != nil {
+		return nil, nil, store.CommitIdentity{}, err
+	}
+	return itr, f, identity, nil
 }
 
 // commitIdentity returns the GitHub App's bot as the author and committer of
 // the gitops commits: name <slug>[bot] and email
-// <id>+<slug>[bot]@users.noreply.github.com, where the slug comes from GET
-// /app with appClient (the App JWT) and the bot user id from GET
-// /users/<slug>[bot] with installClient (the installation).
-func commitIdentity(ctx context.Context, appClient, installClient *gh.Client) (store.CommitIdentity, error) {
+// <id>+<slug>[bot]@users.noreply.<host>, where host is the host name of
+// githubURL (GITHUB_URL) without its port, the slug comes from GET /app with
+// appClient (the App JWT) and the bot user id from GET /users/<slug>[bot]
+// with installClient (the installation).
+func commitIdentity(
+	ctx context.Context, appClient, installClient *gh.Client, githubURL string,
+) (store.CommitIdentity, error) {
+	web, err := url.Parse(githubURL)
+	if err != nil {
+		return store.CommitIdentity{}, fmt.Errorf("GITHUB_URL: %w", err)
+	}
 	app, _, err := appClient.Apps.Get(ctx, "")
 	if err != nil {
 		return store.CommitIdentity{}, fmt.Errorf("GET /app: %w", err)
@@ -421,7 +447,7 @@ func commitIdentity(ctx context.Context, appClient, installClient *gh.Client) (s
 	}
 	return store.CommitIdentity{
 		Name:  login,
-		Email: fmt.Sprintf("%d+%s@users.noreply.github.com", user.GetID(), login),
+		Email: fmt.Sprintf("%d+%s@users.noreply.%s", user.GetID(), login, web.Hostname()),
 	}, nil
 }
 
@@ -467,6 +493,7 @@ func newApp(cfg *config.Config) (*github.App, error) {
 		AppID:         cfg.AppID,
 		PrivateKey:    cfg.PrivateKey,
 		WebhookSecret: cfg.WebhookSecret,
+		APIURL:        cfg.GitHubAPIURL,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating github app: %w", err)
@@ -559,7 +586,8 @@ func parseCleanupTTL(raw string) (time.Duration, error) {
 }
 
 // verifyAppCmd hits GET /app with App-JWT auth using GITHUB_APP_ID and the
-// PEM at GITHUB_PRIVATE_KEY_PATH (or inline GITHUB_PRIVATE_KEY). On success
+// PEM at GITHUB_PRIVATE_KEY_PATH (or inline GITHUB_PRIVATE_KEY), on the API
+// base of GITHUB_API_URL (config.LoadGitHubURLs). On success
 // it prints the App's identity and lists every installation reachable with
 // these credentials — the installation IDs needed for GITHUB_INSTALLATION_ID.
 //
@@ -582,12 +610,16 @@ func verifyAppCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			_, apiURL, err := config.LoadGitHubURLs()
+			if err != nil {
+				return err
+			}
 
-			tr, err := ghinstallation.NewAppsTransport(http.DefaultTransport, appID, pem)
+			ghApp, err := github.NewApp(github.AppConfig{AppID: appID, PrivateKey: pem, APIURL: apiURL})
 			if err != nil {
 				return fmt.Errorf("loading PEM: %w", err)
 			}
-			client := gh.NewClient(&http.Client{Transport: tr})
+			client := ghApp.Client(ghApp.AppsTransport())
 
 			app, _, err := client.Apps.Get(cmd.Context(), "")
 			if err != nil {

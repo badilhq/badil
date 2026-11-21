@@ -235,24 +235,26 @@ func withoutUpdatedAt(vals PreviewValues, serviceName string) PreviewValues {
 }
 
 // UnpinPR returns a copy of vals where every entry deployed by the PR
-// owner/repo#number (matched on its metadata pr-url; owner and repo compare
-// case-insensitively) is reset to a bare branch-tracking entry. It also returns
+// owner/repo#number (matched on its metadata pr-url, parsed with parse; owner
+// and repo compare case-insensitively) is reset to a bare branch-tracking entry. It also returns
 // the names of the unpinned services in file order, and whether any entry is
 // still pinned to a commit. The root fields and every entry's other fields
 // (repoURL, branch, imageTag, chart, host) are kept as written: ApplyCatalog
 // then gives an unpinned entry its branch-tracking imageTag. vals is never
 // mutated.
-func UnpinPR(vals PreviewValues, owner, repo string, number int) (PreviewValues, []string, bool) {
-	return unpin(vals, func(entry ServiceEntry) bool { return belongsToPR(entry, owner, repo, number) })
+func UnpinPR(
+	vals PreviewValues, parse PRURLParser, owner, repo string, number int,
+) (PreviewValues, []string, bool) {
+	return unpin(vals, func(entry ServiceEntry) bool { return belongsToPR(entry, parse, owner, repo, number) })
 }
 
 // UnpinPRServices is UnpinPR restricted to the entries whose name is in
 // services: the PR's entries for other services stay pinned.
 func UnpinPRServices(
-	vals PreviewValues, owner, repo string, number int, services []string,
+	vals PreviewValues, parse PRURLParser, owner, repo string, number int, services []string,
 ) (PreviewValues, []string, bool) {
 	return unpin(vals, func(entry ServiceEntry) bool {
-		return slices.Contains(services, entry.Name) && belongsToPR(entry, owner, repo, number)
+		return slices.Contains(services, entry.Name) && belongsToPR(entry, parse, owner, repo, number)
 	})
 }
 
@@ -316,9 +318,10 @@ func ApplyHosts(vals PreviewValues, slug string, urls URLConfig) PreviewValues {
 	return out
 }
 
-// belongsToPR reports whether entry was deployed by owner/repo#number.
-func belongsToPR(entry ServiceEntry, owner, repo string, number int) bool {
-	return entry.Metadata != nil && MatchesPR(entry.Metadata.PRURL, owner, repo, number)
+// belongsToPR reports whether entry was deployed by owner/repo#number, its
+// pr-url parsed with parse.
+func belongsToPR(entry ServiceEntry, parse PRURLParser, owner, repo string, number int) bool {
+	return entry.Metadata != nil && MatchesPR(parse, entry.Metadata.PRURL, owner, repo, number)
 }
 
 // LastDeploy returns the newest updated-at (RFC3339) across the pinned entries

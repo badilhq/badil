@@ -34,13 +34,15 @@ That's the whole loop. The sections below explain each step in case something go
 
 1. Uses `--webhook-url` (`BADIL_WEBHOOK_URL`) when set; otherwise reads the public HTTPS URL of your ngrok tunnel from the local ngrok inspector (`http://127.0.0.1:4040/api/tunnels`). `/webhooks/github` is appended.
 2. Generates a webhook secret and a deploy token locally.
-3. Starts a temp HTTP listener on an ephemeral port and opens your browser to a page that POSTs a GitHub App manifest to `github.com/settings/apps/new`.
+3. Starts a temp HTTP listener on an ephemeral port and opens your browser to a page that POSTs a GitHub App manifest to `github.com/settings/apps/new` (`<GITHUB_URL>/settings/apps/new` when `GITHUB_URL` is set).
 4. After you click **Create GitHub App**, GitHub redirects back to the listener with a one-time code.
-5. Exchanges the code at `POST /app-manifests/:code/conversions` for the App ID, PEM, and webhook secret.
+5. Exchanges the code at `POST /app-manifests/:code/conversions` on the API base (`GITHUB_API_URL`, default `https://api.github.com/`) for the App ID, PEM, and webhook secret.
 6. Writes `dev.private-key.pem` and `.env` in the current directory.
 7. Opens the App's install page so you can attach it to the gitops repo + service repos.
 
 After install, the browser URL ends with `/settings/installations/<ID>`. Paste that into `.env` as `GITHUB_INSTALLATION_ID`.
+
+On another GitHub host (GitHub Enterprise), export `GITHUB_URL` and `GITHUB_API_URL` before `make dev-bootstrap` and add them to `.env`: `bootstrap-app`, `verify-app` and `serve` all read them (see [Server environment variables](docs/CONFIGURATION.md#server-environment-variables)).
 
 Flags worth knowing:
 

@@ -12,7 +12,7 @@ image:
 imagePullSecrets: []
 
 # Server configuration; githubAppId, githubInstallationId and gitopsRepoURL
-# are required, gitopsRepoUsername is optional.
+# are required, gitopsRepoUsername, githubURL and githubAPIURL are optional.
 config:
   # GitHub App ID (GITHUB_APP_ID).
   githubAppId: ""
@@ -24,6 +24,15 @@ config:
   # Basic-auth username of the Secret key gitops-repo-token
   # (GITOPS_REPO_USERNAME); empty uses x-access-token.
   gitopsRepoUsername: ""
+  # Web base of the GitHub host (GITHUB_URL), e.g. https://ghe.example.com:
+  # the host of the service repos' URLs and PR URLs. Empty uses
+  # https://github.com.
+  githubURL: ""
+  # API base of the GitHub host (GITHUB_API_URL), e.g.
+  # https://ghe.example.com/api/v3/; api/v3/ is appended to a base whose path
+  # does not end with it and whose host neither starts with "api." nor
+  # contains ".api.". Empty uses https://api.github.com/.
+  githubAPIURL: ""
 
 # Required: existing Secret with keys github-private-key and github-webhook-secret.
 # Optional key deploy-token enables POST /v1/deploy and POST /v1/sync (BADIL_DEPLOY_TOKEN).
