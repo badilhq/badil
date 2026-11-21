@@ -19,6 +19,7 @@ import (
 	gh "github.com/google/go-github/v71/github"
 
 	"github.com/badilhq/badil/internal/config"
+	"github.com/badilhq/badil/internal/fakegithub"
 	forgegithub "github.com/badilhq/badil/internal/forge/github"
 	"github.com/badilhq/badil/internal/github"
 	"github.com/badilhq/badil/internal/store"
@@ -201,6 +202,43 @@ func TestCommitIdentity(t *testing.T) {
 		context.Background(), client("app-jwt"), client("installation"), "https://github.com",
 	); err == nil {
 		t.Error("commitIdentity with GET /app failing = nil error, want one")
+	}
+}
+
+// TestCommitIdentity_Mock checks the identity against the mock GitHub server,
+// with the App and installation clients on its API base: the mock App's bot
+// and an email on the web URL's host name, without its port.
+func TestCommitIdentity_Mock(t *testing.T) {
+	const webURL = "http://git.local:3000"
+	mock := httptest.NewServer(fakegithub.New(fakegithub.Config{
+		WebURL: webURL, WebhookURL: "http://127.0.0.1:1/webhooks/github", WebhookSecret: "s",
+		InstallationID: 1, AppSlug: "badil-mock", BotUserID: 1,
+	}).Handler())
+	t.Cleanup(mock.Close)
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := github.NewApp(github.AppConfig{
+		AppID:      1,
+		PrivateKey: pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}),
+		APIURL:     mock.URL + "/api/v3/",
+	})
+	if err != nil {
+		t.Fatalf("NewApp: %v", err)
+	}
+	id, err := commitIdentity(
+		t.Context(),
+		app.Client(app.AppsTransport()),
+		app.Client(app.InstallationTransport(1)),
+		webURL,
+	)
+	if err != nil {
+		t.Fatalf("commitIdentity: %v", err)
+	}
+	want := store.CommitIdentity{Name: "badil-mock[bot]", Email: "1+badil-mock[bot]@users.noreply.git.local"}
+	if id != want {
+		t.Errorf("identity = %+v, want %+v", id, want)
 	}
 }
 
