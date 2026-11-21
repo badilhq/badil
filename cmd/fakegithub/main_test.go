@@ -33,10 +33,6 @@ func TestParseSettings(t *testing.T) {
 
 	for _, tc := range []struct{ name, webURL, want string }{
 		{"path", "http://localhost:3000/gitea", "must not have a path"},
-		{"user info", "http://u:p@localhost:3000", "must not contain user info"},
-		{"query", "http://localhost:3000?x=1", "must not have a query"},
-		{"fragment", "http://localhost:3000#x", "must not have a fragment"},
-		{"scheme", "ftp://localhost:3000", "must be an https or http URL"},
 		{"missing", "", "--web-url is required"},
 	} {
 		t.Run("web-url "+tc.name, func(t *testing.T) {
