@@ -4,10 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/url"
 	"os"
 	"strconv"
-	"strings"
 
 	"github.com/badilhq/badil/internal/github"
 	"github.com/badilhq/badil/internal/store"
@@ -144,28 +142,15 @@ func LoadGitHubURLs() (string, string, error) {
 	return webURL, apiURL, nil
 }
 
-// validateRepoURL checks raw is an http(s) URL with a host, no user info, query
-// or fragment, and a path store.RepoFullName accepts. Its error reads after the
-// setting's name.
+// validateRepoURL checks raw is a base URL github.ParseBaseURL accepts, with
+// a path store.RepoFullName accepts. Its error reads after the setting's name.
 func validateRepoURL(raw string) error {
-	u, err := url.Parse(raw)
-	if ue, ok := errors.AsType[*url.Error](err); ok {
-		// The URL itself stays out of the error: it may hold credentials.
-		err = ue.Err
-	}
-	switch {
-	case err != nil:
-		return fmt.Errorf("must be a URL: %w", err)
-	case u.Scheme != "https" && u.Scheme != "http":
-		return fmt.Errorf("must be an https or http URL, got scheme %q", u.Scheme)
-	case u.Hostname() == "":
-		return errors.New("must have a host")
-	case u.User != nil:
+	u, err := github.ParseBaseURL(raw)
+	if errors.Is(err, github.ErrUserInfo) {
 		return errors.New("must not contain credentials: set GITOPS_REPO_TOKEN")
-	case u.RawQuery != "" || u.ForceQuery:
-		return errors.New("must not have a query")
-	case strings.Contains(raw, "#"):
-		return errors.New("must not have a fragment")
+	}
+	if err != nil {
+		return err
 	}
 	if _, ok := store.RepoFullName(u.Path); !ok {
 		return fmt.Errorf("must have a repository path of at least two segments, got %q", u.Path)
