@@ -84,9 +84,9 @@ func TestNewApp_DefaultAPIURL(t *testing.T) {
 			t.Errorf("APIURL %q: client bases = %s, %s; want %s, %s",
 				apiURL, c.BaseURL, c.UploadURL, def.BaseURL, def.UploadURL)
 		}
-		nc, err := github.NewClient(nil, apiURL)
+		nc, err := github.NewClient(apiURL)
 		if err != nil || *nc.BaseURL != *def.BaseURL || *nc.UploadURL != *def.UploadURL {
-			t.Errorf("NewClient(nil, %q) = %v, %v; want the default client", apiURL, nc, err)
+			t.Errorf("NewClient(%q) = %v, %v; want the default client", apiURL, nc, err)
 		}
 	}
 }
@@ -142,7 +142,7 @@ func TestNewApp_CustomAPIURL(t *testing.T) {
 }
 
 func TestNewClient_InvalidAPIURL(t *testing.T) {
-	if _, err := github.NewClient(nil, "http://[::1"); err == nil {
+	if _, err := github.NewClient("http://[::1"); err == nil {
 		t.Error("NewClient with an unparsable API URL = nil error, want one")
 	}
 }

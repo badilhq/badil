@@ -186,7 +186,7 @@ func runBootstrap(ctx context.Context, stdin io.Reader, stdout io.Writer, opts b
 		return fmt.Errorf("timed out waiting for GitHub callback: %w", ctx.Err())
 	}
 
-	client, err := github.NewClient(nil, opts.githubAPIURL)
+	client, err := github.NewClient(opts.githubAPIURL)
 	if err != nil {
 		return fmt.Errorf("GITHUB_API_URL: %w", err)
 	}
