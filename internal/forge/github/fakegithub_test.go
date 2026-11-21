@@ -50,7 +50,7 @@ func newMockEnv(t *testing.T, secret string) *mockEnv {
 	receiver := httptest.NewServer(http.HandlerFunc(env.receive))
 	t.Cleanup(receiver.Close)
 	env.mock = httptest.NewServer(fakegithub.New(fakegithub.Config{
-		WebURL:         mockWebURL + "/",
+		WebURL:         mockWebURL,
 		WebhookURL:     receiver.URL + "/webhooks/github",
 		WebhookSecret:  secret,
 		InstallationID: mockInstallation,
