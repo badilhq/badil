@@ -25,8 +25,7 @@ var (
 // GitHubStore is the gitops repo, read from a git clone and written by
 // pushing commits to it (Apply).
 type GitHubStore struct {
-	// repoURL is the gitops repo's URL that fullName, webBase and the preview
-	// files' gitopsRepoURL derive from: WithRepoURL's, else the clone URL.
+	// repoURL is the URL the derived names come from.
 	repoURL string
 	// fullName is repoURL's repository path, owner/repo on GitHub.
 	fullName string
@@ -87,9 +86,8 @@ func WithHeadMoved(f func()) Option {
 }
 
 // Open clones the gitops repo at clone.URL, which is required, as clone
-// says. The full name, the commit links and the preview files'
-// gitopsRepoURL derive from clone.URL, or from WithRepoURL's URL when set; a
-// URL without a repository path of two segments is an error. Apply commits
+// says. Names derive from clone.URL unless WithRepoURL is set; a URL without
+// a repository path of two segments is an error. Apply commits
 // as identity, whose Name and Email must be set. The clone is timed as the
 // clone operation; a failed clone is an error, ErrUnauthorized when the
 // remote or the credential provider refused it.
@@ -119,18 +117,25 @@ func Open(ctx context.Context, clone CloneConfig, identity CommitIdentity, opts 
 	return c, nil
 }
 
-// repoNames returns the full name of the repo at raw, its path without the
-// leading "/", a trailing "/" and then a trailing ".git", and its web base,
-// raw's scheme and host followed by the full name. A full name of fewer than
-// two non-empty segments is an error.
+// RepoFullName returns the full name of a repo from its URL path: the path
+// without its leading "/", a trailing "/" and then a trailing ".git". ok is
+// false when that leaves fewer than two segments or an empty one.
+func RepoFullName(path string) (fullName string, ok bool) {
+	fullName = strings.TrimPrefix(path, "/")
+	fullName = strings.TrimSuffix(strings.TrimSuffix(fullName, "/"), ".git")
+	segments := strings.Split(fullName, "/")
+	return fullName, len(segments) >= 2 && !slices.Contains(segments, "")
+}
+
+// repoNames returns the full name of the repo at raw (RepoFullName) and its
+// web base, raw's scheme and host followed by the full name.
 func repoNames(raw string) (string, string, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return "", "", errors.New("gitops repo URL: not a URL")
 	}
-	fullName := strings.TrimPrefix(u.Path, "/")
-	fullName = strings.TrimSuffix(strings.TrimSuffix(fullName, "/"), ".git")
-	if segments := strings.Split(fullName, "/"); len(segments) < 2 || slices.Contains(segments, "") {
+	fullName, ok := RepoFullName(u.Path)
+	if !ok {
 		return "", "", fmt.Errorf("gitops repo URL: repository path %q needs at least two segments", u.Path)
 	}
 	return fullName, u.Scheme + "://" + u.Host + "/" + fullName, nil
