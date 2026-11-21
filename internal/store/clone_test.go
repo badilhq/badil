@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -114,8 +115,7 @@ func serviceName(t *testing.T, st *store.GitHubStore) string {
 func TestOpen_TempDirPerStore(t *testing.T) {
 	remote := newRemote(t, map[string]string{"previews/a/values.yaml": previewFile("first")})
 	open := func() *store.GitHubStore {
-		st, err := store.Open(context.Background(), "acme", "gitops",
-			store.CloneConfig{URL: remote.URL()}, storetest.Identity)
+		st, err := store.Open(context.Background(), store.CloneConfig{URL: remote.URL()}, storetest.Identity)
 		if err != nil {
 			t.Fatalf("Open: %v", err)
 		}
@@ -153,8 +153,7 @@ func TestOpen_CloneDirClonedAgain(t *testing.T) {
 	remote := newRemote(t, map[string]string{"previews/a/values.yaml": previewFile("first")})
 	dir := filepath.Join(t.TempDir(), "gitops")
 	open := func() *store.GitHubStore {
-		st, err := store.Open(context.Background(), "acme", "gitops",
-			store.CloneConfig{URL: remote.URL(), Dir: dir}, storetest.Identity)
+		st, err := store.Open(context.Background(), store.CloneConfig{URL: remote.URL(), Dir: dir}, storetest.Identity)
 		if err != nil {
 			t.Fatalf("Open: %v", err)
 		}
@@ -347,12 +346,165 @@ func TestOpen_RemoteRefusesCredentials(t *testing.T) {
 			}))
 			t.Cleanup(srv.Close)
 			creds := func(context.Context) (string, string, error) { return "x-access-token", "revoked", nil }
-			_, err := store.Open(context.Background(), "acme", "gitops",
-				store.CloneConfig{URL: srv.URL + "/acme/gitops.git", Credentials: creds}, storetest.Identity)
+			_, err := store.Open(
+				context.Background(),
+				store.CloneConfig{URL: srv.URL + "/acme/gitops.git", Credentials: creds},
+				storetest.Identity,
+			)
 			if !errors.Is(err, store.ErrUnauthorized) {
 				t.Errorf("Open = %v, want ErrUnauthorized", err)
 			}
 		})
+	}
+}
+
+func TestOpen_RepoURLErrors(t *testing.T) {
+	remote := newRemote(t, nil)
+	cases := []struct {
+		name    string
+		clone   store.CloneConfig
+		opts    []store.Option
+		wantErr string
+	}{
+		{name: "no clone URL", wantErr: "gitops repo URL is required"},
+		{
+			name:    "one segment",
+			clone:   store.CloneConfig{URL: remote.URL()},
+			opts:    []store.Option{store.WithRepoURL("https://github.com/gitops.git")},
+			wantErr: `gitops repo URL: repository path "/gitops.git" needs at least two segments`,
+		},
+		{
+			name:    "no path",
+			clone:   store.CloneConfig{URL: "https://github.com"},
+			wantErr: `gitops repo URL: repository path "" needs at least two segments`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st, err := store.Open(context.Background(), tc.clone, storetest.Identity, tc.opts...)
+			if err == nil {
+				_ = st.Close()
+			}
+			if err == nil || err.Error() != tc.wantErr {
+				t.Errorf("Open = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// authRemote serves remote over HTTP, refusing with 401 every request whose
+// basic-auth pair is not user and password, answering every push it lets
+// through with 403, and records each request's pair.
+type authRemote struct {
+	srv   *httptest.Server
+	mu    sync.Mutex
+	pairs []string
+}
+
+func newAuthRemote(t *testing.T, remote *storetest.Remote, user, password string) *authRemote {
+	t.Helper()
+	a := &authRemote{}
+	handler := remote.HTTPHandler(http.StatusForbidden)
+	a.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u, p, _ := r.BasicAuth()
+		a.mu.Lock()
+		a.pairs = append(a.pairs, r.URL.Query().Get("service")+" "+u+":"+p)
+		a.mu.Unlock()
+		if u != user || p != password {
+			w.Header().Set("WWW-Authenticate", `Basic realm="gitops"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(a.srv.Close)
+	return a
+}
+
+// requests returns the recorded requests, each "<service> <user>:<password>",
+// the service empty but for info/refs.
+func (a *authRemote) requests() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return slices.Clone(a.pairs)
+}
+
+// assertAuth checks every request carried the basic-auth pair want, and that
+// they include the clone, the ls-remotes and fetches, and a push.
+func (a *authRemote) assertAuth(t *testing.T, want string) {
+	t.Helper()
+	services := map[string]int{}
+	for _, req := range a.requests() {
+		service, pair, _ := strings.Cut(req, " ")
+		services[service]++
+		if pair != want {
+			t.Errorf("request %q, want basic auth %s", req, want)
+		}
+	}
+	// The clone, two ls-remotes, a fetch and Apply's fetch advertise
+	// git-upload-pack; the push advertises git-receive-pack.
+	if services["git-upload-pack"] < 4 || services["git-receive-pack"] != 1 {
+		t.Errorf("info/refs requests by service = %v, want the clone, ls-remotes, fetch and a push", services)
+	}
+}
+
+// TestCredentials_BasicAuth checks that the clone, every ls-remote and fetch,
+// and a push send a static provider's username and token.
+func TestCredentials_BasicAuth(t *testing.T) {
+	for _, user := range []string{"x-access-token", "deploy-user"} {
+		t.Run(user, func(t *testing.T) {
+			const token = "glpat-static-token"
+			remote := newRemote(t, map[string]string{"previews/a/values.yaml": previewFile("first")})
+			a := newAuthRemote(t, remote, user, token)
+			creds := func(context.Context) (string, string, error) { return user, token, nil }
+			st, err := store.Open(context.Background(),
+				store.CloneConfig{URL: a.srv.URL + "/acme/gitops.git", Credentials: creds}, storetest.Identity)
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			t.Cleanup(func() { _ = st.Close() })
+			store.SetSleep(st, func(context.Context, time.Duration) error { return nil })
+
+			st.Invalidate()
+			serviceName(t, st)
+			remote.Set("previews/a/values.yaml", previewFile("second"))
+			st.Invalidate()
+			if got := serviceName(t, st); got != "second" {
+				t.Fatalf("service = %q, want the fetched second", got)
+			}
+			_, err = st.Apply(context.Background(), store.Op{
+				Kind: store.OpDeploy,
+				Change: func(tree *store.Tree) (store.Summary, error) {
+					tree.DeletePreview("a")
+					return store.Summary{Subject: "chore(preview): delete a"}, nil
+				},
+			})
+			if !errors.Is(err, store.ErrUnauthorized) {
+				t.Fatalf("Apply = %v, want the push refused with 403", err)
+			}
+
+			a.assertAuth(t, user+":"+token)
+		})
+	}
+}
+
+// TestCredentials_WrongToken checks that a clone refused for a wrong token
+// fails with ErrUnauthorized, without the token in the error.
+func TestCredentials_WrongToken(t *testing.T) {
+	const token = "glpat-wrong-token"
+	remote := newRemote(t, map[string]string{"previews/a/values.yaml": previewFile("first")})
+	a := newAuthRemote(t, remote, "x-access-token", "glpat-right-token")
+	creds := func(context.Context) (string, string, error) { return "x-access-token", token, nil }
+	st, err := store.Open(context.Background(),
+		store.CloneConfig{URL: a.srv.URL + "/acme/gitops.git", Credentials: creds}, storetest.Identity)
+	if err == nil {
+		_ = st.Close()
+	}
+	if !errors.Is(err, store.ErrUnauthorized) || strings.Contains(err.Error(), token) {
+		t.Fatalf("Open = %v, want ErrUnauthorized without the token", err)
+	}
+	if reqs := a.requests(); len(reqs) == 0 || reqs[0] != "git-upload-pack x-access-token:"+token {
+		t.Errorf("requests = %v, want the clone with the wrong token", reqs)
 	}
 }
 
@@ -364,8 +516,11 @@ func TestOpen_CredentialProviderError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	creds := func(context.Context) (string, string, error) { return "", "", errors.New("token mint failed") }
-	_, err := store.Open(context.Background(), "acme", "gitops",
-		store.CloneConfig{URL: srv.URL + "/acme/gitops.git", Credentials: creds}, storetest.Identity)
+	_, err := store.Open(
+		context.Background(),
+		store.CloneConfig{URL: srv.URL + "/acme/gitops.git", Credentials: creds},
+		storetest.Identity,
+	)
 	if !errors.Is(err, store.ErrUnauthorized) || !strings.Contains(err.Error(), "token mint failed") {
 		t.Errorf("Open = %v, want ErrUnauthorized with the provider's error", err)
 	}
@@ -388,8 +543,11 @@ func TestCredentials_BeforeEachGitCall(t *testing.T) {
 		}
 		return "x-access-token", "token", nil
 	}
-	st, err := store.Open(context.Background(), "acme", "gitops",
-		store.CloneConfig{URL: remote.URL(), Credentials: creds}, storetest.Identity)
+	st, err := store.Open(
+		context.Background(),
+		store.CloneConfig{URL: remote.URL(), Credentials: creds},
+		storetest.Identity,
+	)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -445,8 +603,11 @@ func TestFreshness_CancelledRefreshRetriedByWaiter(t *testing.T) {
 		}
 		return "x-access-token", "token", nil
 	}
-	st, err := store.Open(context.Background(), "acme", "gitops",
-		store.CloneConfig{URL: remote.URL(), Credentials: creds}, storetest.Identity)
+	st, err := store.Open(
+		context.Background(),
+		store.CloneConfig{URL: remote.URL(), Credentials: creds},
+		storetest.Identity,
+	)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

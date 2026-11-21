@@ -4,8 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
+	"slices"
 	"strconv"
+	"strings"
 )
 
 // Config holds all application configuration.
@@ -14,8 +17,15 @@ type Config struct {
 	PrivateKey     []byte //nolint:gosec // intentional field name
 	WebhookSecret  string
 	InstallationID int64
-	GitOpsRepo     string
-	ListenAddr     string
+	// GitOpsRepoURL is the http(s) clone URL of the gitops repo.
+	GitOpsRepoURL string
+	// GitOpsRepoUsername is the basic-auth username of GitOpsRepoToken, ""
+	// for the default.
+	GitOpsRepoUsername string
+	// GitOpsRepoToken authenticates the git calls to the gitops repo, ""
+	// for the GitHub App installation token.
+	GitOpsRepoToken string
+	ListenAddr      string
 	// DeployToken authenticates POST /v1/deploy and POST /v1/sync, "" when
 	// they are disabled.
 	DeployToken string
@@ -55,9 +65,17 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
-	gitOpsRepo, err := requireEnv("GITOPS_REPO")
+	gitOpsRepoURL, err := requireEnv("GITOPS_REPO_URL")
 	if err != nil {
 		return nil, err
+	}
+	if err = validateRepoURL(gitOpsRepoURL); err != nil {
+		return nil, fmt.Errorf("GITOPS_REPO_URL %w", err)
+	}
+
+	username, token := os.Getenv("GITOPS_REPO_USERNAME"), os.Getenv("GITOPS_REPO_TOKEN")
+	if username != "" && token == "" {
+		return nil, errors.New("GITOPS_REPO_USERNAME requires GITOPS_REPO_TOKEN")
 	}
 
 	listenAddr := os.Getenv("LISTEN_ADDR")
@@ -71,18 +89,53 @@ func Load() (*Config, error) {
 	}
 
 	return &Config{
-		AppID:          appID,
-		PrivateKey:     privateKey,
-		WebhookSecret:  webhookSecret,
-		InstallationID: installationID,
-		GitOpsRepo:     gitOpsRepo,
-		ListenAddr:     listenAddr,
-		DeployToken:    os.Getenv("BADIL_DEPLOY_TOKEN"),
-		ReadToken:      os.Getenv("BADIL_READ_TOKEN"),
-		MetricsAddr:    metricsAddr,
-		StatusToken:    os.Getenv("BADIL_STATUS_TOKEN"),
-		GitOpsCloneDir: os.Getenv("GITOPS_CLONE_DIR"),
+		AppID:              appID,
+		PrivateKey:         privateKey,
+		WebhookSecret:      webhookSecret,
+		InstallationID:     installationID,
+		GitOpsRepoURL:      gitOpsRepoURL,
+		GitOpsRepoUsername: username,
+		GitOpsRepoToken:    token,
+		ListenAddr:         listenAddr,
+		DeployToken:        os.Getenv("BADIL_DEPLOY_TOKEN"),
+		ReadToken:          os.Getenv("BADIL_READ_TOKEN"),
+		MetricsAddr:        metricsAddr,
+		StatusToken:        os.Getenv("BADIL_STATUS_TOKEN"),
+		GitOpsCloneDir:     os.Getenv("GITOPS_CLONE_DIR"),
 	}, nil
+}
+
+// validateRepoURL checks raw is an http(s) URL with a host, no user info, query
+// or fragment, and a path of at least two non-empty segments once its leading
+// "/", a trailing "/" and then a trailing ".git" are removed. Its error reads
+// after the setting's name.
+func validateRepoURL(raw string) error {
+	u, err := url.Parse(raw)
+	if ue := (*url.Error)(nil); errors.As(err, &ue) {
+		// The URL itself stays out of the error: it may hold credentials.
+		err = ue.Err
+	}
+	switch {
+	case err != nil:
+		return fmt.Errorf("must be a URL: %w", err)
+	case u.Scheme != "https" && u.Scheme != "http":
+		return fmt.Errorf("must be an https or http URL, got scheme %q", u.Scheme)
+	case u.Hostname() == "":
+		return errors.New("must have a host")
+	case u.User != nil:
+		return errors.New("must not contain credentials: set GITOPS_REPO_TOKEN")
+	case u.RawQuery != "" || u.ForceQuery:
+		return errors.New("must not have a query")
+	case strings.Contains(raw, "#"):
+		return errors.New("must not have a fragment")
+	}
+	p := strings.TrimPrefix(u.Path, "/")
+	p = strings.TrimSuffix(strings.TrimSuffix(p, "/"), ".git")
+	segments := strings.Split(p, "/")
+	if len(segments) < 2 || slices.Contains(segments, "") {
+		return fmt.Errorf("must have a repository path of at least two segments, got %q", u.Path)
+	}
+	return nil
 }
 
 // loadMetricsAddr reads METRICS_ADDR: unset means ":9090", set to "" means

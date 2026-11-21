@@ -56,7 +56,7 @@ A deploy runs these steps:
 5. Write it in one commit, `chore(preview): deploy <service>@<sha7> to <slug>`, pushed again on a moved remote head (the push retry). Steps 3 and 4 are decided again on every push attempt.
 6. Fan out the PR comment, best-effort: failures are returned as `warnings`.
 
-It always writes, even when only `updated-at` changes, so a repeated deploy of the same commit refreshes the TTL clock. `gitops_commit_url` is the URL of the pushed commit, `https://github.com/<GITOPS_REPO>/commit/<sha>`. The one exception is two identical calls within the same second: the second leaves the file as it is, so it commits nothing, and its `gitops_commit_url` and comment link to the gitops repo's current head.
+It always writes, even when only `updated-at` changes, so a repeated deploy of the same commit refreshes the TTL clock. `gitops_commit_url` is the URL of the pushed commit, `<GITOPS_REPO_URL without .git>/commit/<sha>`. The one exception is two identical calls within the same second: the second leaves the file as it is, so it commits nothing, and its `gitops_commit_url` and comment link to the gitops repo's current head.
 
 A manual deploy runs outside the reconcile queue and skips the one-PR-per-service check (see [One PR per service](EVENTS.md#one-pr-per-service)). The cleanup sweep may later unpin it (see [Manual deploy pins](CLEANUP.md#manual-deploy-pins)).
 
@@ -234,7 +234,7 @@ Each event is handled as follows:
 |---|---|---|
 | `pull_request` | action `opened`, `reopened`, `synchronize`, `labeled`, `unlabeled` or `closed` | async reconcile: see [Label flow](EVENTS.md#label-flow) |
 | `pull_request` | any other action | log only |
-| `push` | to `GITOPS_REPO`'s default branch, not a deletion | async config sync: see [Push](CLEANUP.md#push) |
+| `push` | to the default branch of the gitops repo (`GITOPS_REPO_URL`), not a deletion | async config sync: see [Push](CLEANUP.md#push) |
 | `push` | any other push | log only |
 | any other event | | structured log only |
 

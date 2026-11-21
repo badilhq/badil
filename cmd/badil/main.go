@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -9,7 +10,6 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -374,15 +374,12 @@ func shutdownServers(ctx context.Context, servers ...*http.Server) error {
 // cfg. One installation transport of the GitHub App backs both the API client
 // and the store's git credentials, so its cached installation token is shared.
 // The store commits as the App's bot (commitIdentity), clones the gitops repo
-// into cfg.GitOpsCloneDir and is configured by opts; an identity that can't
-// be resolved or a failed clone is an error.
+// cfg.GitOpsRepoURL into cfg.GitOpsCloneDir with the credentials of
+// gitopsCredentials and is configured by opts; an identity that can't be
+// resolved or a failed clone is an error.
 func newStoreAndForge(
 	ctx context.Context, app *github.App, cfg *config.Config, opts ...store.Option,
 ) (*store.GitHubStore, *forgegithub.Forge, error) {
-	owner, repo, ok := strings.Cut(cfg.GitOpsRepo, "/")
-	if !ok || owner == "" || repo == "" {
-		return nil, nil, fmt.Errorf("GITOPS_REPO must be 'owner/repo', got %q", cfg.GitOpsRepo)
-	}
 	itr := app.InstallationTransport(cfg.InstallationID)
 	client := gh.NewClient(&http.Client{Transport: itr})
 	appClient := gh.NewClient(&http.Client{Transport: app.AppsTransport()})
@@ -390,10 +387,10 @@ func newStoreAndForge(
 	if err != nil {
 		return nil, nil, fmt.Errorf("gitops commit identity: %w", err)
 	}
-	st, err := store.Open(ctx, owner, repo, store.CloneConfig{
-		URL:         store.RepoURL(owner, repo),
+	st, err := store.Open(ctx, store.CloneConfig{
+		URL:         cfg.GitOpsRepoURL,
 		Dir:         cfg.GitOpsCloneDir,
-		Credentials: gitCredentials(itr),
+		Credentials: gitopsCredentials(cfg, itr),
 	}, identity, opts...)
 	if err != nil {
 		return nil, nil, err
@@ -428,13 +425,31 @@ func commitIdentity(ctx context.Context, appClient, installClient *gh.Client) (s
 	}, nil
 }
 
+// defaultGitUsername is the basic-auth username of an installation token, and
+// of GITOPS_REPO_TOKEN when GITOPS_REPO_USERNAME is unset.
+const defaultGitUsername = "x-access-token"
+
+// gitopsCredentials authenticates the store's git calls with
+// cfg.GitOpsRepoToken, as cfg.GitOpsRepoUsername or defaultGitUsername, when
+// the token is set, and as the installation of itr (gitCredentials)
+// otherwise.
+func gitopsCredentials(cfg *config.Config, itr *ghinstallation.Transport) store.CredentialProvider {
+	if cfg.GitOpsRepoToken == "" {
+		return gitCredentials(itr)
+	}
+	user := cmp.Or(cfg.GitOpsRepoUsername, defaultGitUsername)
+	return func(context.Context) (string, string, error) {
+		return user, cfg.GitOpsRepoToken, nil
+	}
+}
+
 // gitCredentials authenticates the store's git calls as the installation of
 // itr: user x-access-token, with the installation token itr caches and
 // refreshes before it expires.
 func gitCredentials(itr *ghinstallation.Transport) store.CredentialProvider {
 	return func(ctx context.Context) (string, string, error) {
 		token, err := itr.Token(ctx)
-		return "x-access-token", token, err
+		return defaultGitUsername, token, err
 	}
 }
 

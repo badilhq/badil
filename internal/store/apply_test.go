@@ -345,7 +345,7 @@ func TestOpen_RejectsEmptyIdentity(t *testing.T) {
 		{Name: storetest.Identity.Name},
 		{},
 	} {
-		st, err := store.Open(context.Background(), "acme", "gitops", store.CloneConfig{URL: remote.URL()}, id)
+		st, err := store.Open(context.Background(), store.CloneConfig{URL: remote.URL()}, id)
 		if err == nil {
 			_ = st.Close()
 			t.Errorf("Open with identity %+v = nil error, want one", id)

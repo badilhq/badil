@@ -5,6 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"slices"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -19,11 +22,16 @@ var (
 	ErrUnauthorized = errors.New("gitops: unauthorized")
 )
 
-// GitHubStore is the gitops repo owner/repo on GitHub, read from a git clone
-// and written by pushing commits to it (Apply).
+// GitHubStore is the gitops repo, read from a git clone and written by
+// pushing commits to it (Apply).
 type GitHubStore struct {
-	owner    string
-	repo     string
+	// repoURL is the gitops repo's URL that fullName, webBase and the preview
+	// files' gitopsRepoURL derive from: WithRepoURL's, else the clone URL.
+	repoURL string
+	// fullName is repoURL's repository path, owner/repo on GitHub.
+	fullName string
+	// webBase is repoURL's scheme, host and fullName, the base of commit links.
+	webBase  string
 	identity CommitIdentity
 	metrics  *metrics.Metrics
 	clone    *gitClone
@@ -50,6 +58,15 @@ func WithMetrics(m *metrics.Metrics) Option {
 	}
 }
 
+// WithRepoURL makes the full name, the commit links and the preview files'
+// gitopsRepoURL derive from u instead of CloneConfig.URL: for a store that
+// clones a mirror of the repo at u.
+func WithRepoURL(u string) Option {
+	return func(c *GitHubStore) {
+		c.repoURL = u
+	}
+}
+
 // WithApplied calls f with the result of every Apply whose push landed,
 // whichever caller ran it; not after a no-op or a failed Apply. f runs on
 // Apply's goroutine before Apply returns: it must not block.
@@ -69,22 +86,30 @@ func WithHeadMoved(f func()) Option {
 	}
 }
 
-// Open clones the gitops repo owner/repo as clone says. owner is the GitHub
-// organization or user; repo is the bare repository name, which commit URLs
-// name. Apply commits as identity, whose Name and Email must be set. The
-// clone is timed as the clone operation; a failed clone is an error,
-// ErrUnauthorized when the remote or the credential provider refused it.
-func Open(
-	ctx context.Context, owner, repo string, clone CloneConfig, identity CommitIdentity, opts ...Option,
-) (*GitHubStore, error) {
+// Open clones the gitops repo at clone.URL, which is required, as clone
+// says. The full name, the commit links and the preview files'
+// gitopsRepoURL derive from clone.URL, or from WithRepoURL's URL when set; a
+// URL without a repository path of two segments is an error. Apply commits
+// as identity, whose Name and Email must be set. The clone is timed as the
+// clone operation; a failed clone is an error, ErrUnauthorized when the
+// remote or the credential provider refused it.
+func Open(ctx context.Context, clone CloneConfig, identity CommitIdentity, opts ...Option) (*GitHubStore, error) {
+	if clone.URL == "" {
+		return nil, errors.New("gitops repo URL is required")
+	}
 	if identity.Name == "" || identity.Email == "" {
 		return nil, errors.New("gitops commit identity: name and email are required")
 	}
-	c := &GitHubStore{
-		owner: owner, repo: repo, identity: identity, applySlot: make(chan struct{}, 1), sleep: sleepCtx,
-	}
+	c := &GitHubStore{identity: identity, applySlot: make(chan struct{}, 1), sleep: sleepCtx}
 	for _, opt := range opts {
 		opt(c)
+	}
+	if c.repoURL == "" {
+		c.repoURL = clone.URL
+	}
+	var err error
+	if c.fullName, c.webBase, err = repoNames(c.repoURL); err != nil {
+		return nil, err
 	}
 	cl, err := openClone(ctx, clone, c.observe, c.headMoved)
 	if err != nil {
@@ -92,6 +117,23 @@ func Open(
 	}
 	c.clone = cl
 	return c, nil
+}
+
+// repoNames returns the full name of the repo at raw, its path without the
+// leading "/", a trailing "/" and then a trailing ".git", and its web base,
+// raw's scheme and host followed by the full name. A full name of fewer than
+// two non-empty segments is an error.
+func repoNames(raw string) (string, string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", "", errors.New("gitops repo URL: not a URL")
+	}
+	fullName := strings.TrimPrefix(u.Path, "/")
+	fullName = strings.TrimSuffix(strings.TrimSuffix(fullName, "/"), ".git")
+	if segments := strings.Split(fullName, "/"); len(segments) < 2 || slices.Contains(segments, "") {
+		return "", "", fmt.Errorf("gitops repo URL: repository path %q needs at least two segments", u.Path)
+	}
+	return fullName, u.Scheme + "://" + u.Host + "/" + fullName, nil
 }
 
 // Close removes the clone directory when the store created it (an unset
@@ -138,9 +180,9 @@ func (c *GitHubStore) FetchServiceCatalogSHA(ctx context.Context) (*ServiceCatal
 	return catalog, sha, err
 }
 
-// FullName returns the gitops repo as owner/repo.
+// FullName returns the gitops repo's repository path, owner/repo on GitHub.
 func (c *GitHubStore) FullName() string {
-	return c.owner + "/" + c.repo
+	return c.fullName
 }
 
 // previewsDir is the gitops repo directory holding one subdirectory per preview.
@@ -187,15 +229,10 @@ func parsePreview(slug string, raw []byte) (*preview.PreviewValues, error) {
 	return &vals, nil
 }
 
-// RepoURL returns the git URL of the GitHub repo owner/repo:
-// https://github.com/<owner>/<repo>.git.
-func RepoURL(owner, repo string) string {
-	return "https://github.com/" + owner + "/" + repo + ".git"
-}
-
-// gitopsRepoURL returns the git URL of the gitops repo (GITOPS_REPO).
+// gitopsRepoURL returns the git URL of the gitops repo written into the
+// preview files.
 func (c *GitHubStore) gitopsRepoURL() string {
-	return RepoURL(c.owner, c.repo)
+	return c.repoURL
 }
 
 // previewIndent is the indentation of the preview files badil writes.

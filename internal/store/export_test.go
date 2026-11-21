@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/go-git/go-git/v5/plumbing"
+
 	"github.com/badilhq/badil/internal/preview"
 )
 
@@ -38,4 +40,14 @@ const MaxAttempts = maxAttempts
 // PutPreview puts vals at previews/<slug>/values.yaml in t.
 func PutPreview(t *Tree, slug string, vals preview.PreviewValues) error {
 	return t.putPreview(slug, vals)
+}
+
+// CommitURL is the web URL of c's gitops commit hash.
+func CommitURL(c *GitHubStore, hash string) string {
+	return c.commitURL(plumbing.NewHash(hash))
+}
+
+// GitopsRepoURL is the gitopsRepoURL c writes into the preview files.
+func GitopsRepoURL(c *GitHubStore) string {
+	return c.gitopsRepoURL()
 }

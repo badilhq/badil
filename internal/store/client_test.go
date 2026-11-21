@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"slices"
 	"strings"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
+	"github.com/badilhq/badil/internal/store/storetest"
 )
 
 func sampleInputs() preview.DeployInputs {
@@ -100,10 +103,59 @@ func TestFetchServiceCatalogSHA(t *testing.T) {
 	}
 }
 
-func TestFullName(t *testing.T) {
-	c, _ := readStore(t, nil)
-	if got := c.FullName(); got != "acme/gitops" {
-		t.Errorf("FullName = %q, want acme/gitops", got)
+// commitSHA is a gitops commit of the commit link tests.
+const commitSHA = "0123456789abcdef0123456789abcdef01234567"
+
+// TestRepoNames checks the full name, commit link and preview files'
+// gitopsRepoURL a store derives from its repo URL, today's strings for
+// https://github.com/acme/gitops.git.
+func TestRepoNames(t *testing.T) {
+	cases := []struct {
+		url, fullName, commitURL string
+	}{
+		{"https://github.com/acme/gitops.git", "acme/gitops", "https://github.com/acme/gitops/commit/" + commitSHA},
+		{"https://github.com/acme/gitops", "acme/gitops", "https://github.com/acme/gitops/commit/" + commitSHA},
+		{"https://github.com/acme/gitops/", "acme/gitops", "https://github.com/acme/gitops/commit/" + commitSHA},
+		{"https://github.com/acme/gitops.git/", "acme/gitops", "https://github.com/acme/gitops/commit/" + commitSHA},
+		{"https://GitHub.com/Acme/GitOps.git", "Acme/GitOps", "https://GitHub.com/Acme/GitOps/commit/" + commitSHA},
+		{
+			"http://gitea.gitea.svc:3000/acme/gitops.git", "acme/gitops",
+			"http://gitea.gitea.svc:3000/acme/gitops/commit/" + commitSHA,
+		},
+	}
+	remote := newRemote(t, nil)
+	for _, tc := range cases {
+		t.Run(tc.url, func(t *testing.T) {
+			c := openStore(t, remote.URL(), store.WithRepoURL(tc.url))
+			if got := c.FullName(); got != tc.fullName {
+				t.Errorf("FullName = %q, want %q", got, tc.fullName)
+			}
+			if got := store.CommitURL(c, commitSHA); got != tc.commitURL {
+				t.Errorf("commit URL = %q, want %q", got, tc.commitURL)
+			}
+			if got := store.GitopsRepoURL(c); got != tc.url {
+				t.Errorf("gitopsRepoURL = %q, want %q", got, tc.url)
+			}
+		})
+	}
+}
+
+// TestRepoNames_FromCloneURL checks that without WithRepoURL the names derive
+// from the clone URL.
+func TestRepoNames_FromCloneURL(t *testing.T) {
+	remote := newRemote(t, nil)
+	srv := httptest.NewServer(remote.HTTPHandler(http.StatusForbidden))
+	t.Cleanup(srv.Close)
+	repoURL := srv.URL + "/acme/gitops.git"
+	st, err := store.Open(context.Background(), store.CloneConfig{URL: repoURL}, storetest.Identity)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if st.FullName() != "acme/gitops" || store.CommitURL(st, commitSHA) != srv.URL+"/acme/gitops/commit/"+commitSHA ||
+		store.GitopsRepoURL(st) != repoURL {
+		t.Errorf("FullName, commit URL, gitopsRepoURL = %q, %q, %q; want those of %s",
+			st.FullName(), store.CommitURL(st, commitSHA), store.GitopsRepoURL(st), repoURL)
 	}
 }
 

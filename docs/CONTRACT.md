@@ -94,7 +94,7 @@ dependencies:
 | Field | Type | Present | Meaning |
 |---|---|---|---|
 | `apiVersion` | string | always | `badil.dev/v1beta1` |
-| `gitopsRepoURL` | string | always | the gitops repo, `https://github.com/<GITOPS_REPO>.git`: where `dependencies[].valueFiles` are read |
+| `gitopsRepoURL` | string | always | the gitops repo, `GITOPS_REPO_URL`: where `dependencies[].valueFiles` are read |
 | `namespace` | object | when `badil.yaml` sets `namespace` labels or annotations | extra metadata of the preview namespace |
 | `namespace.labels` | map of strings | | extra labels; never one of `app.kubernetes.io/name`, `app.kubernetes.io/instance`, `app.kubernetes.io/part-of`, `app.kubernetes.io/managed-by` |
 | `namespace.annotations` | map of strings | | extra annotations; never `argocd.argoproj.io/sync-wave` |

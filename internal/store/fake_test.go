@@ -111,13 +111,14 @@ func (f *gitopsFake) open(t *testing.T, opts ...store.Option) *store.GitHubStore
 	return openStore(t, f.remote.URL(), opts...)
 }
 
-// openStore returns a store that clones remoteURL into its own temporary
-// directory, removed at the end of the test, and does not wait between
-// Apply's attempts.
+// openStore returns a store of acme/gitops (storetest.GitopsURL) that clones
+// remoteURL into its own temporary directory, removed at the end of the test,
+// and does not wait between Apply's attempts.
 func openStore(t *testing.T, remoteURL string, opts ...store.Option) *store.GitHubStore {
 	t.Helper()
 	st, err := store.Open(
-		context.Background(), "acme", "gitops", store.CloneConfig{URL: remoteURL}, storetest.Identity, opts...,
+		context.Background(), store.CloneConfig{URL: remoteURL}, storetest.Identity,
+		append([]store.Option{store.WithRepoURL(storetest.GitopsURL)}, opts...)...,
 	)
 	if err != nil {
 		t.Fatalf("open store: %v", err)

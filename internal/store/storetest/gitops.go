@@ -13,7 +13,8 @@ import (
 )
 
 // GitopsURL is the git URL of the gitops repo of the stores Gitops opens,
-// acme/gitops.
+// acme/gitops: their full name, commit links and preview files' gitopsRepoURL
+// derive from it (store.WithRepoURL).
 const GitopsURL = "https://github.com/acme/gitops.git"
 
 // Identity is the commit identity of the tests' stores.
@@ -68,11 +69,9 @@ func Gitops(
 	remote := NewRemote(t, files)
 	st, err := store.Open(
 		context.Background(),
-		"acme",
-		"gitops",
 		store.CloneConfig{URL: remote.URL()},
 		Identity,
-		opts...)
+		append([]store.Option{store.WithRepoURL(GitopsURL)}, opts...)...)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

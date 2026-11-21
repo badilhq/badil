@@ -531,7 +531,7 @@ func TestReconcile_OpLabels(t *testing.T) {
 			captureLogs(t)
 			m := metrics.New()
 			remote := storetest.NewRemote(t, map[string]string{"badil.yaml": reconcileServices})
-			st, err := store.Open(context.Background(), "acme", "gitops", store.CloneConfig{URL: remote.URL()},
+			st, err := store.Open(context.Background(), store.CloneConfig{URL: remote.URL()},
 				storetest.Identity, store.WithMetrics(m))
 			if err != nil {
 				t.Fatalf("Open: %v", err)

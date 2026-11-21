@@ -40,8 +40,12 @@ Server environment.
   value: {{ required "config.githubAppId is required" .Values.config.githubAppId | int64 | quote }}
 - name: GITHUB_INSTALLATION_ID
   value: {{ required "config.githubInstallationId is required" .Values.config.githubInstallationId | int64 | quote }}
-- name: GITOPS_REPO
-  value: {{ required "config.gitopsRepo is required" .Values.config.gitopsRepo | quote }}
+- name: GITOPS_REPO_URL
+  value: {{ required "config.gitopsRepoURL is required" .Values.config.gitopsRepoURL | quote }}
+{{- with .Values.config.gitopsRepoUsername }}
+- name: GITOPS_REPO_USERNAME
+  value: {{ . | quote }}
+{{- end }}
 - name: LISTEN_ADDR
   value: ":{{ .Values.service.port }}"
 - name: GITOPS_CLONE_DIR
@@ -61,6 +65,12 @@ Server environment.
     secretKeyRef:
       name: {{ $secret }}
       key: deploy-token
+      optional: true
+- name: GITOPS_REPO_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secret }}
+      key: gitops-repo-token
       optional: true
 {{- end -}}
 
