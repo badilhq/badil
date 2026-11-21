@@ -11,19 +11,25 @@ image:
 # Pull secrets for a private registry.
 imagePullSecrets: []
 
-# Server configuration; all three values are required.
+# Server configuration; githubAppId, githubInstallationId and gitopsRepoURL
+# are required, gitopsRepoUsername is optional.
 config:
   # GitHub App ID (GITHUB_APP_ID).
   githubAppId: ""
   # GitHub App installation ID (GITHUB_INSTALLATION_ID).
   githubInstallationId: ""
-  # Gitops repository as owner/name (GITOPS_REPO).
-  gitopsRepo: ""
+  # Gitops repository's http(s) clone URL, e.g.
+  # https://github.com/<owner>/<repo>.git (GITOPS_REPO_URL).
+  gitopsRepoURL: ""
+  # Basic-auth username of the Secret key gitops-repo-token
+  # (GITOPS_REPO_USERNAME); empty uses x-access-token.
+  gitopsRepoUsername: ""
 
 # Required: existing Secret with keys github-private-key and github-webhook-secret.
 # Optional key deploy-token enables POST /v1/deploy and POST /v1/sync (BADIL_DEPLOY_TOKEN).
 # Optional key read-token enables the GET /v1 routes (BADIL_READ_TOKEN); deploy-token grants them too.
 # Optional key status-token enables POST /webhooks/status (BADIL_STATUS_TOKEN).
+# Optional key gitops-repo-token authenticates badil's git calls to the gitops repo (GITOPS_REPO_TOKEN) instead of the GitHub App installation token.
 existingSecret: ""
 
 # Port the server listens on and the Service exposes.

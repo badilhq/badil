@@ -315,7 +315,9 @@ badil reads these environment variables:
 | `GITHUB_PRIVATE_KEY_PATH` or `GITHUB_PRIVATE_KEY` | yes, one of them | | GitHub App private key: PEM file path or inline PEM |
 | `GITHUB_WEBHOOK_SECRET` | yes | | GitHub App webhook secret |
 | `GITHUB_INSTALLATION_ID` | yes | | the only installation badil accepts webhooks from |
-| `GITOPS_REPO` | yes | | the gitops repo, `owner/repo` |
+| `GITOPS_REPO_URL` | yes | | the gitops repo's http(s) clone URL, e.g. `https://github.com/acme/gitops.git`: no credentials, query or fragment, and a repository path of at least two segments. Its path without the leading `/`, a trailing `/` and a trailing `.git` is the repo's full name (`acme/gitops`) |
+| `GITOPS_REPO_TOKEN` | no | unset: the GitHub App installation token | token of badil's git calls to the gitops repo (clone, ls-remote, fetch, push), sent as HTTP basic auth. In the chart, it is the optional `gitops-repo-token` key of `existingSecret`. See [Gitops repo credentials](#gitops-repo-credentials) |
+| `GITOPS_REPO_USERNAME` | no | `x-access-token` | basic-auth username sent with `GITOPS_REPO_TOKEN`; set without the token, badil fails at start. In the chart, `config.gitopsRepoUsername` |
 | `GITOPS_CLONE_DIR` | no | unset: a temporary directory per process, removed on exit | directory of the gitops repo's git clone, removed and cloned again on start; the chart sets `/var/lib/badil/gitops`, on an `emptyDir` |
 | `BADIL_DEPLOY_TOKEN` | no | unset | bearer token for `/v1/deploy` and `/v1/sync`, which answer 404 when it is unset; also grants the `GET /v1` routes |
 | `BADIL_READ_TOKEN` | no | unset | `serve` only: bearer token of the `GET /v1` routes ([`/v1/previews`](API.md#get-v1previews), [`/v1/wait`](API.md#get-v1wait)); `BADIL_DEPLOY_TOKEN` grants them too. With neither set, they answer 404. In the chart, it is the optional `read-token` key of `existingSecret` |
@@ -325,6 +327,19 @@ badil reads these environment variables:
 | `POD_NAMESPACE` | no | unset: status kept in memory only | `serve` only: the namespace where badil keeps each preview's status as a ConfigMap, through the in-cluster Kubernetes config. Without it, or outside a cluster, the status is not persisted and badil logs `status persistence disabled` at start. The chart sets it to the release namespace |
 | `CLEANUP_INTERVAL` | no | unset: no in-server sweep | `serve` only: how often the in-server sweep runs, a Go duration of at least `1m` (e.g. `1h`) |
 | `CLEANUP_TTL` | no | unset: no expiry | `cleanup`, and `serve` when `CLEANUP_INTERVAL` is set: sweep expiry, a Go duration (e.g. `168h`) |
+
+### Gitops repo credentials
+
+Without `GITOPS_REPO_TOKEN`, badil's git calls to the gitops repo authenticate as the GitHub App installation, username `x-access-token`. With it, they send `GITOPS_REPO_USERNAME` (default `x-access-token`) and the token instead. The username each host accepts with a token:
+
+| Host | Token | Username |
+|---|---|---|
+| GitHub | personal access token | `x-access-token`, or any non-empty username |
+| GitLab | personal, project or group access token | `x-access-token`, or any non-blank username |
+| GitLab | deploy token | the deploy token's own username |
+| Gitea | access token or deploy token | any, `x-access-token` included |
+
+A push runs as the token's owner. A branch rule on the gitops repo that only the badil App may bypass rejects badil's pushes made with `GITOPS_REPO_TOKEN`. The commits' author and committer stay the App's bot whatever the token.
 
 ### GitHub App
 

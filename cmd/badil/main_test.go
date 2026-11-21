@@ -17,6 +17,7 @@ import (
 	"github.com/bradleyfalzon/ghinstallation/v2"
 	gh "github.com/google/go-github/v71/github"
 
+	"github.com/badilhq/badil/internal/config"
 	"github.com/badilhq/badil/internal/github"
 	"github.com/badilhq/badil/internal/store"
 )
@@ -56,11 +57,11 @@ func TestParseCleanupTTL(t *testing.T) {
 	}
 }
 
-// TestGitCredentials_OneTokenPerValidity checks that many git credential
-// calls in a row, as before each ls-remote and fetch, make one installation
-// token request while the token is valid.
-func TestGitCredentials_OneTokenPerValidity(t *testing.T) {
-	var mints atomic.Int32
+// installationTransport returns the transport of installation 67890 of a
+// GitHub App whose API is srv, counting each installation token srv mints in
+// mints.
+func installationTransport(t *testing.T, mints *atomic.Int32) *ghinstallation.Transport {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/app/installations/67890/access_tokens" {
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
@@ -82,13 +83,21 @@ func TestGitCredentials_OneTokenPerValidity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	atr.BaseURL = srv.URL
 	app, err := github.NewAppFromTransport(atr, "secret")
 	if err != nil {
 		t.Fatal(err)
 	}
+	itr := app.InstallationTransport(67890)
+	itr.BaseURL = srv.URL
+	return itr
+}
 
-	creds := gitCredentials(app.InstallationTransport(67890))
+// TestGitCredentials_OneTokenPerValidity checks that many git credential
+// calls in a row, as before each ls-remote and fetch, make one installation
+// token request while the token is valid.
+func TestGitCredentials_OneTokenPerValidity(t *testing.T) {
+	var mints atomic.Int32
+	creds := gitCredentials(installationTransport(t, &mints))
 	for range 20 {
 		user, password, credErr := creds(context.Background())
 		if credErr != nil || user != "x-access-token" || password != "ghs_installation" {
@@ -98,6 +107,36 @@ func TestGitCredentials_OneTokenPerValidity(t *testing.T) {
 	}
 	if n := mints.Load(); n != 1 {
 		t.Errorf("access token requests = %d, want 1", n)
+	}
+}
+
+// TestGitopsCredentials checks GITOPS_REPO_TOKEN, with the default or the
+// configured username, replaces the installation token.
+func TestGitopsCredentials(t *testing.T) {
+	cases := []struct {
+		name, username, token string
+		wantUser, wantPass    string
+		wantMints             int32
+	}{
+		{name: "token", token: "glpat-secret", wantUser: "x-access-token", wantPass: "glpat-secret"},
+		{
+			name: "token and username", username: "deploy-user", token: "glpat-secret",
+			wantUser: "deploy-user", wantPass: "glpat-secret",
+		},
+		{name: "no token", wantUser: "x-access-token", wantPass: "ghs_installation", wantMints: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var mints atomic.Int32
+			cfg := &config.Config{GitOpsRepoUsername: tc.username, GitOpsRepoToken: tc.token}
+			user, password, err := gitopsCredentials(cfg, installationTransport(t, &mints))(context.Background())
+			if err != nil || user != tc.wantUser || password != tc.wantPass {
+				t.Errorf("credentials = %q, %q, %v; want %q, %q", user, password, err, tc.wantUser, tc.wantPass)
+			}
+			if n := mints.Load(); n != tc.wantMints {
+				t.Errorf("access token requests = %d, want %d", n, tc.wantMints)
+			}
+		})
 	}
 }
 

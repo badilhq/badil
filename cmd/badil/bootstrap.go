@@ -42,13 +42,13 @@ const (
 // Documented at https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest.
 func bootstrapAppCmd() *cobra.Command {
 	var (
-		appName    string
-		gitopsRepo string
-		envPath    string
-		pemPath    string
-		owner      string
-		webhookURL string
-		assumeYes  bool
+		appName       string
+		gitopsRepoURL string
+		envPath       string
+		pemPath       string
+		owner         string
+		webhookURL    string
+		assumeYes     bool
 	)
 	cmd := &cobra.Command{
 		Use:   "bootstrap-app",
@@ -62,18 +62,19 @@ before doing anything (skip with --yes).`,
 			ctx, cancel := context.WithTimeout(cmd.Context(), manifestTimeout)
 			defer cancel()
 			return runBootstrap(ctx, cmd.InOrStdin(), cmd.OutOrStdout(), bootstrapOpts{
-				appName:    appName,
-				gitopsRepo: gitopsRepo,
-				envPath:    envPath,
-				pemPath:    pemPath,
-				owner:      owner,
-				webhookURL: webhookURL,
-				assumeYes:  assumeYes,
+				appName:       appName,
+				gitopsRepoURL: gitopsRepoURL,
+				envPath:       envPath,
+				pemPath:       pemPath,
+				owner:         owner,
+				webhookURL:    webhookURL,
+				assumeYes:     assumeYes,
 			})
 		},
 	}
 	cmd.Flags().StringVar(&appName, "name", defaultAppName(), "App name (must be globally unique)")
-	cmd.Flags().StringVar(&gitopsRepo, "gitops-repo", "", "GITOPS_REPO value to write into .env (owner/repo)")
+	cmd.Flags().StringVar(&gitopsRepoURL, "gitops-repo-url", "",
+		"GITOPS_REPO_URL value to write into .env (the gitops repo's clone URL)")
 	cmd.Flags().StringVar(&envPath, "env-file", ".env", "Path to write the .env file")
 	cmd.Flags().StringVar(&pemPath, "pem-file", "dev.private-key.pem", "Path to write the App private key")
 	cmd.Flags().StringVar(&owner, "owner", "", "Org login to install the App under (empty = personal account)")
@@ -84,13 +85,13 @@ before doing anything (skip with --yes).`,
 }
 
 type bootstrapOpts struct {
-	appName    string
-	gitopsRepo string
-	envPath    string
-	pemPath    string
-	owner      string
-	webhookURL string
-	assumeYes  bool
+	appName       string
+	gitopsRepoURL string
+	envPath       string
+	pemPath       string
+	owner         string
+	webhookURL    string
+	assumeYes     bool
 }
 
 func runBootstrap(ctx context.Context, stdin io.Reader, stdout io.Writer, opts bootstrapOpts) error {
@@ -188,7 +189,7 @@ func runBootstrap(ctx context.Context, stdin io.Reader, stdout io.Writer, opts b
 		AppID:         conv.GetID(),
 		PEMPath:       opts.pemPath,
 		WebhookSecret: conv.GetWebhookSecret(),
-		GitOpsRepo:    opts.gitopsRepo,
+		GitOpsRepoURL: opts.gitopsRepoURL,
 		DeployToken:   deployToken,
 	})
 	if writeErr := os.WriteFile(opts.envPath, []byte(envBody), 0o600); writeErr != nil {
@@ -398,20 +399,20 @@ type envValues struct {
 	AppID         int64
 	PEMPath       string
 	WebhookSecret string
-	GitOpsRepo    string
+	GitOpsRepoURL string
 	DeployToken   string
 }
 
 func renderEnv(v envValues) string {
-	gitops := v.GitOpsRepo
+	gitops := v.GitOpsRepoURL
 	if gitops == "" {
-		gitops = "# set this — owner/repo of your gitops repository"
+		gitops = " # set this — the clone URL of your gitops repository, e.g. https://github.com/<owner>/<repo>.git"
 	}
 	return fmt.Sprintf(`export GITHUB_APP_ID=%d
 export GITHUB_PRIVATE_KEY_PATH=%s
 export GITHUB_WEBHOOK_SECRET=%s
 export GITHUB_INSTALLATION_ID= # set after installing the App
-export GITOPS_REPO=%s
+export GITOPS_REPO_URL=%s
 export BADIL_DEPLOY_TOKEN=%s
 export LISTEN_ADDR=:8080
 `, v.AppID, v.PEMPath, v.WebhookSecret, gitops, v.DeployToken)
