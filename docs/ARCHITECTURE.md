@@ -60,9 +60,9 @@ The steps from label to teardown:
 
 The [cleanup sweep](#cleanup-sweep) catches what events missed. Every step is detailed in [Pull request events](EVENTS.md), [Services and dependencies](SERVICES.md) and [Cleanup and config sync](CLEANUP.md).
 
-## The gitops repo is the interface
+## Reads and writes through the gitops repo
 
-badil never talks to the cluster or to Argo CD. It reads one file, `badil.yaml`, and writes one file per preview. Argo CD does every deploy and deletion.
+badil does not talk to Argo CD, and its only Kubernetes access is the status ConfigMaps in its own namespace. It reads one file, `badil.yaml`, and writes one file per preview. Argo CD does every deploy and deletion.
 
 badil reads the gitops repo from a full git clone of its default branch, made on start in `GITOPS_CLONE_DIR`. Before a read, it checks the remote branch head with `ls-remote`, at most once every 5 seconds, and fetches only when the head moved. A push to the gitops repo makes the next read check at once. A failed check fails the read: badil never reads a clone it could not check.
 
@@ -104,7 +104,7 @@ These alternatives were considered and not chosen:
 
 A preview is named by a slug: the PR's branch, or the name of a `preview:<name>` label. PRs from several repos with the same branch or the same named label share one preview. Each pins its own services.
 
-A preview holds one PR per service, so two PRs never fight over a service. `preview.maxPreviews` can cap the number of previews.
+A preview holds one PR per service, so a service is pinned by at most one PR. `preview.maxPreviews` can cap the number of previews.
 
 Rules: [Target preview](EVENTS.md#target-preview), [One PR per service](EVENTS.md#one-pr-per-service) and [Preview cap](EVENTS.md#preview-cap).
 
@@ -142,13 +142,13 @@ Rules: [Config sync](CLEANUP.md#config-sync).
 
 ## Preview deployments on GitHub
 
-Argo CD, not badil, knows whether a preview service is healthy. So Argo CD's notifications controller, not badil, posts GitHub Deployments for pinned services, through its own GitHub App.
+Argo CD decides whether a preview service is healthy, so its notifications controller posts GitHub Deployments for pinned services, through its own GitHub App. badil posts none.
 
 Triggers and limitations: [Preview deployments on GitHub](OPERATIONS.md#preview-deployments-on-github).
 
 ## Preview status
 
-The renderer, not badil, sees the cluster. It reports each preview service's status through the [status callback](CONTRACT.md#status-callback), `POST /webhooks/status`; Argo CD's notifications controller is the reference sender.
+badil has no access to preview namespaces. The renderer reports each preview service's status through the [status callback](CONTRACT.md#status-callback), `POST /webhooks/status`; Argo CD's notifications controller is the reference sender.
 
 ```mermaid
 flowchart LR

@@ -36,8 +36,6 @@ This requires the ApplicationSet controller policy `sync` (the default) or `crea
 
 ### What the sweeper catches
 
-The cleanup sweeper catches these cases:
-
 - closes missed while badil was down;
 - pins written by a deploy after the PR closed;
 - a labeled PR whose branch was renamed after the deploy: it is unpinned from its old slug, without a comment. Push to redeploy it at the new slug.
@@ -113,7 +111,7 @@ A `badil.yaml` change therefore reaches every preview within one sweep interval,
 
 A mistaken edit propagates the same way, except that pinned entries of a removed service stay until their PR leaves. A git revert of `badil.yaml` undoes it at the next sweep.
 
-After a catalog edit, one sweep makes one commit covering every preview whose file differs. It updates the comment of each open PR of the previews whose services, dependencies or hosts changed. All of this stays within the GitHub App's rate limit, and `badil_previews_synced_total` shows the volume.
+After a catalog edit, one sweep makes one commit covering every preview whose file differs. It updates the comment of each open PR of the previews whose services, dependencies or hosts changed. These comment updates count against the GitHub App's rate limit; `badil_previews_synced_total` shows the volume.
 
 A failed sweep commit is retried by the next sweep. A failed comment refresh is logged (`preview sync comment failed`) and not retried. That comment stays stale until the PR's next deploy or teardown, as for every comment fan-out.
 

@@ -17,7 +17,7 @@ badil answers `opened`, `reopened`, `synchronize`, `labeled`, `unlabeled` and `c
 5. The PR is torn down from every other preview it may still be pinned in (the [cleanup set](#cleanup-set)), before anything is deployed.
 6. An open PR with a target deploys to the target slug (see [Deploy step](#deploy-step)).
 
-   Steps 5 and 6 are one commit, pushed again on a moved remote head (see [The gitops repo is the interface](ARCHITECTURE.md#the-gitops-repo-is-the-interface)). Its subject is `chore(preview): deploy <owner>/<repo>#<n> to <slug>` when a service was deployed, followed by `, unpin from <slug>, …` when the PR left other previews, and `chore(preview): unpin <owner>/<repo>#<n> from <slug>, …` otherwise. Its body has one line per change, by slug: `<slug>: pin <service>@<sha7>`, `<slug>: unpin <service>` or `<slug>: delete`. The PR comments are posted once the commit is pushed, one per PR and preview, and link to it. When the PR's files can't be listed, or the target preview can't be read, the commit holds only step 5 and the reconcile fails.
+   Steps 5 and 6 are one commit, pushed again on a moved remote head (see [Reads and writes through the gitops repo](ARCHITECTURE.md#reads-and-writes-through-the-gitops-repo)). Its subject is `chore(preview): deploy <owner>/<repo>#<n> to <slug>` when a service was deployed, followed by `, unpin from <slug>, …` when the PR left other previews, and `chore(preview): unpin <owner>/<repo>#<n> from <slug>, …` otherwise. Its body has one line per change, by slug: `<slug>: pin <service>@<sha7>`, `<slug>: unpin <service>` or `<slug>: delete`. The PR comments are posted once the commit is pushed, one per PR and preview, and link to it. When the PR's files can't be listed, or the target preview can't be read, the commit holds only step 5 and the reconcile fails.
 7. An open PR with conflicting named labels gets no preview. Its comment is replaced last by:
 
    ```
@@ -28,7 +28,7 @@ badil answers `opened`, `reopened`, `synchronize`, `labeled`, `unlabeled` and `c
 
 ### Current PR state
 
-Because badil acts on the PR as GitHub returns it, late or out-of-order deliveries, `closed` included, converge on the current truth. A `closed` delivery running after the PR was reopened and labeled deploys it.
+Because badil acts on the PR as GitHub returns it, late or out-of-order deliveries, `closed` included, act on the PR's current state. A `closed` delivery running after the PR was reopened and labeled deploys it.
 
 Fork PRs (head repo different from the base repo) are skipped: CI can't push a fork's image. A closed fork PR is still torn down.
 
