@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.1](https://github.com/badilhq/badil/compare/v0.27.0...v0.27.1) (2026-11-22)
+
+
+### Documentation
+
+* replace slogan phrasing with plain statements ([#128](https://github.com/badilhq/badil/issues/128)) ([adb64b4](https://github.com/badilhq/badil/commit/adb64b4f05074cecffdd246c1fb638a70af83e87))
+
 ## [0.27.0](https://github.com/badilhq/badil/compare/v0.26.0...v0.27.0) (2026-11-21)
 
 
