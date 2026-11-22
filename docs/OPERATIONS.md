@@ -80,7 +80,7 @@ Each is recorded as the time since `updated-at`, up to the 24h bound, so it usua
 
 ## Preview deployments on GitHub
 
-Argo CD, not badil, signals on GitHub that a PR's code is running in its preview, or failed to: health is Argo CD's call. Its notifications controller posts GitHub Deployments through its own GitHub App (Deployments R/W, Metadata R). badil makes no Deployments calls.
+Argo CD's notifications controller posts GitHub Deployments when a PR's code runs in its preview or fails to, based on Argo CD's health status, through its own GitHub App (Deployments R/W, Metadata R). badil makes no Deployments calls.
 
 Configuration: [`examples/argocd/github-deployments-values.yaml`](../examples/argocd/github-deployments-values.yaml), applied after `notifications-values.yaml`. Setup: INSTALL [Preview deployments on GitHub](INSTALL.md#preview-deployments-on-github-optional).
 
@@ -157,8 +157,6 @@ The environment is `preview-<slug>-<service>`, one per preview service. A new `s
 
 ### Limitations
 
-These limitations apply:
-
 1. `inactive` on delete is best effort: the controller only sees the deletion if it processes the update before the Application's finalizer completes.
 
    It looks up the deployment by the SHA badil last pinned, so it closes that SHA's `success`, `failure` or `error` deployment. Only when that SHA never got a status (still Progressing at teardown) does it create an extra `inactive` deployment for it.
@@ -178,7 +176,7 @@ These limitations apply:
     `on-preview-deleted` then looks up the deployment by the short SHA and misses the full-SHA `success` deployment: it leaves that deployment open and creates an extra `inactive` deployment for the short ref.
 
     The label flow always pins the full SHA.
-12. The unpin status is lost when the pinned entry has left the sync history (Argo CD keeps the last 10 syncs) before the controller sees the unpin. Not expected in practice.
+12. The unpin status is lost when the pinned entry has left the sync history (Argo CD keeps the last 10 syncs) before the controller sees the unpin.
 13. When the unpinned SHA's sync succeeded but it never got a status (still Progressing at the unpin), the unpin creates an extra deployment for that SHA holding only `inactive`, as limitation 1 describes for delete.
 14. Argo CD records a sync in its history only when it succeeds. If the last pinned SHA's sync failed (its deployment shows `error` or `failure`) and badil then unpins the service, `on-preview-unpinned` posts `inactive` on the previous successfully synced pin's deployment, and the failed SHA's deployment stays open.
 15. `on-preview-deployed` needs a sync at the pinned SHA, and Argo CD auto-syncs an Application only when it is OutOfSync. A pin whose rendered manifests equal what is deployed (a chart that ignores the image tag, with its chart path unchanged by the PR) runs no sync: the service runs the pinned SHA with no deployment status.

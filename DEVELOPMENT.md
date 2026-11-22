@@ -4,7 +4,7 @@ Local setup for badil: ngrok tunnel (or a public URL), GitHub App, env, smoke te
 
 ## Prerequisites
 
-- Go 1.25+
+- Go 1.26+
 - `ngrok` (unless badil has a public URL you pass as `BADIL_WEBHOOK_URL`)
 - `gh` CLI, authenticated (`gh auth status`)
 - GitHub account with admin access to the gitops repo
@@ -26,7 +26,7 @@ make dev-serve             # starts the server
 make dev-cleanup           # runs one cleanup sweep (CLEANUP_TTL=168h make dev-cleanup to also expire idle previews)
 ```
 
-That's the whole loop. The sections below explain each step in case something goes wrong.
+The sections below detail each step.
 
 `make dev-bootstrap` prints a preflight plan describing every state change it's about to make — App name, webhook URL, file paths (with explicit "will overwrite" warnings) — and prompts before touching anything. Pass `-y` / `--yes` if you want to skip the prompt in scripts.
 
@@ -44,7 +44,7 @@ After install, the browser URL ends with `/settings/installations/<ID>`. Paste t
 
 On another GitHub host (GitHub Enterprise), export `GITHUB_URL` and `GITHUB_API_URL` before `make dev-bootstrap` and add them to `.env`: `bootstrap-app`, `verify-app` and `serve` all read them (see [Server environment variables](docs/CONFIGURATION.md#server-environment-variables)).
 
-Flags worth knowing:
+`bootstrap-app` flags:
 
 | Flag | Default | Purpose |
 |---|---|---|
@@ -85,7 +85,7 @@ curl -s -X POST http://localhost:8080/v1/deploy \
 EOF
 ```
 
-The deploy itself is what's being smoked — a successful response means the gitops commit landed. Expect a `warnings` entry about PR-comment fan-out failing: the smoke uses a fake `pull/1` URL that doesn't exist, so the comment POST gets a 404. That's the test's design (best-effort fan-out, load-bearing write).
+A successful response means the gitops commit landed. Expect a `warnings` entry: the smoke uses a fake `pull/1` URL, so the PR comment POST gets a 404. Comments are best effort; the gitops write is not.
 
 ```json
 {

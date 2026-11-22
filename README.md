@@ -7,13 +7,13 @@
 
 Per-pull-request preview environments for teams running Kubernetes and ArgoCD. Self-hosted, open source.
 
-Every branch gets its own isolated, full-stack environment: the services changed in the PR run at their PR version, every other service runs at its branch (default `main`). badil writes the desired state to your gitops repo; your ArgoCD deploys it. badil never touches your previews directly: its only cluster access is its own status ConfigMaps (`badil-status-<slug>`), in its own namespace.
+Each labelled PR gets a preview in its own namespace, named after its branch or its `preview:<name>` label: the services changed in the PR run at their PR version, every other service runs at its branch (default `main`). badil writes the desired state to your gitops repo; your ArgoCD deploys it. badil never touches your previews directly: its only cluster access is its own status ConfigMaps (`badil-status-<slug>`), in its own namespace.
 
 ## Why
 
-When code is written at machine speed, the bottleneck is validating and integrating it, and a shared staging environment becomes a queue. badil applies the practices from [AI Writes Code in Hours. It Still Takes Weeks to Ship.](https://medium.com/@aminebenseddik/ai-writes-code-in-hours-it-still-takes-weeks-to-ship-7fb07f87cc07):
+A shared staging environment makes changes wait in line to be validated and integrated. badil applies the practices from [AI Writes Code in Hours. It Still Takes Weeks to Ship.](https://medium.com/@aminebenseddik/ai-writes-code-in-hours-it-still-takes-weeks-to-ship-7fb07f87cc07):
 
-- One isolated preview per branch, or per `preview:<name>` label, across repos: PRs on the same branch, or with the same `preview:<name>` label, share one preview.
+- One preview per branch, or per `preview:<name>` label, across repos, each in its own namespace: PRs on the same branch, or with the same `preview:<name>` label, share one preview.
 - Changed services run at their PR commit, everything else at their branch (default `main`).
 - CI builds once; badil only writes desired state. It never builds images and never reads or writes preview namespaces: it writes only its own status ConfigMaps, in its own namespace.
 - Argo CD deploys from git.

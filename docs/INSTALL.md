@@ -242,7 +242,7 @@ badil sets no quota or network policy on previews. To cap each preview's resourc
 
 1. Label a PR `preview`.
 2. Expect:
-   - within seconds, a badil comment on the PR and `previews/<slug>/values.yaml` in the gitops repo;
+   - a badil comment on the PR and `previews/<slug>/values.yaml` in the gitops repo, once badil has processed the webhook;
    - within the ApplicationSet poll (3 minutes by default), one Argo CD Application per service and per dependency.
 3. With preview URLs, the comment links each exposed service.
 4. Removing the label or closing the PR tears the preview down.
@@ -271,7 +271,7 @@ go install github.com/badilhq/badil/cmd/badil@latest
 
 ### Wait for a preview
 
-A CI job or an agent can wait until a PR's preview is ready at its commit, or learn at once why it never will be, instead of sleeping. Generate a read token (e.g. `openssl rand -hex 32`) as `BADIL_READ_TOKEN`, add it to the badil Secret as `read-token` and restart badil. The deploy token is accepted too, but it also grants deploys. A preview reaches `ready` only through the [status callback](#preview-status-optional): without it badil never learns a service's state, so a pinned PR stays `progressing` and `badil wait` exits 2 when `--timeout` passes.
+A CI job or an agent can wait until a PR's preview is ready at its commit, or exit at once when the preview failed or was refused, instead of sleeping for a fixed time. Generate a read token (e.g. `openssl rand -hex 32`) as `BADIL_READ_TOKEN`, add it to the badil Secret as `read-token` and restart badil. The deploy token is accepted too, but it also grants deploys. A preview reaches `ready` only through the [status callback](#preview-status-optional): without it badil never learns a service's state, so a pinned PR stays `progressing` and `badil wait` exits 2 when `--timeout` passes.
 
 ```bash
 kubectl patch secret badil -n badil --type merge \
