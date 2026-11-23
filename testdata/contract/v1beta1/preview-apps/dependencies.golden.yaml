@@ -7,8 +7,8 @@ metadata:
   labels:
     app.kubernetes.io/name: dependencies
     app.kubernetes.io/instance: dependencies
-    app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
+    badil.dev/preview: dependencies
   annotations:
     argocd.argoproj.io/sync-wave: "-2"
 
@@ -22,8 +22,8 @@ metadata:
   labels:
     app.kubernetes.io/name: dependencies
     app.kubernetes.io/instance: dependencies
-    app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
+    badil.dev/preview: dependencies
   annotations:
     argocd.argoproj.io/sync-wave: "-3"
   finalizers:
@@ -52,8 +52,8 @@ metadata:
   labels:
     app.kubernetes.io/name: api
     app.kubernetes.io/instance: dependencies
-    app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
+    badil.dev/preview: dependencies
   annotations:
     argocd.argoproj.io/sync-wave: "0"
     preview.badil.dev/vcs.ref.revision: "0123456789abcdef0123456789abcdef01234567"
@@ -99,8 +99,8 @@ metadata:
   labels:
     app.kubernetes.io/name: postgres
     app.kubernetes.io/instance: dependencies
-    app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
+    badil.dev/preview: dependencies
   annotations:
     argocd.argoproj.io/sync-wave: "-1"
     preview.badil.dev/vcs.ref.revision: ""
@@ -146,8 +146,8 @@ metadata:
   labels:
     app.kubernetes.io/name: mailpit
     app.kubernetes.io/instance: dependencies
-    app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
+    badil.dev/preview: dependencies
   annotations:
     argocd.argoproj.io/sync-wave: "-1"
     preview.badil.dev/vcs.ref.revision: ""

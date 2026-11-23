@@ -1,9 +1,9 @@
-# want: at '/namespace/labels/app.kubernetes.io~1part-of': false schema
+# want: at '/namespace/labels/badil.dev~1preview': false schema
 apiVersion: badil.dev/v1beta1
 gitopsRepoURL: https://github.com/acme/gitops.git
 namespace:
   labels:
-    app.kubernetes.io/part-of: x
+    badil.dev/preview: x
 services:
   - name: api
     repoURL: https://github.com/acme/platform.git

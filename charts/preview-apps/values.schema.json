@@ -15,8 +15,8 @@
           "properties": {
             "app.kubernetes.io/name": false,
             "app.kubernetes.io/instance": false,
-            "app.kubernetes.io/part-of": false,
-            "app.kubernetes.io/managed-by": false
+            "app.kubernetes.io/managed-by": false,
+            "badil.dev/preview": false
           },
           "additionalProperties": {
             "type": "string"

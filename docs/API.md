@@ -41,7 +41,7 @@ The manual trigger: it pins one service of a preview at a commit.
 - **Auth:** `Authorization: Bearer $BADIL_DEPLOY_TOKEN`.
 - **Request:** a JSON object with `service`, `head_ref`, `commit_sha`, `pr_author`, `pr_url`, `pr_number` and `workflow_run_url`.
 - **Response:** `{ "preview_slug", "gitops_commit_url", "warnings": [...] }`. `warnings` holds the PR comment fan-out failures.
-- **Errors:** `409 {"error": "preview limit (<max>) reached"}` when `preview.maxPreviews` is reached and `previews/<slug>/` does not exist. `409 {"error": "namespace <slug> exists and is not a preview"}` when `previews/<slug>/` does not exist and the namespace `<slug>` exists without the preview labels; `502 {"error": "namespace check failed: <error>"}` when that namespace cannot be read. A write the gitops remote refused for badil's credentials answers 502.
+- **Errors:** `409 {"error": "preview limit (<max>) reached"}` when `preview.maxPreviews` is reached and `previews/<slug>/` does not exist. `409 {"error": "namespace <slug> exists and is not a preview"}` when `previews/<slug>/` does not exist and the namespace `<slug>` exists without the preview label; `502 {"error": "namespace check failed: <error>"}` when that namespace cannot be read. A write the gitops remote refused for badil's credentials answers 502.
 
 `service` must be a service of `badil.yaml`. `commit_sha` accepts any value: send the full SHA, or a `{sha7}`/`{sha8}` image tag will not match the one CI pushed (see [`imageTag`](CONFIGURATION.md#imagetag)).
 

@@ -108,7 +108,8 @@ notifications:
         send: [badil-status]
 
   # Service and dependency Applications of every preview; the selector
-  # excludes the per-preview parent Applications, which carry only part-of.
+  # excludes the per-preview parent Applications, which carry badil.dev/preview
+  # but no managed-by.
   subscriptions:
     - recipients:
         - badil
@@ -117,4 +118,4 @@ notifications:
         - on-status-ready
         - on-status-degraded
         - on-status-sync-failed
-      selector: app.kubernetes.io/part-of=preview-environments,app.kubernetes.io/managed-by=argocd
+      selector: badil.dev/preview,app.kubernetes.io/managed-by=argocd

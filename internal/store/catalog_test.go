@@ -805,8 +805,8 @@ func TestParseCatalog_MalformedRendererSettings(t *testing.T) {
 		},
 		{
 			"namespace label reserved",
-			catalogServices + "namespace: {labels: {app.kubernetes.io/part-of: x}}\n",
-			"badil.yaml: namespace.labels.app.kubernetes.io/part-of is set by the preview-apps chart " +
+			catalogServices + "namespace: {labels: {badil.dev/preview: x}}\n",
+			"badil.yaml: namespace.labels.badil.dev/preview is set by the preview-apps chart " +
 				"and cannot be overridden",
 		},
 		{
@@ -918,6 +918,19 @@ func TestParseCatalog_MalformedRendererSettings(t *testing.T) {
 				t.Fatalf("err = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+// TestParseCatalog_NamespacePartOf checks that app.kubernetes.io/part-of, which
+// the preview-apps chart does not set, is accepted as a namespace label.
+func TestParseCatalog_NamespacePartOf(t *testing.T) {
+	got, err := store.ParseCatalog([]byte(catalogServices + "namespace: {labels: {app.kubernetes.io/part-of: x}}\n"))
+	if err != nil {
+		t.Fatalf("ParseCatalog: %v", err)
+	}
+	want := &preview.NamespaceMetadata{Labels: map[string]string{"app.kubernetes.io/part-of": "x"}}
+	if !reflect.DeepEqual(got.Namespace, want) {
+		t.Errorf("Namespace = %#v, want %#v", got.Namespace, want)
 	}
 }
 

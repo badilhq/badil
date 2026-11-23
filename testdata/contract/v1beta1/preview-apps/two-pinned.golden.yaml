@@ -7,8 +7,8 @@ metadata:
   labels:
     app.kubernetes.io/name: two-pinned
     app.kubernetes.io/instance: two-pinned
-    app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
+    badil.dev/preview: two-pinned
   annotations:
     argocd.argoproj.io/sync-wave: "-2"
 
@@ -22,8 +22,8 @@ metadata:
   labels:
     app.kubernetes.io/name: two-pinned
     app.kubernetes.io/instance: two-pinned
-    app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
+    badil.dev/preview: two-pinned
   annotations:
     argocd.argoproj.io/sync-wave: "-3"
   finalizers:
@@ -49,8 +49,8 @@ metadata:
   labels:
     app.kubernetes.io/name: api
     app.kubernetes.io/instance: two-pinned
-    app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
+    badil.dev/preview: two-pinned
   annotations:
     argocd.argoproj.io/sync-wave: "0"
     preview.badil.dev/vcs.ref.revision: "f00dbabe0123456789abcdef0123456789abcdef"
@@ -96,8 +96,8 @@ metadata:
   labels:
     app.kubernetes.io/name: worker
     app.kubernetes.io/instance: two-pinned
-    app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
+    badil.dev/preview: two-pinned
   annotations:
     argocd.argoproj.io/sync-wave: "0"
     preview.badil.dev/vcs.ref.revision: "f00dbabe0123456789abcdef0123456789abcdef"

@@ -96,7 +96,7 @@ dependencies:
 | `apiVersion` | string | always | `badil.dev/v1beta1` |
 | `gitopsRepoURL` | string | always | the gitops repo, `GITOPS_REPO_URL`: where `dependencies[].valueFiles` are read |
 | `namespace` | object | when `badil.yaml` sets `namespace` labels or annotations | extra metadata of the preview namespace |
-| `namespace.labels` | map of strings | | extra labels; never one of `app.kubernetes.io/name`, `app.kubernetes.io/instance`, `app.kubernetes.io/part-of`, `app.kubernetes.io/managed-by` |
+| `namespace.labels` | map of strings | | extra labels; never one of `app.kubernetes.io/name`, `app.kubernetes.io/instance`, `app.kubernetes.io/managed-by`, `badil.dev/preview` |
 | `namespace.annotations` | map of strings | | extra annotations; never `argocd.argoproj.io/sync-wave` |
 | `services` | list | always | every service of `badil.yaml` (only the pinned ones and what they need when `badil.yaml` declares `needs`), in catalog order, then the pinned entries of services removed from it, in file order, as of the file's last write. A file written before a catalog change keeps its old entries until the next write (deploy or sweep) |
 | `services[].name` | string | always | the service name, the key of `services` in `badil.yaml`; a kept pinned entry of a removed service keeps its last name |
@@ -154,7 +154,7 @@ A renderer of `badil.dev/v1beta1`:
 7. Adds `namespace.labels` and `namespace.annotations`, when present, to the preview namespace.
 8. Deletes everything of the preview when its directory disappears, its data included: `preview-apps` deletes the preview namespace, which is how per-preview data is dropped.
 9. Rejects a file whose `apiVersion` it does not support, instead of rendering it.
-10. Labels each preview namespace `app.kubernetes.io/part-of: preview-environments` and `app.kubernetes.io/instance: <slug>`, as `preview-apps` does. badil refuses a new preview whose namespace already exists without these labels (see [Namespace in use](EVENTS.md#namespace-in-use)).
+10. Labels each preview namespace `badil.dev/preview: <slug>`, as `preview-apps` does. badil refuses a new preview whose namespace already exists without this label (see [Namespace in use](EVENTS.md#namespace-in-use)).
 
 ## Status callback
 

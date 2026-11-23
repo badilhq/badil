@@ -16,7 +16,7 @@ spec:
     metadata:
       name: "{{ .path.basename }}"
       labels:
-        app.kubernetes.io/part-of: preview-environments
+        badil.dev/preview: "{{ .path.basename }}"
     spec:
       project: previews
       sources:
@@ -24,7 +24,7 @@ spec:
           targetRevision: HEAD
           ref: values
         - repoURL: oci://ghcr.io/badilhq/charts/preview-apps
-          targetRevision: 0.13.0
+          targetRevision: 0.14.0
           path: "."
           helm:
             releaseName: "{{ .path.basename }}"
