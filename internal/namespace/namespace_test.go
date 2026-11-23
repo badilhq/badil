@@ -106,3 +106,26 @@ func TestInCluster_DisabledOutsideACluster(t *testing.T) {
 		t.Errorf("Foreign = %v, %v, want false, nil", got, err)
 	}
 }
+
+// TestInCluster_FailsWithoutToken checks that inside a cluster, without a
+// readable ServiceAccount token, every check fails instead of being disabled.
+func TestInCluster_FailsWithoutToken(t *testing.T) {
+	t.Setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	c := namespace.InCluster(context.Background())
+	if strings.Contains(buf.String(), "namespace check disabled") {
+		t.Errorf("logs = %q, want no namespace check disabled line", buf.String())
+	}
+	got, err := c.Foreign(context.Background(), "kube-system")
+	if err == nil || !strings.Contains(err.Error(), "in-cluster config") {
+		t.Errorf("Foreign err = %v, want an in-cluster config error", err)
+	}
+	if got {
+		t.Error("Foreign = true on a config error")
+	}
+}

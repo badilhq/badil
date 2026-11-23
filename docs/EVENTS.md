@@ -154,7 +154,7 @@ A namespace `<slug>` already exists in the cluster and is not a preview, so badi
 
 It logs `preview reconcile skipped` with reason `namespace in use`.
 
-A failed check, such as an unreachable API server or `Forbidden` without the ClusterRole, fails the reconcile: it logs `preview reconcile failed` with `namespace check failed: <error>` and commits only the PR's teardowns from its other previews. [Catch-up](#catch-up) or the PR's next event retries it.
+A failed check, such as an unreachable API server, `Forbidden` without the ClusterRole, or a pod without a ServiceAccount token, fails the reconcile: it logs `preview reconcile failed` with `namespace check failed: <error>` and commits only the PR's teardowns from its other previews. [Catch-up](#catch-up) or the PR's next event retries it.
 
 A refused PR is retried as one over the preview cap: by catch-up, once per head SHA in `badil serve` and on every `badil cleanup` run. Both check the namespace.
 

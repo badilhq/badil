@@ -7,6 +7,7 @@ package namespace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -60,18 +61,29 @@ type disabled struct{}
 
 func (disabled) Foreign(context.Context, string) (bool, error) { return false, nil }
 
+// failing is the Checker inside a cluster whose client cannot be built: every
+// check returns err.
+type failing struct{ err error }
+
+func (f failing) Foreign(context.Context, string) (bool, error) { return false, f.err }
+
 // InCluster returns a Checker reading namespaces through the in-cluster
-// configuration. Without one, it returns a Checker for which no namespace is
-// foreign, and logs why, once.
+// configuration. Outside a cluster, it returns a Checker for which no
+// namespace is foreign, and logs why, once. Inside a cluster, when the client
+// cannot be built, such as without a readable ServiceAccount token, it returns
+// a Checker for which every check fails with that error.
 func InCluster(ctx context.Context) Checker {
 	cfg, err := rest.InClusterConfig()
-	var kube kubernetes.Interface
-	if err == nil {
-		kube, err = kubernetes.NewForConfig(cfg)
-	}
-	if err != nil {
+	if errors.Is(err, rest.ErrNotInCluster) {
 		slog.Default().InfoContext(ctx, "namespace check disabled", slog.String("reason", err.Error()))
 		return disabled{}
+	}
+	if err != nil {
+		return failing{err: fmt.Errorf("in-cluster config: %w", err)}
+	}
+	kube, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return failing{err: fmt.Errorf("kubernetes client: %w", err)}
 	}
 	return New(kube)
 }
