@@ -2,7 +2,12 @@
 # Refuses any update or delete of a namespace by the Argo CD application
 # controller unless the namespace already carries the preview label, so Argo
 # CD cannot adopt or delete a namespace badil did not create. Creates and
-# requests from other users are not matched.
+# requests from other users are not matched. The identity falls back to the
+# chart defaults so that a `helm upgrade --reuse-values` from a release without
+# namespaceGuard, which does not take new chart defaults, still matches the
+# controller.
+{{- $argocdNamespace := .Values.namespaceGuard.argocdNamespace | default "argocd" }}
+{{- $controllerServiceAccount := .Values.namespaceGuard.controllerServiceAccount | default "argocd-application-controller" }}
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -19,7 +24,7 @@ spec:
         operations: ["UPDATE", "DELETE"]
   matchConditions:
     - name: argocd-application-controller
-      expression: 'request.userInfo.username == "system:serviceaccount:{{ .Values.namespaceGuard.argocdNamespace }}:{{ .Values.namespaceGuard.controllerServiceAccount }}"'
+      expression: 'request.userInfo.username == "system:serviceaccount:{{ $argocdNamespace }}:{{ $controllerServiceAccount }}"'
   validations:
     - expression: "oldObject.metadata.?labels[?'app.kubernetes.io/part-of'].orValue('') == 'preview-environments'"
       message: namespace is not a badil preview

@@ -287,6 +287,9 @@ jobs:
 
       - name: Render badil namespace guard
         run: |
+          # GitHub runs this step with bash -e and no pipefail: without it a failed helm template would print nothing
+          # and pass the "nothing by default" check.
+          set -o pipefail
           # Prints each admission object as "<kind> <name>", followed for the policy by its failure policy and rules,
           # its match condition and its validation, and for the binding by its policy name and actions.
           guard() {
@@ -297,33 +300,37 @@ jobs:
                   (.spec.validations[] | .expression + " -> " + .message)),
                 (select(.kind == "ValidatingAdmissionPolicyBinding") | .spec.policyName + " " + (.spec.validationActions | to_json(0)))'
           }
-          got=$(guard)
-          if [ -n "$got" ]; then
-            echo '::error::expected no ValidatingAdmissionPolicy or binding by default'
-            printf 'got:\n%s\n' "$got"
-            exit 1
-          fi
-          rules='Fail [{"apiGroups":[""],"apiVersions":["v1"],"resources":["namespaces"],"operations":["UPDATE","DELETE"]}]'
-          validation="oldObject.metadata.?labels[?'app.kubernetes.io/part-of'].orValue('') == 'preview-environments' -> namespace is not a badil preview"
-          got=$(guard --set namespaceGuard.enabled=true)
-          want="ValidatingAdmissionPolicy t-namespace-guard
-          $rules
-          request.userInfo.username == \"system:serviceaccount:argocd:argocd-application-controller\"
-          $validation
-          ValidatingAdmissionPolicyBinding t-namespace-guard
-          t-namespace-guard [\"Deny\"]"
-          if [ "$got" != "$want" ]; then
-            echo '::error::expected the namespace guard policy and binding with namespaceGuard.enabled=true'
-            printf 'got:\n%s\n' "$got"
-            exit 1
-          fi
-          got=$(guard --set namespaceGuard.enabled=true,namespaceGuard.argocdNamespace=gitops,namespaceGuard.controllerServiceAccount=controller \
-            | grep '^request\.userInfo')
-          if [ "$got" != 'request.userInfo.username == "system:serviceaccount:gitops:controller"' ]; then
-            echo '::error::expected the match condition username built from namespaceGuard.argocdNamespace and controllerServiceAccount'
-            printf 'got: %s\n' "$got"
-            exit 1
-          fi
+          # The expected output of guard for the controller identity system:serviceaccount:$1:$2.
+          want() {
+            printf '%s\n' \
+              'ValidatingAdmissionPolicy t-namespace-guard' \
+              'Fail [{"apiGroups":[""],"apiVersions":["v1"],"resources":["namespaces"],"operations":["UPDATE","DELETE"]}]' \
+              "request.userInfo.username == \"system:serviceaccount:$1:$2\"" \
+              "oldObject.metadata.?labels[?'app.kubernetes.io/part-of'].orValue('') == 'preview-environments' -> namespace is not a badil preview" \
+              'ValidatingAdmissionPolicyBinding t-namespace-guard' \
+              't-namespace-guard ["Deny"]'
+          }
+          # check <message> <want> <guard args...>
+          check() {
+            local message=$1 expected=$2 got
+            shift 2
+            got=$(guard "$@")
+            if [ "$got" != "$expected" ]; then
+              echo "::error::$message"
+              printf 'got:\n%s\n' "$got"
+              exit 1
+            fi
+          }
+          check 'expected no ValidatingAdmissionPolicy or binding by default' ''
+          check 'expected the namespace guard policy and binding with namespaceGuard.enabled=true' \
+            "$(want argocd argocd-application-controller)" --set namespaceGuard.enabled=true
+          check 'expected the policy and binding with the match condition username built from namespaceGuard.argocdNamespace and controllerServiceAccount' \
+            "$(want gitops controller)" \
+            --set namespaceGuard.enabled=true,namespaceGuard.argocdNamespace=gitops,namespaceGuard.controllerServiceAccount=controller
+          # A helm upgrade --reuse-values from a release without namespaceGuard has no identity values.
+          check 'expected the default controller identity when the identity values are missing' \
+            "$(want argocd argocd-application-controller)" \
+            --set namespaceGuard.enabled=true,namespaceGuard.argocdNamespace=null,namespaceGuard.controllerServiceAccount=null
 
       - name: Render badil cleanup token
         run: |

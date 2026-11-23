@@ -96,6 +96,9 @@ cleanup:
 # CD's application controller unless the namespace carries the preview label
 # app.kubernetes.io/part-of: preview-environments: Argo CD then cannot adopt or
 # delete a namespace badil did not create, whoever wrote the preview file.
+# It covers every namespace the controller updates or deletes: on an Argo CD
+# that also manages other namespaces, their updates and deletes are refused
+# too.
 # Renders a cluster-scoped ValidatingAdmissionPolicy and its binding; needs
 # Kubernetes 1.30+.
 namespaceGuard:
