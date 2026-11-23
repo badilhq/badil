@@ -172,3 +172,13 @@ func BuildPreviewLimitSummary(slug string, limit int) string {
 		"Once a preview is torn down, push to this pull request or re-add its label.",
 		slug, limit)
 }
+
+// BuildNamespaceInUseSummary renders the comment badil leaves on a PR it
+// refused to deploy because the namespace of its new preview slug already
+// exists and is not a preview namespace.
+func BuildNamespaceInUseSummary(slug string) string {
+	return fmt.Sprintf("## ⚠️ Preview: `%s`\n\n"+
+		"A namespace `%s` already exists in the cluster and is not a preview, so badil does not deploy into it. "+
+		"Rename the branch, or use a `preview:<name>` label.",
+		slug, slug)
+}

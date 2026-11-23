@@ -15,8 +15,9 @@ spec:
         {{- include "badil.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "badil.fullname" . }}
-      # The server reads and writes its status ConfigMaps (role.yaml); the
-      # ServiceAccount itself mounts no token, so the CronJob gets none.
+      # The server reads and writes its status ConfigMaps (role.yaml) and reads
+      # the namespace of a new preview (clusterrole.yaml); the ServiceAccount
+      # itself mounts no token, so each pod spec that needs one sets this.
       automountServiceAccountToken: true
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:

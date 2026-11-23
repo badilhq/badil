@@ -13,6 +13,7 @@ import (
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
+	"github.com/badilhq/badil/internal/namespace"
 	"github.com/badilhq/badil/internal/status"
 )
 
@@ -27,6 +28,14 @@ type Option func(*Server)
 func WithMetrics(m *metrics.Metrics) Option {
 	return func(s *Server) {
 		s.metrics = m
+	}
+}
+
+// WithNamespaces checks the namespace of each new preview through c before
+// it is written (namespace.Checker). Without it, no namespace is checked.
+func WithNamespaces(c namespace.Checker) Option {
+	return func(s *Server) {
+		s.namespaces = c
 	}
 }
 
@@ -70,8 +79,11 @@ type Server struct {
 	store storeAPI
 	// fanOut posts a preview's summary on its open PRs:
 	// lifecycle.FanOutPRComments.
-	fanOut      lifecycle.FanOutFunc
-	metrics     *metrics.Metrics
+	fanOut  lifecycle.FanOutFunc
+	metrics *metrics.Metrics
+	// namespaces checks the namespace of a new preview, nil when none is
+	// checked.
+	namespaces  namespace.Checker
 	deployToken string
 	// statusToken authenticates POST /webhooks/status, "" when it is
 	// disabled.
@@ -158,16 +170,20 @@ func NewServer(
 	return s
 }
 
-// reconcileAPI is the store, the forge, the metrics and the fan-out as
-// lifecycle.ReconcilePR expects them. A nil *metrics.Metrics records nothing.
+// reconcileAPI is the store, the forge, the metrics, the fan-out and the
+// namespace check as lifecycle.ReconcilePR expects them. A nil *metrics.Metrics records nothing.
 func (s *Server) reconcileAPI() lifecycle.ReconcileAPI {
-	return lifecycle.ReconcileAPI{Store: s.store, Forge: s.forge, Recorder: s.metrics, FanOut: s.fanOut}
+	return lifecycle.ReconcileAPI{
+		Store: s.store, Forge: s.forge, Recorder: s.metrics, FanOut: s.fanOut, Namespaces: s.namespaces,
+	}
 }
 
-// deployAPI is the store, the forge, the metrics and the fan-out as
-// lifecycle.DeployPR expects them.
+// deployAPI is the store, the forge, the metrics, the fan-out and the
+// namespace check as lifecycle.DeployPR expects them.
 func (s *Server) deployAPI() lifecycle.DeployAPI {
-	return lifecycle.DeployAPI{Store: s.store, Forge: s.forge, Recorder: s.metrics, FanOut: s.fanOut}
+	return lifecycle.DeployAPI{
+		Store: s.store, Forge: s.forge, Recorder: s.metrics, FanOut: s.fanOut, Namespaces: s.namespaces,
+	}
 }
 
 // syncAPI is the store, the forge, the metrics and the fan-out as

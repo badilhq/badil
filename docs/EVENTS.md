@@ -42,7 +42,8 @@ An open PR with a target deploys, at the PR's head SHA, in catalog order, to the
 It writes the services as the manual flow does (see [`POST /v1/deploy`](API.md#post-v1deploy)), in the reconcile's commit, then posts the preview's summary once on its open PRs. It deploys nothing when one of these holds:
 
 - another PR holds one of its services there (see [One PR per service](#one-pr-per-service));
-- the target does not exist and the preview cap is reached (see [Preview cap](#preview-cap)).
+- the target does not exist and the preview cap is reached (see [Preview cap](#preview-cap));
+- the target does not exist and its namespace exists and is not a preview namespace (see [Namespace in use](#namespace-in-use)).
 
 A failed commit fails the reconcile: nothing of it is written.
 
@@ -139,11 +140,31 @@ The check is decided on the head the commit is made on, and again on every push 
 
 The check reads the gitops clone, so it costs no extra GitHub call.
 
+## Namespace in use
+
+A preview's slug is its namespace. Argo CD adopts a namespace that already exists, and the teardown then deletes it with everything in it. So badil creates a preview only when its namespace does not exist, or is already a preview namespace of that slug: labelled `app.kubernetes.io/part-of: preview-environments` and `app.kubernetes.io/instance: <slug>`, as `preview-apps` labels it (see [Renderer obligations](CONTRACT.md#renderer-obligations)). A leftover or terminating preview namespace is therefore allowed. A deploy into an existing preview is never checked.
+
+In the label flow, the check runs right after the preview cap check, when the target's `values.yaml` does not exist. badil gets the namespace named after the slug, through the chart's ClusterRole (`get` on namespaces). When it exists without those labels, the reconcile writes nothing and replaces the PR's comment with:
+
+```
+## ⚠️ Preview: `<slug>`
+
+A namespace `<slug>` already exists in the cluster and is not a preview, so badil does not deploy into it. Rename the branch, or use a `preview:<name>` label.
+```
+
+It logs `preview reconcile skipped` with reason `namespace in use`.
+
+A failed check, such as an unreachable API server, `Forbidden` without the ClusterRole, or a pod without a ServiceAccount token, fails the reconcile: it logs `preview reconcile failed` with `namespace check failed: <error>` and commits only the PR's teardowns from its other previews. [Catch-up](#catch-up) or the PR's next event retries it.
+
+A refused PR is retried as one over the preview cap: by catch-up, once per head SHA in `badil serve` and on every `badil cleanup` run. Both check the namespace.
+
+The check runs on every push attempt, and `/v1/deploy` runs it too (see [`POST /v1/deploy`](API.md#post-v1deploy)). A namespace created after the check and before Argo CD syncs the new preview, at most one ApplicationSet poll later, is still adopted. Outside a cluster, badil logs `namespace check disabled` at start and checks nothing.
+
 ## Reconcile queue
 
 Background reconciles run one at a time, in no guaranteed order. A reconcile reads the PR only once it runs.
 
-A reconcile has a 20s budget, counted from when it starts running. It covers the PR and files reads of [path filters](SERVICES.md#path-filters), then its commit, including the wait for an operation already writing (a cleanup sweep, a manual deploy) and every push attempt, then its comments. The commit holds, in this order, its cleanup teardowns, the holder check, the preview cap check, the unpin of untouched services and its services. A reconcile that deploys fails when its commit is not pushed in time. One that only tears down records each of its teardowns as an error and keeps the `torn_down` outcome.
+A reconcile has a 20s budget, counted from when it starts running. It covers the PR and files reads of [path filters](SERVICES.md#path-filters), then its commit, including the wait for an operation already writing (a cleanup sweep, a manual deploy) and every push attempt, then its comments. The commit holds, in this order, its cleanup teardowns, the holder check, the preview cap check, the namespace check, the unpin of untouched services and its services. A reconcile that deploys fails when its commit is not pushed in time. One that only tears down records each of its teardowns as an error and keeps the `torn_down` outcome.
 
 Shutdown waits up to 25s for queued and running jobs. Jobs still queued then are dropped: the cleanup sweeper catches missed teardowns of closed PRs, and [catch-up](#catch-up) the missed deploys of open ones.
 
@@ -172,7 +193,7 @@ Each listed PR is decided in this order:
 5. A PR is skipped when it is in the seen map at its head SHA, or when a catch-up reconcile of it is still queued or running.
 6. Any other PR is reconciled.
 
-The seen map holds, per PR, the head SHA its last catch-up reconcile was started at, once that reconcile completed with an outcome other than `failed`. A reconcile that fails, or never completes (dropped at shutdown, or panicked), leaves the PR out of it, so the next run reconciles it again at the same head SHA. A PR that never gets a pin (no service changed, held by another PR, preview cap reached, conflicting labels) is therefore reconciled once per head SHA. `badil serve` keeps the seen map for the life of the process; each `badil cleanup` run starts with an empty one.
+The seen map holds, per PR, the head SHA its last catch-up reconcile was started at, once that reconcile completed with an outcome other than `failed`. A reconcile that fails, or never completes (dropped at shutdown, or panicked), leaves the PR out of it, so the next run reconciles it again at the same head SHA. A PR that never gets a pin (no service changed, held by another PR, preview cap reached, namespace in use, conflicting labels) is therefore reconciled once per head SHA. `badil serve` keeps the seen map for the life of the process; each `badil cleanup` run starts with an empty one.
 
 ### How
 

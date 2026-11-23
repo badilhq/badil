@@ -447,6 +447,16 @@ func TestBuildPreviewLimitSummary(t *testing.T) {
 	}
 }
 
+func TestBuildNamespaceInUseSummary(t *testing.T) {
+	got := preview.BuildNamespaceInUseSummary("kube-system")
+	want := "## ⚠️ Preview: `kube-system`\n\n" +
+		"A namespace `kube-system` already exists in the cluster and is not a preview, so badil does not deploy into it. " +
+		"Rename the branch, or use a `preview:<name>` label."
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 func TestBuildSummary_Dependencies(t *testing.T) {
 	urls := sharedURLFixture()
 	urls.Expose["mailpit"] = "/ui"

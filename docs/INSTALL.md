@@ -126,6 +126,7 @@ helm install badil oci://ghcr.io/badilhq/charts/badil -n badil \
 - badil's git calls to the gitops repo authenticate as the App installation. To use a token instead, add `--from-literal=gitops-repo-token=<token>` to the Secret, and `--set config.gitopsRepoUsername=<username>` when the host needs a username other than `x-access-token` (see [Gitops repo credentials](CONFIGURATION.md#gitops-repo-credentials)). Pushes then run as the token's owner.
 - `cleanup.ttl` (e.g. `168h`) is optional: it also deletes previews with no deploy for that long.
 - The cleanup sweep runs in the server every hour by default (`cleanup.interval`, `1h`): it deletes stale previews and rewrites every kept preview to match `badil.yaml`, and exports its metrics (with the Prometheus Operator, scrape them with `metrics.serviceMonitor.enabled=true` and `metrics.serviceMonitor.labels` matching its selector, e.g. `release: <kube-prometheus-stack release>`). `cleanup.enabled=true` switches it to an hourly CronJob without metrics and turns the in-server sweep off.
+- The chart also installs a ClusterRole and ClusterRoleBinding, `<release>-namespaces`, that let badil get namespaces and nothing else: before creating a preview, badil reads the namespace named after its slug and refuses the preview when that namespace exists and is not a preview (see [Namespace in use](EVENTS.md#namespace-in-use)).
 - Keep `replicaCount: 1`.
 
 Once the Secret exists, delete the local `.env` and PEM. The non-secret values you set stay readable with `helm get values badil -n badil`, which the [upgrade](#10-upgrade) uses.
@@ -373,5 +374,7 @@ Set `preview.domain` in `badil.yaml`, create a wildcard DNS record `*.<domain>` 
 | `preview reconcile skipped … reason="repo not in catalog"` | The `services.<name>.repo` URL isn't `<GITHUB_URL>/<owner>/<repo>[.git]` (`GITHUB_URL` defaults to `https://github.com`) | Fix the URL in `badil.yaml` |
 | `preview reconcile skipped … reason="fork pr"` | The PR comes from a fork | Expected: fork PRs never get a preview |
 | `preview reconcile skipped … reason="no service changed"` | No changed file of the PR matches any `paths` of its repo's services | Fix `paths` in `badil.yaml` |
+| `preview reconcile skipped … reason="namespace in use"` | A namespace named after the preview's slug already exists and is not a preview | Rename the branch, or use a `preview:<name>` label |
+| `preview reconcile failed … namespace check failed: … forbidden` | badil's ServiceAccount cannot get namespaces: the chart's ClusterRole or ClusterRoleBinding is missing | Reinstall the chart, or restore `<release>-namespaces` |
 | No comment after labeling | The App isn't installed on that repo, or the label differs from `preview.label` | Install the App on the repo, or use the configured label |
 | Pods in `ImagePullBackOff` | The image isn't pushed yet, or the namespace can't pull from the registry | If CI is still pushing, wait; otherwise check registry access (prerequisites) |
