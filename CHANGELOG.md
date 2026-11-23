@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.28.0](https://github.com/badilhq/badil/compare/v0.27.1...v0.28.0) (2026-11-23)
+
+
+### Features
+
+* **chart:** add an opt-in admission policy that keeps the preview renderer off namespaces badil did not create ([#132](https://github.com/badilhq/badil/issues/132)) ([48622bf](https://github.com/badilhq/badil/commit/48622bfed2743dc1f36c65570e15db08ec0dfa0e))
+
+
+### Bug Fixes
+
+* refuse a preview whose namespace badil did not create ([#130](https://github.com/badilhq/badil/issues/130)) ([7f35f8f](https://github.com/badilhq/badil/commit/7f35f8fd67bf7d7abf2f97faefb3bacd28715355))
+
 ## [0.27.1](https://github.com/badilhq/badil/compare/v0.27.0...v0.27.1) (2026-11-22)
 
 
