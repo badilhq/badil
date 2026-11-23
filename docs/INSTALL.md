@@ -233,6 +233,26 @@ Last successful sweep needs `cleanup.interval`; the spin-up panels need [Preview
 
 badil sets no quota or network policy on previews. To cap each preview's resources and isolate its ingress, apply the Kyverno policy in [`examples/kyverno/`](../examples/kyverno/README.md) (Kyverno v1.19.0 or later): it creates a ResourceQuota, a LimitRange and an ingress NetworkPolicy in every preview namespace. Adapt its quota numbers and its ingress controller namespace first. Details: [Preview limits](CONFIGURATION.md#preview-limits).
 
+### Namespace guard (optional)
+
+badil refuses a new preview whose namespace already exists and is not a preview (see [Namespace in use](EVENTS.md#namespace-in-use)), but only for the previews it writes itself. A preview file written to the gitops repo by anything else, or a namespace created between badil's check and the renderer's sync, still lets the renderer adopt that namespace, and the teardown then deletes it with everything in it. The namespace guard closes that gap in the cluster: a ValidatingAdmissionPolicy refuses any update or delete of a namespace by the ServiceAccount of the renderer that deploys previews unless the namespace already carries `app.kubernetes.io/part-of: preview-environments`, whoever wrote the preview file. Requests from any other user, and the renderer's creation of a namespace, are not affected.
+
+The policy covers every namespace that identity updates or deletes, not only previews. Enable the guard only when the renderer's ServiceAccount manages no namespace other than previews.
+
+It needs Kubernetes 1.30 or later. Add to the `helm install` (or a `helm upgrade --reuse-values`):
+
+```bash
+  --set namespaceGuard.enabled=true
+```
+
+The policy matches the renderer by its ServiceAccount, set with `namespaceGuard.renderer.namespace` and `namespaceGuard.renderer.serviceAccount`. The default is Argo CD's application controller, `system:serviceaccount:argocd:argocd-application-controller`. For Argo CD in another namespace or under another ServiceAccount, or another renderer, set both to the ServiceAccount the renderer applies the preview manifests as: its controller pod's `serviceAccountName`, unless the renderer is configured to apply as another ServiceAccount. A wrong identity leaves the guard inactive without error. Read Argo CD's application controller ServiceAccount with:
+
+```bash
+kubectl get statefulset argocd-application-controller -n argocd -o jsonpath='{.spec.template.spec.serviceAccountName}'
+```
+
+Check: `kubectl get validatingadmissionpolicy,validatingadmissionpolicybinding badil-namespace-guard` lists both. What a refused preview looks like: [Namespace guard](OPERATIONS.md#namespace-guard). Values: [Namespace guard](CONFIGURATION.md#namespace-guard).
+
 ## 7. Service repos
 
 - Create the `preview` label (or your custom `preview.label`) in each service repo, e.g. `gh label create preview --repo <owner>/<repo>`. Create any `preview:<name>` label yourself in each repo too: badil never creates labels.

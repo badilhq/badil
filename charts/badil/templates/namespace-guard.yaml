@@ -1,0 +1,42 @@
+{{- if .Values.namespaceGuard.enabled }}
+# Refuses any update or delete of a namespace by the ServiceAccount of the
+# renderer that deploys previews unless the namespace already carries the
+# preview label, so the renderer cannot adopt or delete a namespace badil did
+# not create. Creates and requests from other users are not matched. The
+# identity falls back to the chart defaults (Argo CD's application controller)
+# so that a `helm upgrade --reuse-values` from a release without these values,
+# which does not take new chart defaults, still matches the renderer.
+{{- $renderer := .Values.namespaceGuard.renderer | default dict }}
+{{- $rendererNamespace := $renderer.namespace | default "argocd" }}
+{{- $rendererServiceAccount := $renderer.serviceAccount | default "argocd-application-controller" }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ include "badil.fullname" . }}-namespace-guard
+  labels:
+    {{- include "badil.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["namespaces"]
+        operations: ["UPDATE", "DELETE"]
+  matchConditions:
+    - name: preview-renderer
+      expression: 'request.userInfo.username == "system:serviceaccount:{{ $rendererNamespace }}:{{ $rendererServiceAccount }}"'
+  validations:
+    - expression: "oldObject.metadata.?labels[?'app.kubernetes.io/part-of'].orValue('') == 'preview-environments'"
+      message: namespace is not a badil preview
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ include "badil.fullname" . }}-namespace-guard
+  labels:
+    {{- include "badil.labels" . | nindent 4 }}
+spec:
+  policyName: {{ include "badil.fullname" . }}-namespace-guard
+  validationActions: [Deny]
+{{- end }}
