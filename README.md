@@ -7,7 +7,7 @@
 
 Per-pull-request preview environments for teams running Kubernetes and ArgoCD. Self-hosted, open source.
 
-Each labelled PR gets a preview in its own namespace, named after its branch or its `preview:<name>` label: the services changed in the PR run at their PR version, every other service runs at its branch (default `main`). badil writes the desired state to your gitops repo; your ArgoCD deploys it. badil never touches your previews directly: its only cluster access is its own status ConfigMaps (`badil-status-<slug>`), in its own namespace.
+Each labelled PR gets a preview in its own namespace, named after its branch or its `preview:<name>` label: the services changed in the PR run at their PR version, every other service runs at its branch (default `main`). badil writes the desired state to your gitops repo; your ArgoCD deploys it. badil never touches your previews directly: its only cluster access is its own status ConfigMaps (`badil-status-<slug>`), in its own namespace, and `get` on namespaces by name, to refuse a new preview whose namespace exists and is not a preview.
 
 ## Why
 
@@ -15,7 +15,7 @@ A shared staging environment makes changes wait in line to be validated and inte
 
 - One preview per branch, or per `preview:<name>` label, across repos, each in its own namespace: PRs on the same branch, or with the same `preview:<name>` label, share one preview.
 - Changed services run at their PR commit, everything else at their branch (default `main`).
-- CI builds once; badil only writes desired state. It never builds images and never reads or writes preview namespaces: it writes only its own status ConfigMaps, in its own namespace.
+- CI builds once; badil only writes desired state. It never builds images and never writes preview namespaces: it writes only its own status ConfigMaps, in its own namespace, and reads a namespace by name only before creating a preview.
 - Argo CD deploys from git.
 - Previews are torn down when their PR closes or the label is removed, and swept so they don't accumulate: the sweep also unpins open PRs whose label moved, conflicts or is gone.
 

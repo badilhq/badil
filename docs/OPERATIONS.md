@@ -14,7 +14,7 @@ Every label has a closed set of values. Go runtime (`go_*`) and process (`proces
 |---|---|---|---|
 | `badil_webhook_deliveries_total` | counter | `event`, `status` | Webhook deliveries. `event` is `ping`, `installation`, `installation_repositories`, `pull_request`, `push` or `other` once the signature is verified, `unverified` before. `status` is the HTTP status: `200`, `401` or `403`. |
 | `badil_reconciles_total` | counter | `outcome` | One per pull request reconcile: `failed` (catalog or PR read error, PR files list error, a target preview file that can't be read, or a failed commit of a deploy), else `skipped`, else `deployed` (a service was written), else `torn_down`. |
-| `badil_reconcile_skips_total` | counter | `reason` | Skipped reconciles by reason: `other label`, `not labeled`, `repo not in catalog`, `fork pr`, `service held by another pr`, `preview limit reached`, `conflicting preview labels`, `already deployed`, `no service changed`. |
+| `badil_reconcile_skips_total` | counter | `reason` | Skipped reconciles by reason: `other label`, `not labeled`, `repo not in catalog`, `fork pr`, `service held by another pr`, `preview limit reached`, `namespace in use`, `conflicting preview labels`, `already deployed`, `no service changed`. |
 | `badil_teardowns_total` | counter | `trigger`, `result` | Teardowns of a PR from a preview. `trigger` is `webhook` or `sweep`; `result` is `deleted`, `unpinned`, `noop` (nothing pinned) or `error`. |
 | `badil_gitops_operation_duration_seconds` | histogram | `op`, `result` | Duration of the gitops operations, each one commit, push retries included: `deploy` (a reconcile of an open PR with a target, or `/v1/deploy`), `teardown` (any other reconcile), `sweep` and `sync` (a push or `/v1/sync`); and of the git `clone`, `ls_remote` and `fetch` of the gitops clone. `result` is `ok` or `error`. |
 | `badil_gitops_push_conflicts_total` | counter | `op` | Pushes of a gitops operation rejected because the remote head moved, each retried on the new head. `op` is the operation: `deploy`, `teardown`, `sweep` or `sync`, as in `badil_gitops_operation_duration_seconds`. |
@@ -37,7 +37,7 @@ Deletions made by the `badil cleanup` CronJob show only after the next server re
 
 ## Preview status
 
-badil never reads preview namespaces, so the renderer tells it how each preview service is doing, through the [status callback](CONTRACT.md#status-callback). Argo CD's notifications controller is the reference sender: it POSTs to [`/webhooks/status`](API.md#post-webhooksstatus) when a service's or dependency's Application starts a sync (`progressing`), is synced and Healthy (`ready`), turns Degraded (`degraded`) or fails to sync or render (`sync-failed`) at its current target. Configuration: [`examples/argocd/notifications-values.yaml`](../examples/argocd/notifications-values.yaml).
+badil never reads what runs in preview namespaces, so the renderer tells it how each preview service is doing, through the [status callback](CONTRACT.md#status-callback). Argo CD's notifications controller is the reference sender: it POSTs to [`/webhooks/status`](API.md#post-webhooksstatus) when a service's or dependency's Application starts a sync (`progressing`), is synced and Healthy (`ready`), turns Degraded (`degraded`) or fails to sync or render (`sync-failed`) at its current target. Configuration: [`examples/argocd/notifications-values.yaml`](../examples/argocd/notifications-values.yaml).
 
 badil keeps the latest status per preview and service:
 
@@ -47,9 +47,9 @@ badil keeps the latest status per preview and service:
 
 When a preview is deleted, its status and ConfigMap go: at once when the server's own commit deleted it, and otherwise (`badil cleanup`, a manual deletion) after the next fetch of the gitops repo that moves its head, and at start.
 
-The chart's Role lets badil get, list, create, update and delete ConfigMaps in its namespace, nothing else. Outside a cluster, or without `POD_NAMESPACE`, the status is kept in memory only and badil logs `status persistence disabled` at start.
+The chart's Role lets badil get, list, create, update and delete ConfigMaps in its namespace, nothing else. Its ClusterRole, `<release>-namespaces`, only lets it get namespaces, for the [namespace check](EVENTS.md#namespace-in-use) of a new preview. Outside a cluster, or without `POD_NAMESPACE`, the status is kept in memory only and badil logs `status persistence disabled` at start.
 
-Only `badil serve` keeps status; `badil cleanup` has no Kubernetes access.
+Only `badil serve` keeps status; `badil cleanup` only gets namespaces, for the namespace check of its catch-up.
 
 ## Spin-up time
 

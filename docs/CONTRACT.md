@@ -154,6 +154,7 @@ A renderer of `badil.dev/v1beta1`:
 7. Adds `namespace.labels` and `namespace.annotations`, when present, to the preview namespace.
 8. Deletes everything of the preview when its directory disappears, its data included: `preview-apps` deletes the preview namespace, which is how per-preview data is dropped.
 9. Rejects a file whose `apiVersion` it does not support, instead of rendering it.
+10. Labels each preview namespace `app.kubernetes.io/part-of: preview-environments` and `app.kubernetes.io/instance: <slug>`, as `preview-apps` does. badil refuses a new preview whose namespace already exists without these labels (see [Namespace in use](EVENTS.md#namespace-in-use)).
 
 ## Status callback
 
@@ -183,7 +184,7 @@ Other fields are ignored. badil answers 204 to every valid event, 400 to an inva
 
 ## What badil never does
 
-- Touch preview namespaces: it writes to the gitops repo and to PR comments, and the renderer does every deploy and deletion. Its only cluster access is the status ConfigMaps it keeps in its own namespace (`badil-status-<slug>`); it never reads or writes preview namespaces.
+- Touch preview namespaces: it writes to the gitops repo and to PR comments, and the renderer does every deploy and deletion. Its only cluster access is the status ConfigMaps it keeps in its own namespace (`badil-status-<slug>`) and `get` on namespaces by name, to check that a new preview's namespace is free; it never writes namespaces nor reads what is in them.
 - Build images: each service's CI pushes images tagged as its `imageTag` format renders the commit SHA.
 - Read, provision or drop data stores: data in the preview namespace goes with it, data outside it belongs to whatever provisions it. See [Preview data](ARCHITECTURE.md#preview-data).
 

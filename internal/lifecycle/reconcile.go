@@ -13,6 +13,7 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 
 	"github.com/badilhq/badil/internal/forge"
+	"github.com/badilhq/badil/internal/namespace"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
 )
@@ -32,6 +33,10 @@ const (
 	// PreviewLimitReason is the skip reason of a reconcile refused because
 	// creating its preview would exceed preview.maxPreviews.
 	PreviewLimitReason = "preview limit reached"
+	// NamespaceInUseReason is the skip reason of a reconcile refused because
+	// the namespace of its new preview exists and is not a preview namespace
+	// for its slug.
+	NamespaceInUseReason = "namespace in use"
 	// NotLabeledReason is the skip reason of an opened, reopened or
 	// synchronize event of a PR without a preview label.
 	NotLabeledReason = "not labeled"
@@ -69,13 +74,15 @@ type ReconcileStore interface {
 	FetchServiceCatalog(ctx context.Context) (*store.ServiceCatalog, error)
 }
 
-// ReconcileAPI is what ReconcilePR uses: the store, the forge, the Recorder
-// and the comment fan-out.
+// ReconcileAPI is what ReconcilePR uses: the store, the forge, the Recorder,
+// the comment fan-out and the namespace check of a new preview (nil checks
+// nothing).
 type ReconcileAPI struct {
-	Store    ReconcileStore
-	Forge    forge.Forge
-	Recorder Recorder
-	FanOut   FanOutFunc
+	Store      ReconcileStore
+	Forge      forge.Forge
+	Recorder   Recorder
+	FanOut     FanOutFunc
+	Namespaces namespace.Checker
 }
 
 // teardownAPI narrows a to what a teardown uses.
@@ -109,12 +116,14 @@ type Event struct {
 // preview it may still be pinned in. Then, when it is open and has a target,
 // the catalog services of its repo that it touches (touchedServices) are
 // deployed there at its head SHA, unless another PR already pins one of them,
-// or the preview does not exist and preview.maxPreviews previews already do;
-// before that deploy, the PR's entries there for the other services of its
-// repo are unpinned. A PR that touches no service is torn down from its
-// target and told so, and the reconcile is skipped. An open PR with
-// conflicting named labels is told so. Fork PRs and repos outside the catalog
-// are skipped. Every outcome is logged.
+// or the preview does not exist and preview.maxPreviews previews already do,
+// or the preview does not exist and its namespace exists and is not a
+// preview namespace for its slug (namespace.Checker); before that deploy,
+// the PR's entries there for the other services of its repo are unpinned. A
+// PR that touches no service is torn down from its target and told so, and
+// the reconcile is skipped. An open PR with conflicting named labels is told
+// so. Fork PRs and repos outside the catalog are skipped. Every outcome is
+// logged.
 //
 // The forge is read first. The teardowns and the deploy are then one
 // operation of the store, one commit, decided on the tree each push attempt
@@ -133,8 +142,9 @@ type Event struct {
 //
 // Each call records exactly one outcome through the Recorder: failed when the
 // catalog or the PR can't be read on a non-closed event, when the PR's files
-// can't be listed, the target preview can't be read or the previews can't be
-// listed (the teardowns from the PR's other previews are still committed),
+// can't be listed, the target preview can't be read, the previews can't be
+// listed or the target's namespace can't be checked (the teardowns from the
+// PR's other previews are still committed),
 // or when the commit of a PR open with a target can't be pushed;
 // otherwise skipped (with its reason) when the reconcile was skipped;
 // otherwise deployed when a service was written; otherwise torn_down. It
@@ -199,6 +209,7 @@ func reconcile(ctx context.Context, api ReconcileAPI, ev Event, headSHA *string)
 	}
 	p := &reconcilePlan{
 		parsePR: api.Forge.ParsePRURL, ev: ev, pr: pr, t: t, catalog: catalog, deploy: deploy, repoServices: services,
+		foreign:      foreignFunc(ctx, api.Namespaces),
 		cleanupSlugs: cleanupSlugs(t, pr, ev, catalog.Label), cleanupReason: cleanupReason(t, pr, ev, catalog.Label),
 		timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
@@ -234,19 +245,23 @@ type reconcilePlan struct {
 	cleanupSlugs  []string
 	cleanupReason string
 	timestamp     string
+	// foreign checks the namespace of a new target preview.
+	foreign func(slug string) (bool, error)
 	// listErr is the error of the PR's file listing: the change only tears
 	// the PR down from cleanupSlugs, and the reconcile fails.
 	listErr error
 
 	ran bool
-	// readErr is the error of reading the target preview or listing the
-	// previews in the last attempt: the change only tears the PR down from
-	// cleanupSlugs, and the reconcile fails.
+	// readErr is the error of reading the target preview, listing the
+	// previews or checking the target's namespace in the last attempt: the
+	// change only tears the PR down from cleanupSlugs, and the reconcile
+	// fails.
 	readErr   error
 	cleanup   []*teardownStep
 	noService *teardownStep
 	held      *heldPin
 	limited   bool
+	inUse     bool
 	unpin     *teardownStep
 	deploys   []*deployStep
 }
@@ -275,16 +290,19 @@ func (p *reconcilePlan) target(slug string) Target {
 // preview of cleanupSlugs. Then, when it is open and has a target: when it
 // touches no service, it is torn down from the target too; otherwise it is
 // refused when one of its services is pinned there by another PR, or the
-// target does not exist and preview.maxPreviews previews already do; it is
-// not refused, its entries for the services of its repo it does not touch
+// target does not exist and preview.maxPreviews previews already do, or the
+// target does not exist and its namespace is foreign (foreign); it is not
+// refused, its entries for the services of its repo it does not touch
 // are unpinned there, then each service it touches is deployed. A service
 // already deployed as it would be written is left alone unless the PR left
 // another preview. Teardowns and deploys that fail are recorded, not
 // returned. When the PR's files could not be listed, or the target preview
 // can't be read or the previews listed, only the teardowns from cleanupSlugs
-// are kept, and the error is recorded in listErr or readErr.
+// are kept, and the error is recorded in listErr or readErr, as is a failed
+// namespace check.
 func (p *reconcilePlan) change(tree *store.Tree) (store.Summary, error) {
-	p.ran, p.readErr, p.noService, p.held, p.limited, p.unpin, p.deploys = true, nil, nil, nil, false, nil, nil
+	p.ran, p.readErr, p.noService, p.held, p.limited, p.inUse, p.unpin, p.deploys =
+		true, nil, nil, nil, false, false, nil, nil
 	p.cleanup = newSteps(p.ev.Target, p.cleanupSlugs, p.cleanupReason)
 	for _, s := range p.cleanup {
 		s.run(tree)
@@ -309,6 +327,9 @@ func (p *reconcilePlan) change(tree *store.Tree) (store.Summary, error) {
 		} else if limited, listErr := limitReached(tree, p.catalog.MaxPreviews); listErr != nil || limited {
 			p.limited, p.readErr = limited && listErr == nil, listErr
 			break
+		} else if inUse, checkErr := p.foreign(p.t.Slug); checkErr != nil || inUse {
+			p.inUse, p.readErr = inUse && checkErr == nil, checkErr
+			break
 		}
 		if p.unpin = p.untouchedUnpin(vals); p.unpin != nil {
 			p.unpin.run(tree)
@@ -317,6 +338,22 @@ func (p *reconcilePlan) change(tree *store.Tree) (store.Summary, error) {
 		p.deployAll(tree, !removed)
 	}
 	return p.summary(), nil
+}
+
+// foreignFunc returns the namespace check of a new preview through c, under
+// ctx: whether its namespace is foreign (namespace.Checker.Foreign), a failed
+// check as a *NamespaceCheckError. A nil c checks nothing.
+func foreignFunc(ctx context.Context, c namespace.Checker) func(slug string) (bool, error) {
+	return func(slug string) (bool, error) {
+		if c == nil {
+			return false, nil
+		}
+		foreign, err := c.Foreign(ctx, slug)
+		if err != nil {
+			return false, &NamespaceCheckError{Err: err}
+		}
+		return foreign, nil
+	}
 }
 
 // limitReached reports whether maxPreviews previews exist in tree, with no
@@ -473,6 +510,9 @@ func (p *reconcilePlan) refusal(ctx context.Context, api ReconcileAPI) (string, 
 	case p.limited:
 		body = preview.BuildPreviewLimitSummary(p.t.Slug, p.catalog.MaxPreviews)
 		o, r = reconcileSkipped(ctx, p.ev, PreviewLimitReason, slog.Int("max_previews", p.catalog.MaxPreviews))
+	case p.inUse:
+		body = preview.BuildNamespaceInUseSummary(p.t.Slug)
+		o, r = reconcileSkipped(ctx, p.ev, NamespaceInUseReason)
 	default:
 		return "", ""
 	}

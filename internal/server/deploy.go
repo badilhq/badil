@@ -133,12 +133,26 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 
 	// A manual deploy always writes: it refreshes updated-at (the TTL clock)
 	// and always returns a gitops commit URL. It is refused with 409 when the
-	// preview does not exist and preview.maxPreviews previews already do.
+	// preview does not exist and preview.maxPreviews previews already do, or
+	// when the preview does not exist and its namespace is not a preview's;
+	// a failed namespace check is a 502.
 	result, fanErr, err := lifecycle.DeployPR(ctx, s.deployAPI(), services, slug, inputs)
 	if errors.Is(err, lifecycle.ErrPreviewLimit) {
 		msg := fmt.Sprintf("preview limit (%d) reached", services.MaxPreviews)
 		logger.WarnContext(ctx, "deploy failed", slog.String("op", "preview limit"), slog.String("err", msg))
 		writeJSONError(ctx, w, http.StatusConflict, msg)
+		return
+	}
+	if errors.Is(err, lifecycle.ErrNamespaceInUse) {
+		msg := fmt.Sprintf("namespace %s exists and is not a preview", slug)
+		logger.WarnContext(ctx, "deploy failed", slog.String("op", "namespace in use"), slog.String("err", msg))
+		writeJSONError(ctx, w, http.StatusConflict, msg)
+		return
+	}
+	var nsErr *lifecycle.NamespaceCheckError
+	if errors.As(err, &nsErr) {
+		logger.ErrorContext(ctx, "deploy failed", slog.String("op", "namespace check"), slog.String("err", err.Error()))
+		writeJSONError(ctx, w, http.StatusBadGateway, err.Error())
 		return
 	}
 	var checkErr *lifecycle.CapCheckError

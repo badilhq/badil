@@ -25,6 +25,7 @@ import (
 	"github.com/badilhq/badil/internal/github"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
+	"github.com/badilhq/badil/internal/namespace"
 	"github.com/badilhq/badil/internal/server"
 	"github.com/badilhq/badil/internal/status"
 	"github.com/badilhq/badil/internal/store"
@@ -52,16 +53,28 @@ func sweepAPI(st *store.GitHubStore, f forge.Forge, m *metrics.Metrics) lifecycl
 	return lifecycle.SweepAPI{Store: st, Forge: f, Recorder: m, FanOut: lifecycle.FanOutPRComments}
 }
 
-// reconcileAPI is st, f and the fan-out with the metrics recorder
-// lifecycle.ReconcilePR expects. A nil *metrics.Metrics records nothing.
-func reconcileAPI(st *store.GitHubStore, f forge.Forge, m *metrics.Metrics) lifecycle.ReconcileAPI {
-	return lifecycle.ReconcileAPI{Store: st, Forge: f, Recorder: m, FanOut: lifecycle.FanOutPRComments}
-}
-
 // catchUpAPI is st, f and the metrics recorder lifecycle.CatchUp expects. A
 // nil *metrics.Metrics records nothing.
-func catchUpAPI(st *store.GitHubStore, f forge.Forge, m *metrics.Metrics) lifecycle.CatchUpAPI {
+func catchUpAPI(st lifecycle.CatchUpStore, f forge.Forge, m *metrics.Metrics) lifecycle.CatchUpAPI {
 	return lifecycle.CatchUpAPI{Store: st, Forge: f, Recorder: m}
+}
+
+// cleanupStore is the gitops store badil cleanup's catch-up reads and writes:
+// *store.GitHubStore.
+type cleanupStore interface {
+	lifecycle.CatchUpStore
+	lifecycle.ReconcileStore
+}
+
+// cleanupCatchUp is badil cleanup's catch-up over st and f, recording no
+// metrics: it reconciles at once (reconcileNow), checking the namespace of a
+// new preview with ns as serve does.
+func cleanupCatchUp(st cleanupStore, f forge.Forge, ns namespace.Checker) *lifecycle.CatchUp {
+	var m *metrics.Metrics
+	reconcile := lifecycle.ReconcileAPI{
+		Store: st, Forge: f, Recorder: m, FanOut: lifecycle.FanOutPRComments, Namespaces: ns,
+	}
+	return lifecycle.NewCatchUp(catchUpAPI(st, f, m), reconcileNow(reconcile))
 }
 
 // catchUpRunner runs one catch-up: *lifecycle.CatchUp.
@@ -131,6 +144,7 @@ func serveCmd() *cobra.Command {
 			defer stop()
 
 			previewStatus := status.InCluster(ctx)
+			namespaces := namespace.InCluster(ctx)
 			if err = loadStatus(ctx, previewStatus); err != nil {
 				return err
 			}
@@ -144,7 +158,8 @@ func serveCmd() *cobra.Command {
 			previewStatus.Start(ctx, st)
 
 			srv := server.NewServer(f, st, cfg.DeployToken,
-				server.WithMetrics(m), server.WithStatus(cfg.StatusToken, previewStatus),
+				server.WithMetrics(m), server.WithNamespaces(namespaces),
+				server.WithStatus(cfg.StatusToken, previewStatus),
 				server.WithReadToken(cfg.ReadToken), server.WithPreviewTTL(ttl), server.WithWake(wake))
 			catchUpCfg := catchUpAPI(st, f, m)
 			catchUpCfg.Skipped = srv.RecordCatchUpSkip
@@ -529,7 +544,7 @@ func cleanupCmd() *cobra.Command {
 				return err
 			}
 			defer closeStore(ctx, st)
-			catchUp := lifecycle.NewCatchUp(catchUpAPI(st, f, nil), reconcileNow(reconcileAPI(st, f, nil)))
+			catchUp := cleanupCatchUp(st, f, namespace.InCluster(ctx))
 			return runCleanup(cmd.Context(), ctx, sweepAPI(st, f, nil), catchUp, time.Now().UTC(), ttl)
 		},
 	}

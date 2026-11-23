@@ -41,7 +41,7 @@ The manual trigger: it pins one service of a preview at a commit.
 - **Auth:** `Authorization: Bearer $BADIL_DEPLOY_TOKEN`.
 - **Request:** a JSON object with `service`, `head_ref`, `commit_sha`, `pr_author`, `pr_url`, `pr_number` and `workflow_run_url`.
 - **Response:** `{ "preview_slug", "gitops_commit_url", "warnings": [...] }`. `warnings` holds the PR comment fan-out failures.
-- **Errors:** `409 {"error": "preview limit (<max>) reached"}` when `preview.maxPreviews` is reached and `previews/<slug>/` does not exist. A write the gitops remote refused for badil's credentials answers 502.
+- **Errors:** `409 {"error": "preview limit (<max>) reached"}` when `preview.maxPreviews` is reached and `previews/<slug>/` does not exist. `409 {"error": "namespace <slug> exists and is not a preview"}` when `previews/<slug>/` does not exist and the namespace `<slug>` exists without the preview labels; `502 {"error": "namespace check failed: <error>"}` when that namespace cannot be read. A write the gitops remote refused for badil's credentials answers 502.
 
 `service` must be a service of `badil.yaml`. `commit_sha` accepts any value: send the full SHA, or a `{sha7}`/`{sha8}` image tag will not match the one CI pushed (see [`imageTag`](CONFIGURATION.md#imagetag)).
 
@@ -52,9 +52,10 @@ A deploy runs these steps:
 1. Validate `service` against the `services` of `badil.yaml`.
 2. Slugify `head_ref`.
 3. Refuse a new preview past the preview cap with 409 (see [Preview cap check](#preview-cap-check)).
-4. Read or bootstrap `previews/<slug>/values.yaml`.
-5. Write it in one commit, `chore(preview): deploy <service>@<sha7> to <slug>`, pushed again on a moved remote head (the push retry). Steps 3 and 4 are decided again on every push attempt.
-6. Fan out the PR comment, best-effort: failures are returned as `warnings`.
+4. Refuse a new preview whose namespace is in use with 409 (see [Namespace check](#namespace-check)).
+5. Read or bootstrap `previews/<slug>/values.yaml`.
+6. Write it in one commit, `chore(preview): deploy <service>@<sha7> to <slug>`, pushed again on a moved remote head (the push retry). Steps 3 to 5 are decided again on every push attempt.
+7. Fan out the PR comment, best-effort: failures are returned as `warnings`.
 
 It always writes, even when only `updated-at` changes, so a repeated deploy of the same commit refreshes the TTL clock. `gitops_commit_url` is the URL of the pushed commit, `<GITOPS_REPO_URL without .git>/commit/<sha>`. The one exception is two identical calls within the same second: the second leaves the file as it is, so it commits nothing, and its `gitops_commit_url` and comment link to the gitops repo's current head.
 
@@ -67,6 +68,10 @@ The deploy reads `previews/<slug>/values.yaml` on the head its commit is made on
 At the cap, it answers `409 {"error": "preview limit (<max>) reached"}`, writes nothing and logs `deploy failed` with `op` `preview limit`. Other read or list errors are answered like the write's, with `op` `read preview` or `list previews`. A failed write is logged with `op` `write preview`.
 
 The check is decided again on every push attempt, so a concurrent deploy that creates a preview is counted: see [Preview cap](EVENTS.md#preview-cap).
+
+### Namespace check
+
+When `previews/<slug>/values.yaml` does not exist, after the cap check, the deploy gets the namespace `<slug>`. When it exists and is not a preview namespace of `<slug>`, it answers `409 {"error": "namespace <slug> exists and is not a preview"}`, writes nothing and logs `deploy failed` with `op` `namespace in use`. When the namespace cannot be read, it answers `502 {"error": "namespace check failed: <error>"}` and logs `deploy failed` with `op` `namespace check`. The rule is [Namespace in use](EVENTS.md#namespace-in-use).
 
 ## `POST /v1/sync`
 
@@ -161,7 +166,7 @@ The state of a PR is decided in this order:
 
 1. `refused`, reason `repo not in catalog`, when `badil.yaml` has no service of `repo`, whatever the PR's labels.
 2. The PR's latest reconcile outcome, when its head SHA matches `sha` (or for any SHA without `sha`):
-   - `refused` with the skip reason `service held by another pr`, `preview limit reached`, `conflicting preview labels`, `fork pr` or `repo not in catalog`;
+   - `refused` with the skip reason `service held by another pr`, `preview limit reached`, `namespace in use`, `conflicting preview labels`, `fork pr` or `repo not in catalog`;
    - `refused`, reason `torn down`, after a teardown;
    - `skipped`, with the skip reason `no service changed` or `not labeled`;
    - `failed`, reason `reconcile failed`, after a failed reconcile: nothing retries it before the next event or [catch-up](EVENTS.md#catch-up) run, so re-run the CI job or push to reconcile again.

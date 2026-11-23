@@ -240,8 +240,8 @@ func outcomeState(res lifecycle.ReconcileResult) (string, string, bool) {
 		return stateFailed, reasonReconcileFailed, true
 	case lifecycle.OutcomeSkipped:
 		switch res.Reason {
-		case lifecycle.ServiceHeldReason, lifecycle.PreviewLimitReason, lifecycle.LabelConflictReason,
-			lifecycle.ForkPRReason, lifecycle.RepoNotInCatalogReason:
+		case lifecycle.ServiceHeldReason, lifecycle.PreviewLimitReason, lifecycle.NamespaceInUseReason,
+			lifecycle.LabelConflictReason, lifecycle.ForkPRReason, lifecycle.RepoNotInCatalogReason:
 			return stateRefused, res.Reason, true
 		case lifecycle.NoServiceReason, lifecycle.NotLabeledReason:
 			return stateSkipped, res.Reason, true

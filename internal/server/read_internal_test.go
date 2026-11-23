@@ -312,6 +312,7 @@ func TestWait_OutcomeStates(t *testing.T) {
 	}{
 		{res: skipped("service held by another pr"), state: "refused", reason: "service held by another pr"},
 		{res: skipped("preview limit reached"), state: "refused", reason: "preview limit reached"},
+		{res: skipped("namespace in use"), state: "refused", reason: "namespace in use"},
 		{res: skipped("conflicting preview labels"), state: "refused", reason: "conflicting preview labels"},
 		{res: skipped("fork pr"), state: "refused", reason: "fork pr"},
 		{res: skipped("repo not in catalog"), state: "refused", reason: "repo not in catalog"},

@@ -272,6 +272,29 @@ jobs:
             exit 1
           fi
 
+      - name: Render badil namespace ClusterRole
+        run: |
+          # Prints the ClusterRole's rules, then the ClusterRoleBinding's role and subjects.
+          got=$(helm template t charts/badil -f charts/badil/ci/test-values.yaml --namespace badil \
+            | yq -N '(select(.kind == "ClusterRole") | .metadata.name + " " + (.rules | to_json(0))), (select(.kind == "ClusterRoleBinding") | .roleRef.name + " " + (.subjects | to_json(0)))')
+          want='t-namespaces [{"apiGroups":[""],"resources":["namespaces"],"verbs":["get"]}]
+          t-namespaces [{"kind":"ServiceAccount","name":"t","namespace":"badil"}]'
+          if [ "$got" != "$want" ]; then
+            echo '::error::expected a ClusterRole with only get on namespaces, bound to the badil ServiceAccount'
+            printf 'got:\n%s\n' "$got"
+            exit 1
+          fi
+
+      - name: Render badil cleanup token
+        run: |
+          got=$(helm template t charts/badil -f charts/badil/ci/test-values.yaml --set cleanup.enabled=true \
+            | yq -N 'select(.kind == "CronJob") | .spec.jobTemplate.spec.template.spec.automountServiceAccountToken')
+          if [ "$got" != 'true' ]; then
+            echo '::error::expected automountServiceAccountToken true on the cleanup CronJob pod, for its namespace check'
+            printf 'got: %s\n' "$got"
+            exit 1
+          fi
+
       - name: Render badil cleanup interval and ServiceMonitor
         run: |
           # Prints the Deployment's CLEANUP_INTERVAL as "<tag> <value>" and "CronJob" when one renders.

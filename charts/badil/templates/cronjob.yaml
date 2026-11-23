@@ -21,6 +21,8 @@ spec:
         spec:
           restartPolicy: Never
           serviceAccountName: {{ include "badil.fullname" . }}
+          # The catch-up reads the namespace of a new preview (clusterrole.yaml).
+          automountServiceAccountToken: true
           {{- with .Values.imagePullSecrets }}
           imagePullSecrets:
             {{- toYaml . | nindent 12 }}
