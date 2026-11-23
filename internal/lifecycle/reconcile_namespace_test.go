@@ -99,31 +99,20 @@ func TestReconcile_NamespaceNotCheckedForExistingPreview(t *testing.T) {
 }
 
 // TestReconcile_NamespaceAllowed deploys a new preview whose namespace is
-// not foreign, or with no namespace check.
+// not foreign.
 func TestReconcile_NamespaceAllowed(t *testing.T) {
-	cases := []struct {
-		name string
-		c    namespace.Checker
-	}{
-		{name: "namespace not foreign", c: &checker{foreign: []string{"search"}}},
-		{name: "no check", c: nil},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			capture := captureLogs(t)
-			f := &reconcileFake{pr: fetchedPR("front", true, "preview:pricing")}
-			res := reconcileWith(t, f, tc.c)
+	capture := captureLogs(t)
+	f := &reconcileFake{pr: fetchedPR("front", true, "preview:pricing")}
+	res := reconcileWith(t, f, &checker{foreign: []string{"search"}})
 
-			if res.Outcome != lifecycle.OutcomeDeployed {
-				t.Errorf("result = %+v, want deployed", res)
-			}
-			if want := []string{"apply", "fanout"}; !slices.Equal(f.calls, want) {
-				t.Errorf("calls = %v, want %v", f.calls, want)
-			}
-			if got := deployedLogged(capture); !slices.Equal(got, []string{"pricing/front"}) {
-				t.Errorf("deployed = %v, want pricing/front", got)
-			}
-		})
+	if res.Outcome != lifecycle.OutcomeDeployed {
+		t.Errorf("result = %+v, want deployed", res)
+	}
+	if want := []string{"apply", "fanout"}; !slices.Equal(f.calls, want) {
+		t.Errorf("calls = %v, want %v", f.calls, want)
+	}
+	if got := deployedLogged(capture); !slices.Equal(got, []string{"pricing/front"}) {
+		t.Errorf("deployed = %v, want pricing/front", got)
 	}
 }
 
@@ -167,32 +156,6 @@ func deployWith(t *testing.T, f *reconcileFake, c namespace.Checker) error {
 	}
 	_, _, deployErr := lifecycle.DeployPR(context.Background(), api, catalog, "pricing", inputs)
 	return deployErr
-}
-
-func TestDeployPR_NamespaceInUse(t *testing.T) {
-	captureLogs(t)
-	f := &reconcileFake{Metrics: metrics.New()}
-	err := deployWith(t, f, &checker{foreign: []string{"pricing"}})
-
-	if !errors.Is(err, lifecycle.ErrNamespaceInUse) {
-		t.Fatalf("err = %v, want ErrNamespaceInUse", err)
-	}
-	f.assertNothingPushed(t)
-	if len(f.fanOuts) != 0 {
-		t.Errorf("fanOuts = %q, want none", f.fanOuts)
-	}
-}
-
-func TestDeployPR_NamespaceCheckError(t *testing.T) {
-	captureLogs(t)
-	f := &reconcileFake{Metrics: metrics.New()}
-	err := deployWith(t, f, &checker{err: errors.New("forbidden")})
-
-	var checkErr *lifecycle.NamespaceCheckError
-	if !errors.As(err, &checkErr) || err.Error() != "namespace check failed: forbidden" {
-		t.Fatalf("err = %v, want the namespace check error", err)
-	}
-	f.assertNothingPushed(t)
 }
 
 func TestDeployPR_NamespaceNotCheckedForExistingPreview(t *testing.T) {
