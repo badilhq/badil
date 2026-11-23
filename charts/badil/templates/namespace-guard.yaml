@@ -1,11 +1,6 @@
 {{- if .Values.namespaceGuard.enabled }}
-# Refuses any update or delete of a namespace by the ServiceAccount of the
-# renderer that deploys previews unless the namespace already carries the
-# preview label, so the renderer cannot adopt or delete a namespace badil did
-# not create. Creates and requests from other users are not matched. The
-# identity falls back to the chart defaults (Argo CD's application controller)
-# so that a `helm upgrade --reuse-values` from a release without these values,
-# which does not take new chart defaults, still matches the renderer.
+# Falls back to the default identity: helm upgrade --reuse-values from a
+# release without these values does not take new chart defaults.
 {{- $renderer := .Values.namespaceGuard.renderer | default dict }}
 {{- $rendererNamespace := $renderer.namespace | default "argocd" }}
 {{- $rendererServiceAccount := $renderer.serviceAccount | default "argocd-application-controller" }}
