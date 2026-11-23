@@ -88,13 +88,9 @@ func DeployPR(
 		Change: func(tree *store.Tree) (store.Summary, error) {
 			write, limited, inUse = nil, false, false
 			var checkErr error
-			if limited, checkErr = overLimit(tree, catalog.MaxPreviews, slug); checkErr != nil || limited {
+			limited, inUse, checkErr = refusal(tree, catalog.MaxPreviews, slug, api.Namespaces != nil, foreign)
+			if checkErr != nil || limited || inUse {
 				return store.Summary{}, checkErr
-			}
-			if api.Namespaces != nil {
-				if inUse, checkErr = namespaceInUse(tree, slug, foreign); checkErr != nil || inUse {
-					return store.Summary{}, checkErr
-				}
 			}
 			var deployErr error
 			write, deployErr = tree.Deploy(slug, catalog, inputs.ServiceName, inputs.CommitSha, inputs, false)
@@ -124,44 +120,31 @@ func DeployPR(
 	return result, api.FanOut(ctx, api.Forge, write.Values, summary), nil
 }
 
-// overLimit reports whether the preview slug does not exist in tree and
-// maxPreviews previews already do. It reads nothing when maxPreviews is 0 (no
-// cap). A read error is a *CapCheckError.
-func overLimit(tree *store.Tree, maxPreviews int, slug string) (bool, error) {
-	if maxPreviews <= 0 {
-		return false, nil
+// refusal reports whether the deploy of the preview slug in tree is refused
+// because the preview does not exist and either maxPreviews previews already
+// do (limited) or foreign reports its namespace foreign (inUse). It reads the
+// preview once, and nothing when maxPreviews is 0 (no cap) and check is
+// false. A read error is a *CapCheckError; a failed check is foreign's error.
+func refusal(
+	tree *store.Tree, maxPreviews int, slug string, check bool, foreign func(string) (bool, error),
+) (bool, bool, error) {
+	if maxPreviews <= 0 && !check {
+		return false, false, nil
 	}
-	created, err := newPreview(tree, slug)
-	if err != nil || !created {
-		return false, err
+	_, err := tree.GetPreview(slug)
+	if err == nil {
+		return false, false, nil
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return false, false, &CapCheckError{Op: "read preview", Err: err}
 	}
 	limited, err := limitReached(tree, maxPreviews)
 	if err != nil {
-		return false, &CapCheckError{Op: "list previews", Err: err}
+		return false, false, &CapCheckError{Op: "list previews", Err: err}
 	}
-	return limited, nil
-}
-
-// newPreview reports whether the preview slug does not exist in tree. A read
-// error is a *CapCheckError.
-func newPreview(tree *store.Tree, slug string) (bool, error) {
-	_, err := tree.GetPreview(slug)
-	if err == nil {
-		return false, nil
+	if limited {
+		return true, false, nil
 	}
-	if !errors.Is(err, store.ErrNotFound) {
-		return false, &CapCheckError{Op: "read preview", Err: err}
-	}
-	return true, nil
-}
-
-// namespaceInUse reports whether the preview slug does not exist in tree and
-// its namespace is foreign. A read error of the preview is a
-// *CapCheckError; a failed check is foreign's error.
-func namespaceInUse(tree *store.Tree, slug string, foreign func(string) (bool, error)) (bool, error) {
-	created, err := newPreview(tree, slug)
-	if err != nil || !created {
-		return false, err
-	}
-	return foreign(slug)
+	inUse, err := foreign(slug)
+	return false, inUse, err
 }
