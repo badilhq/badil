@@ -205,14 +205,14 @@ The environment is `preview-<slug>-<service>`, one per preview service. A new `s
 
 ## Namespace guard
 
-With the chart's [namespace guard](CONFIGURATION.md#namespace-guard), Argo CD cannot adopt or delete a namespace that does not carry the preview label. A preview whose namespace already exists without that label, whoever wrote its preview file, is refused by the cluster:
+With the chart's [namespace guard](CONFIGURATION.md#namespace-guard), the renderer cannot adopt or delete a namespace that does not carry the preview label. A preview whose namespace already exists without that label, whoever wrote its preview file, is refused by the cluster. With Argo CD as the renderer:
 
 - the preview's parent Application stays `OutOfSync`, and its operation is `Failed` after 5 retries (about 5 minutes) with `one or more objects failed to apply, reason: error when patching ...: namespaces "<slug>" is forbidden: ValidatingAdmissionPolicy ... denied request: namespace is not a badil preview`;
 - its Namespace resource is `SyncFailed`; the per-preview AppProject is created, but no child Application and nothing inside the namespace;
 - no GitHub deployment is posted;
 - the namespace keeps its uid, labels and annotations.
 
-Closing the PR deletes the preview and its parent Application; the namespace and what it holds stay. A preview whose namespace the controller creates is not affected.
+Closing the PR deletes the preview and its parent Application; the namespace and what it holds stay. A preview whose namespace the application controller creates is not affected.
 
 ## Dashboard
 

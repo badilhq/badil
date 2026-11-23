@@ -235,9 +235,9 @@ badil sets no quota or network policy on previews. To cap each preview's resourc
 
 ### Namespace guard (optional)
 
-badil refuses a new preview whose namespace already exists and is not a preview (see [Namespace in use](EVENTS.md#namespace-in-use)), but only for the previews it writes itself. A preview file written to the gitops repo by anything else, or a namespace created between badil's check and Argo CD's sync, still lets Argo CD adopt that namespace, and the teardown then deletes it with everything in it. The namespace guard closes that gap in the cluster: a ValidatingAdmissionPolicy refuses any update or delete of a namespace by Argo CD's application controller unless the namespace already carries `app.kubernetes.io/part-of: preview-environments`, whoever wrote the preview file. Requests from any other user, and the controller's creation of a namespace, are not affected.
+badil refuses a new preview whose namespace already exists and is not a preview (see [Namespace in use](EVENTS.md#namespace-in-use)), but only for the previews it writes itself. A preview file written to the gitops repo by anything else, or a namespace created between badil's check and the renderer's sync, still lets the renderer adopt that namespace, and the teardown then deletes it with everything in it. The namespace guard closes that gap in the cluster: a ValidatingAdmissionPolicy refuses any update or delete of a namespace by the ServiceAccount of the renderer that deploys previews unless the namespace already carries `app.kubernetes.io/part-of: preview-environments`, whoever wrote the preview file. Requests from any other user, and the renderer's creation of a namespace, are not affected.
 
-The policy covers every namespace the controller updates or deletes, not only previews. When the same Argo CD manages other namespaces, it cannot update or delete them either unless they carry the preview label: a change to a Namespace manifest in another Application, `CreateNamespace=true` with `managedNamespaceMetadata`, and a namespace pruned or deleted with its Application all fail to sync. Enable the guard only on an Argo CD that manages no namespace other than previews.
+The policy covers every namespace that identity updates or deletes, not only previews. Enable the guard only when the renderer's ServiceAccount manages no namespace other than previews.
 
 It needs Kubernetes 1.30 or later. Add to the `helm install` (or a `helm upgrade --reuse-values`):
 
@@ -245,7 +245,7 @@ It needs Kubernetes 1.30 or later. Add to the `helm install` (or a `helm upgrade
   --set namespaceGuard.enabled=true
 ```
 
-The policy matches the controller by its ServiceAccount, `system:serviceaccount:argocd:argocd-application-controller` by default. When Argo CD runs in another namespace or under another ServiceAccount, set `namespaceGuard.argocdNamespace` and `namespaceGuard.controllerServiceAccount`; a wrong identity leaves the guard inactive without error. Read the controller's ServiceAccount with:
+The policy matches the renderer by its ServiceAccount, set with `namespaceGuard.renderer.namespace` and `namespaceGuard.renderer.serviceAccount`. The default is Argo CD's application controller, `system:serviceaccount:argocd:argocd-application-controller`. For Argo CD in another namespace or under another ServiceAccount, or another renderer, set both to the ServiceAccount the renderer applies the preview manifests as: its controller pod's `serviceAccountName`, unless the renderer is configured to apply as another ServiceAccount. A wrong identity leaves the guard inactive without error. Read Argo CD's application controller ServiceAccount with:
 
 ```bash
 kubectl get statefulset argocd-application-controller -n argocd -o jsonpath='{.spec.template.spec.serviceAccountName}'
