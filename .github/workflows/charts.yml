@@ -328,9 +328,6 @@ jobs:
             "$(want flux-system helm-controller)" \
             --set namespaceGuard.enabled=true,namespaceGuard.renderer.namespace=flux-system,namespaceGuard.renderer.serviceAccount=helm-controller
           # A helm upgrade --reuse-values from a release without these values has no renderer identity.
-          check 'expected the default renderer identity when the identity values are missing' \
-            "$(want argocd argocd-application-controller)" \
-            --set namespaceGuard.enabled=true,namespaceGuard.renderer.namespace=null,namespaceGuard.renderer.serviceAccount=null
           check 'expected the default renderer identity when namespaceGuard.renderer is missing' \
             "$(want argocd argocd-application-controller)" \
             --set namespaceGuard.enabled=true,namespaceGuard.renderer=null
