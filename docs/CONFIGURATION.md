@@ -245,6 +245,16 @@ It creates a ResourceQuota, a LimitRange and an ingress NetworkPolicy in every p
 
 A quota on compute resources (`requests.cpu`, `requests.memory`, `limits.memory`) refuses pods that do not set them, and `charts/app` ships `resources: {}`. Ship a LimitRange with default requests and limits next to such a quota, as the example does.
 
+## Namespace guard
+
+The badil chart's opt-in admission policy that keeps Argo CD off namespaces badil did not create. With `namespaceGuard.enabled`, it renders a ValidatingAdmissionPolicy and a ValidatingAdmissionPolicyBinding, both cluster-scoped and named `<release>-namespace-guard`. The policy refuses any `UPDATE` or `DELETE` of a Namespace by the Argo CD application controller unless the namespace already carries `app.kubernetes.io/part-of: preview-environments`, with the message `namespace is not a badil preview`. It needs Kubernetes 1.30 or later. Setup: [Namespace guard](INSTALL.md#namespace-guard-optional).
+
+| Value | Default | Description |
+|---|---|---|
+| `namespaceGuard.enabled` | `false` | render the policy and its binding |
+| `namespaceGuard.argocdNamespace` | `argocd` | namespace of the Argo CD application controller's ServiceAccount |
+| `namespaceGuard.controllerServiceAccount` | `argocd-application-controller` | the controller's ServiceAccount; the policy only matches requests from `system:serviceaccount:<argocdNamespace>:<controllerServiceAccount>` |
+
 ## Preview file
 
 badil writes `previews/<slug>/values.yaml`. [Preview contract](CONTRACT.md#v1beta1-file) defines every field and the strict rules of v1beta1. When badil writes it is in [Preview file writes](SERVICES.md#preview-file-writes).

@@ -1,6 +1,6 @@
 # Operations reference
 
-This page lists what badil exposes to run it: its metrics, the preview status and spin-up time the renderer reports, the preview deployments Argo CD posts on GitHub, and the Grafana dashboard. Their setup is in [Install](INSTALL.md#preview-status-optional).
+This page lists what badil exposes to run it: its metrics, the preview status and spin-up time the renderer reports, the preview deployments Argo CD posts on GitHub, what the optional namespace guard refuses, and the Grafana dashboard. Their setup is in [Install](INSTALL.md#preview-status-optional).
 
 ## Metrics
 
@@ -202,6 +202,17 @@ The environment is `preview-<slug>-<service>`, one per preview service. A new `s
     - the chart orders its resources in sync waves. Argo CD applies a wave only once the earlier waves are Healthy, and marks the sync as succeeded as soon as the last wave is applied. An earlier wave turning Healthy (a migration Job, another Deployment) is then a health change after the start, while the last wave's pods still start.
 
     Either way, `success`, `ready` and the spin-up sample for the new SHA can come before its pods are Healthy, and are not sent again when they turn Healthy.
+
+## Namespace guard
+
+With the chart's [namespace guard](CONFIGURATION.md#namespace-guard), Argo CD cannot adopt or delete a namespace that does not carry the preview label. A preview whose namespace already exists without that label, whoever wrote its preview file, is refused by the cluster:
+
+- the preview's parent Application stays `OutOfSync`, and its operation is `Failed` after 5 retries (about 5 minutes) with `one or more objects failed to apply, reason: error when patching ...: namespaces "<slug>" is forbidden: ValidatingAdmissionPolicy ... denied request: namespace is not a badil preview`;
+- its Namespace resource is `SyncFailed`; the per-preview AppProject is created, but no child Application and nothing inside the namespace;
+- no GitHub deployment is posted;
+- the namespace keeps its uid, labels and annotations.
+
+Closing the PR deletes the preview and its parent Application; the namespace and what it holds stay. A preview whose namespace the controller creates is not affected.
 
 ## Dashboard
 

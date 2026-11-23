@@ -1,0 +1,36 @@
+{{- if .Values.namespaceGuard.enabled }}
+# Refuses any update or delete of a namespace by the Argo CD application
+# controller unless the namespace already carries the preview label, so Argo
+# CD cannot adopt or delete a namespace badil did not create. Creates and
+# requests from other users are not matched.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ include "badil.fullname" . }}-namespace-guard
+  labels:
+    {{- include "badil.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["namespaces"]
+        operations: ["UPDATE", "DELETE"]
+  matchConditions:
+    - name: argocd-application-controller
+      expression: 'request.userInfo.username == "system:serviceaccount:{{ .Values.namespaceGuard.argocdNamespace }}:{{ .Values.namespaceGuard.controllerServiceAccount }}"'
+  validations:
+    - expression: "oldObject.metadata.?labels[?'app.kubernetes.io/part-of'].orValue('') == 'preview-environments'"
+      message: namespace is not a badil preview
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ include "badil.fullname" . }}-namespace-guard
+  labels:
+    {{- include "badil.labels" . | nindent 4 }}
+spec:
+  policyName: {{ include "badil.fullname" . }}-namespace-guard
+  validationActions: [Deny]
+{{- end }}

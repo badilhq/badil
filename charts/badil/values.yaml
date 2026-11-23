@@ -91,3 +91,16 @@ cleanup:
   # Delete previews with no deploy for this long (CLEANUP_TTL), as a Go
   # duration such as 168h; empty disables the TTL.
   ttl: ""
+
+# Admission policy that refuses any update or delete of a namespace by Argo
+# CD's application controller unless the namespace carries the preview label
+# app.kubernetes.io/part-of: preview-environments: Argo CD then cannot adopt or
+# delete a namespace badil did not create, whoever wrote the preview file.
+# Renders a cluster-scoped ValidatingAdmissionPolicy and its binding; needs
+# Kubernetes 1.30+.
+namespaceGuard:
+  enabled: false
+  # Namespace and ServiceAccount of the Argo CD application controller; the
+  # policy only matches requests from that identity.
+  argocdNamespace: argocd
+  controllerServiceAccount: argocd-application-controller

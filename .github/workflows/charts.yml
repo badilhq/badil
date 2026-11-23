@@ -285,6 +285,46 @@ jobs:
             exit 1
           fi
 
+      - name: Render badil namespace guard
+        run: |
+          # Prints each admission object as "<kind> <name>", followed for the policy by its failure policy and rules,
+          # its match condition and its validation, and for the binding by its policy name and actions.
+          guard() {
+            helm template t charts/badil -f charts/badil/ci/test-values.yaml "$@" \
+              | yq -N 'select(.kind == "ValidatingAdmissionPolicy*") | .kind + " " + .metadata.name,
+                (select(.kind == "ValidatingAdmissionPolicy") | (.spec.failurePolicy + " " + (.spec.matchConstraints.resourceRules | to_json(0))),
+                  (.spec.matchConditions[] | .expression),
+                  (.spec.validations[] | .expression + " -> " + .message)),
+                (select(.kind == "ValidatingAdmissionPolicyBinding") | .spec.policyName + " " + (.spec.validationActions | to_json(0)))'
+          }
+          got=$(guard)
+          if [ -n "$got" ]; then
+            echo '::error::expected no ValidatingAdmissionPolicy or binding by default'
+            printf 'got:\n%s\n' "$got"
+            exit 1
+          fi
+          rules='Fail [{"apiGroups":[""],"apiVersions":["v1"],"resources":["namespaces"],"operations":["UPDATE","DELETE"]}]'
+          validation="oldObject.metadata.?labels[?'app.kubernetes.io/part-of'].orValue('') == 'preview-environments' -> namespace is not a badil preview"
+          got=$(guard --set namespaceGuard.enabled=true)
+          want="ValidatingAdmissionPolicy t-namespace-guard
+          $rules
+          request.userInfo.username == \"system:serviceaccount:argocd:argocd-application-controller\"
+          $validation
+          ValidatingAdmissionPolicyBinding t-namespace-guard
+          t-namespace-guard [\"Deny\"]"
+          if [ "$got" != "$want" ]; then
+            echo '::error::expected the namespace guard policy and binding with namespaceGuard.enabled=true'
+            printf 'got:\n%s\n' "$got"
+            exit 1
+          fi
+          got=$(guard --set namespaceGuard.enabled=true,namespaceGuard.argocdNamespace=gitops,namespaceGuard.controllerServiceAccount=controller \
+            | grep '^request\.userInfo')
+          if [ "$got" != 'request.userInfo.username == "system:serviceaccount:gitops:controller"' ]; then
+            echo '::error::expected the match condition username built from namespaceGuard.argocdNamespace and controllerServiceAccount'
+            printf 'got: %s\n' "$got"
+            exit 1
+          fi
+
       - name: Render badil cleanup token
         run: |
           got=$(helm template t charts/badil -f charts/badil/ci/test-values.yaml --set cleanup.enabled=true \

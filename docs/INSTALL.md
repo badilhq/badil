@@ -233,6 +233,24 @@ Last successful sweep needs `cleanup.interval`; the spin-up panels need [Preview
 
 badil sets no quota or network policy on previews. To cap each preview's resources and isolate its ingress, apply the Kyverno policy in [`examples/kyverno/`](../examples/kyverno/README.md) (Kyverno v1.19.0 or later): it creates a ResourceQuota, a LimitRange and an ingress NetworkPolicy in every preview namespace. Adapt its quota numbers and its ingress controller namespace first. Details: [Preview limits](CONFIGURATION.md#preview-limits).
 
+### Namespace guard (optional)
+
+badil refuses a new preview whose namespace already exists and is not a preview (see [Namespace in use](EVENTS.md#namespace-in-use)), but only for the previews it writes itself. A preview file written to the gitops repo by anything else, or a namespace created between badil's check and Argo CD's sync, still lets Argo CD adopt that namespace, and the teardown then deletes it with everything in it. The namespace guard closes that gap in the cluster: a ValidatingAdmissionPolicy refuses any update or delete of a namespace by Argo CD's application controller unless the namespace already carries `app.kubernetes.io/part-of: preview-environments`, whoever wrote the preview file. Namespaces the controller creates for previews, and requests from any other user, are not affected.
+
+It needs Kubernetes 1.30 or later. Add to the `helm install` (or a `helm upgrade --reuse-values`):
+
+```bash
+  --set namespaceGuard.enabled=true
+```
+
+The policy matches the controller by its ServiceAccount, `system:serviceaccount:argocd:argocd-application-controller` by default. When Argo CD runs in another namespace or under another ServiceAccount, set `namespaceGuard.argocdNamespace` and `namespaceGuard.controllerServiceAccount`; a wrong identity leaves the guard inactive without error. Read the controller's ServiceAccount with:
+
+```bash
+kubectl get statefulset argocd-application-controller -n argocd -o jsonpath='{.spec.template.spec.serviceAccountName}'
+```
+
+Check: `kubectl get validatingadmissionpolicy,validatingadmissionpolicybinding badil-namespace-guard` lists both. What a refused preview looks like: [Namespace guard](OPERATIONS.md#namespace-guard). Values: [Namespace guard](CONFIGURATION.md#namespace-guard).
+
 ## 7. Service repos
 
 - Create the `preview` label (or your custom `preview.label`) in each service repo, e.g. `gh label create preview --repo <owner>/<repo>`. Create any `preview:<name>` label yourself in each repo too: badil never creates labels.
