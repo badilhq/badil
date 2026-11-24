@@ -82,12 +82,8 @@ func TestApply_OneCommitOnFetchedHead(t *testing.T) {
 		}); putErr != nil {
 			return lifecycle.Summary{}, putErr
 		}
-		return lifecycle.Summary{
-			Subject: "chore(preview): sweep: delete 1, unpin 0, sync 1",
-		}, stampAPIVersion(
-			tree,
-			"a",
-		)
+		sum := lifecycle.Summary{Subject: "chore(preview): sweep: delete 1, unpin 0, sync 1"}
+		return sum, stampAPIVersion(tree, "a")
 	})
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
