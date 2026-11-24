@@ -45,12 +45,16 @@ existingSecret: ""
 service:
   port: 8080
 
-# Ingress routing every path of the host to the server port (/webhooks/github, /webhooks/status, /v1/deploy, /v1/previews, /v1/wait, /healthz); host is required when enabled.
+# Ingress routing POST /webhooks/github (the URL GitHub calls) to the server port, and /v1 when api is true (for CI
+# jobs, agents and the CLI outside the cluster). /healthz and /webhooks/status are never routed: Argo CD reaches the
+# status webhook through the Service. host is required when enabled.
 ingress:
   enabled: false
   className: ""
   host: ""
   tls: []
+  # Also route /v1 (deploy, sync, previews, wait).
+  api: false
 
 # Container resource requests and limits.
 resources: {}

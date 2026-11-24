@@ -40,7 +40,7 @@ Skip this step if the gitops repo comes from the template: its README covers it.
 
 ## 4. Public URL for badil
 
-Choose the https host GitHub will call, e.g. `https://badil.example.com`, and create its A or CNAME record pointing at the ingress controller. The chart's Ingress serves it (step 6), and it is the webhook base URL.
+Choose the https host GitHub will call, e.g. `https://badil.example.com`, and create its A or CNAME record pointing at the ingress controller. The chart's Ingress serves it (step 6), and it is the webhook base URL. The Ingress routes only `POST /webhooks/github`; set `ingress.api: true` (step 6) when CI jobs, agents or the CLI call `/v1` through it.
 
 ## 5. GitHub App
 
@@ -100,7 +100,10 @@ ingress:
   tls:
     - hosts: [badil.example.com]
       secretName: badil-tls
+  # api: true                     # also route /v1, for CI jobs, agents and the CLI outside the cluster
 ```
+
+The Ingress routes only `POST /webhooks/github`, the URL GitHub calls. Set `ingress.api: true` when CI jobs, agents or the CLI call `/v1` through it. It never routes `/healthz` or `/webhooks/status`.
 
 The chart has no `ingress.annotations`: the TLS Secret must exist beforehand (created by you, or by a cert-manager `Certificate`), or the controller's default certificate must be valid for the host. On a local test cluster you can skip the file and use http.
 
@@ -122,7 +125,7 @@ helm install badil oci://ghcr.io/badilhq/charts/badil -n badil \
 ```
 
 - Without `--version`, Helm installs the latest chart. Add `--version X.Y.Z` to pin a release (do so in production), and take the step 3 example files from the same `vX.Y.Z` tag. The image tag defaults to the chart `appVersion`.
-- When the Secret has `deploy-token`, the Ingress also exposes `POST /v1/deploy`, the manual trigger, and `POST /v1/sync`, which syncs every preview (or one) with `badil.yaml` at once, both protected by that bearer token (see [README](../README.md)). `deploy-token` is optional: leave out the `--from-literal=deploy-token=...` line to turn both endpoints off (404). The Ingress also exposes `POST /webhooks/status`, the renderer's status callback, protected by the optional `status-token` bearer token (see [Preview status](#preview-status-optional)). When the Secret has `read-token` or `deploy-token`, the Ingress also exposes the read routes `GET /v1/previews` and `GET /v1/wait`, protected by either token (see [Wait for a preview](#wait-for-a-preview)).
+- When the Secret has `deploy-token`, badil serves `POST /v1/deploy`, the manual trigger, and `POST /v1/sync`, which syncs every preview (or one) with `badil.yaml` at once, both protected by that bearer token (see [README](../README.md)). `deploy-token` is optional: leave out the `--from-literal=deploy-token=...` line to turn both endpoints off (404). When the Secret has `read-token` or `deploy-token`, badil serves the read routes `GET /v1/previews` and `GET /v1/wait`, protected by either token (see [Wait for a preview](#wait-for-a-preview)). The Ingress routes `POST /v1/deploy`, `POST /v1/sync`, `GET /v1/previews` and `GET /v1/wait` only with `ingress.api: true`. `POST /webhooks/status`, the renderer's status callback, is protected by the optional `status-token` bearer token (see [Preview status](#preview-status-optional)); the Ingress never routes it, and Argo CD reaches it through the Service.
 - badil's git calls to the gitops repo authenticate as the App installation. To use a token instead, add `--from-literal=gitops-repo-token=<token>` to the Secret, and `--set config.gitopsRepoUsername=<username>` when the host needs a username other than `x-access-token` (see [Gitops repo credentials](CONFIGURATION.md#gitops-repo-credentials)). Pushes then run as the token's owner.
 - `cleanup.ttl` (e.g. `168h`) is optional: it also deletes previews with no deploy for that long.
 - The cleanup sweep runs in the server every hour by default (`cleanup.interval`, `1h`): it deletes stale previews and rewrites every kept preview to match `badil.yaml`, and exports its metrics (with the Prometheus Operator, scrape them with `metrics.serviceMonitor.enabled=true` and `metrics.serviceMonitor.labels` matching its selector, e.g. `release: <kube-prometheus-stack release>`). `cleanup.enabled=true` switches it to an hourly CronJob without metrics and turns the in-server sweep off.
@@ -134,7 +137,7 @@ Once the Secret exists, delete the local `.env` and PEM. The non-secret values y
 Check:
 
 ```bash
-curl https://badil.example.com/healthz   # {"status":"ok"}
+curl -s -o /dev/null -w '%{http_code}' -X POST https://badil.example.com/webhooks/github   # 401
 ```
 
 ### Preview status (optional)
@@ -231,7 +234,7 @@ Last successful sweep needs `cleanup.interval`; the spin-up panels need [Preview
 
 ### Preview limits (optional)
 
-badil sets no quota or network policy on previews. To cap each preview's resources and isolate its ingress, apply the Kyverno policy in [`examples/kyverno/`](../examples/kyverno/README.md) (Kyverno v1.19.0 or later): it creates a ResourceQuota, a LimitRange and an ingress NetworkPolicy in every preview namespace. Adapt its quota numbers and its ingress controller namespace first. Details: [Preview limits](CONFIGURATION.md#preview-limits).
+A preview runs the code of its PRs in your cluster, with no limits unless you add them. badil sets no quota or network policy on previews. To cap each preview's resources and isolate its ingress, apply the Kyverno policy in [`examples/kyverno/`](../examples/kyverno/README.md) (Kyverno v1.19.0 or later): it creates a ResourceQuota, a LimitRange and an ingress NetworkPolicy in every preview namespace. Adapt its quota numbers and its ingress controller namespace first. Details: [Preview limits](CONFIGURATION.md#preview-limits).
 
 ### Namespace guard (optional)
 
@@ -300,7 +303,7 @@ kubectl patch secret badil -n badil --type merge \
 kubectl rollout restart deployment/badil -n badil
 ```
 
-Then, where the job runs, with the CLI installed ([Install the badil CLI](#install-the-badil-cli)):
+Then, where the job runs, with the CLI installed ([Install the badil CLI](#install-the-badil-cli)). A `BADIL_SERVER` reached through the chart's Ingress needs `ingress.api: true` ([Install badil](#6-install-badil)):
 
 ```bash
 export BADIL_SERVER=https://badil.example.com BADIL_TOKEN="$BADIL_READ_TOKEN"
@@ -311,7 +314,7 @@ badil wait --repo acme/backend-1 --pr 42 --sha "$HEAD_SHA"   # or: badil wait --
 
 ### Wait for a preview in CI
 
-Both jobs pin a release, check its checksum, then run `badil wait`, which fails the job unless the preview is ready or the PR needs none.
+Both jobs pin a release, check its checksum, then run `badil wait`, which fails the job unless the preview is ready or the PR needs none. A `BADIL_SERVER` reached through the chart's Ingress needs `ingress.api: true` ([Install badil](#6-install-badil)).
 
 GitHub Actions, with the repository variable `BADIL_SERVER` and the secret `BADIL_READ_TOKEN`. The step writes the preview URLs to its `urls` output:
 
@@ -389,7 +392,7 @@ Set `preview.domain` in `badil.yaml`, create a wildcard DNS record `*.<domain>` 
 | Deliveries return 404 on `POST /` | The webhook URL lacks `/webhooks/github` | Set the App's webhook URL to `<base>/webhooks/github` |
 | Deliveries return 401 `invalid signature` | `github-webhook-secret` differs from the App's webhook secret | Make the Secret key and the App's webhook secret match, then restart badil |
 | Deliveries return 403 `installation not allowed` | `config.githubInstallationId` is wrong, or the repo is under another account | Set the ID listed by `badil verify-app`; install the App on repos of that account only |
-| Deliveries time out or fail to connect | The ingress or DNS is unreachable from GitHub | Expose the host publicly over https and check `/healthz` from outside |
+| Deliveries time out or fail to connect | The ingress or DNS is unreachable from GitHub | Expose the host publicly over https and check from outside with `curl -s -o /dev/null -w '%{http_code}' -X POST https://<host>/webhooks/github`, which answers `401` |
 | `preview reconcile failed … badil.yaml: …` in `kubectl logs -n badil deploy/badil` | `badil.yaml` is malformed; the error names the key | Fix that key in `badil.yaml` |
 | `preview reconcile skipped … reason="repo not in catalog"` | The `services.<name>.repo` URL isn't `<GITHUB_URL>/<owner>/<repo>[.git]` (`GITHUB_URL` defaults to `https://github.com`) | Fix the URL in `badil.yaml` |
 | `preview reconcile skipped … reason="fork pr"` | The PR comes from a fork | Expected: fork PRs never get a preview |

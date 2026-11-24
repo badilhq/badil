@@ -252,6 +252,30 @@ jobs:
       - name: Render badil with all components
         run: helm template t charts/badil -f charts/badil/ci/test-values.yaml --set ingress.enabled=true,ingress.host=badil.example.com,cleanup.enabled=true,metrics.serviceMonitor.enabled=true,dashboard.enabled=true
 
+      - name: Render badil ingress paths
+        run: |
+          # GitHub runs this step with bash -e and no pipefail: without it a failed helm template would print nothing.
+          set -o pipefail
+          # Prints each Ingress path as "<path> <pathType> <service port name>".
+          paths() {
+            helm template t charts/badil -f charts/badil/ci/test-values.yaml --set "ingress.enabled=true,ingress.host=badil.example.com$1" \
+              | yq -N 'select(.kind == "Ingress") | .spec.rules[].http.paths[] | .path + " " + .pathType + " " + .backend.service.port.name'
+          }
+          got=$(paths "")
+          if [ "$got" != '/webhooks/github Exact http' ]; then
+            echo '::error::expected the Ingress to route only /webhooks/github (Exact) to port http by default'
+            printf 'got:\n%s\n' "$got"
+            exit 1
+          fi
+          got=$(paths ,ingress.api=true)
+          want='/webhooks/github Exact http
+          /v1 Prefix http'
+          if [ "$got" != "$want" ]; then
+            echo '::error::expected the Ingress to route /webhooks/github (Exact) then /v1 (Prefix) to port http with ingress.api=true'
+            printf 'got:\n%s\n' "$got"
+            exit 1
+          fi
+
       - name: Render badil cleanup TTL
         run: |
           # Prints "CronJob:" then its CLEANUP_TTL as "<tag> <value>"; nothing without a CronJob.
