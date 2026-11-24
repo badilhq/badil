@@ -69,7 +69,7 @@ type cleanupStore interface {
 // cleanupCatchUp is badil cleanup's catch-up over st and f, recording no
 // metrics: it reconciles at once (reconcileNow), checking the namespace of a
 // new preview with ns as serve does.
-func cleanupCatchUp(st cleanupStore, f forge.Forge, ns namespace.Checker) *lifecycle.CatchUp {
+func cleanupCatchUp(st cleanupStore, f forge.Forge, ns lifecycle.NamespaceChecker) *lifecycle.CatchUp {
 	var m *metrics.Metrics
 	reconcile := lifecycle.ReconcileAPI{
 		Store: st, Forge: f, Recorder: m, FanOut: lifecycle.FanOutPRComments, Namespaces: ns,

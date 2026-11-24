@@ -10,7 +10,6 @@ import (
 
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
-	"github.com/badilhq/badil/internal/namespace"
 	"github.com/badilhq/badil/internal/preview"
 )
 
@@ -20,9 +19,9 @@ const namespaceInUseBody = "## ⚠️ Preview: `pricing`\n\n" +
 	"A namespace `pricing` already exists in the cluster and is not a preview, so badil does not deploy into it. " +
 	"Rename the branch, or use a `preview:<name>` label."
 
-// checker is a namespace.Checker: the names in foreign are foreign, and every
-// check fails with err when it is set. checked logs the names checked. With
-// t set, a check fails t.
+// checker is a lifecycle.NamespaceChecker: the names in foreign are foreign,
+// and every check fails with err when it is set. checked logs the names
+// checked. With t set, a check fails t.
 type checker struct {
 	foreign []string
 	err     error
@@ -43,7 +42,7 @@ func (c *checker) Foreign(_ context.Context, name string) (bool, error) {
 
 // reconcileWith reconciles a labeled event of acme/front#42 labelled
 // preview:pricing over f with the namespace check c.
-func reconcileWith(t *testing.T, f *reconcileFake, c namespace.Checker) lifecycle.ReconcileResult {
+func reconcileWith(t *testing.T, f *reconcileFake, c lifecycle.NamespaceChecker) lifecycle.ReconcileResult {
 	t.Helper()
 	api := f.api(t)
 	api.Namespaces = c
@@ -142,7 +141,7 @@ func TestReconcile_NamespaceCheckErrorFails(t *testing.T) {
 
 // deployWith deploys front to the preview pricing over f with the namespace
 // check c.
-func deployWith(t *testing.T, f *reconcileFake, c namespace.Checker) error {
+func deployWith(t *testing.T, f *reconcileFake, c lifecycle.NamespaceChecker) error {
 	t.Helper()
 	r := f.api(t)
 	api := lifecycle.DeployAPI{Store: r.Store, Forge: r.Forge, Recorder: r.Recorder, FanOut: r.FanOut, Namespaces: c}

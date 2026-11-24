@@ -30,8 +30,8 @@ func (f *cleanupForge) UpsertComment(_ context.Context, _, _ string, _ int, body
 	return nil
 }
 
-// foreignNamespaces is a namespace.Checker where every namespace is foreign.
-// checked logs the names checked.
+// foreignNamespaces is a lifecycle.NamespaceChecker where every namespace is
+// foreign. checked logs the names checked.
 type foreignNamespaces struct {
 	checked []string
 }

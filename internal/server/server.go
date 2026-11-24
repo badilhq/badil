@@ -13,7 +13,6 @@ import (
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
-	"github.com/badilhq/badil/internal/namespace"
 	"github.com/badilhq/badil/internal/status"
 )
 
@@ -32,8 +31,9 @@ func WithMetrics(m *metrics.Metrics) Option {
 }
 
 // WithNamespaces checks the namespace of each new preview through c before
-// it is written (namespace.Checker). Without it, no namespace is checked.
-func WithNamespaces(c namespace.Checker) Option {
+// it is written (lifecycle.NamespaceChecker). Without it, no namespace is
+// checked.
+func WithNamespaces(c lifecycle.NamespaceChecker) Option {
 	return func(s *Server) {
 		s.namespaces = c
 	}
@@ -83,7 +83,7 @@ type Server struct {
 	metrics *metrics.Metrics
 	// namespaces checks the namespace of a new preview, nil when none is
 	// checked.
-	namespaces  namespace.Checker
+	namespaces  lifecycle.NamespaceChecker
 	deployToken string
 	// statusToken authenticates POST /webhooks/status, "" when it is
 	// disabled.

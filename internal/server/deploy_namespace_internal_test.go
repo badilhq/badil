@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// namespaceChecker is a namespace.Checker: every namespace is foreign when
-// foreign is set, and every check fails with err when it is set.
+// namespaceChecker is a lifecycle.NamespaceChecker: every namespace is foreign
+// when foreign is set, and every check fails with err when it is set.
 type namespaceChecker struct {
 	foreign bool
 	err     error
