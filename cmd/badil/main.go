@@ -1,13 +1,11 @@
 package main
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"sync"
@@ -15,7 +13,6 @@ import (
 	"time"
 
 	"github.com/bradleyfalzon/ghinstallation/v2"
-	gh "github.com/google/go-github/v71/github"
 	"github.com/spf13/cobra"
 
 	"github.com/badilhq/badil/internal/app"
@@ -222,11 +219,11 @@ func shutdownServers(ctx context.Context, servers ...*http.Server) error {
 // newStoreAndForge builds the gitops repo store and the GitHub forge from
 // cfg (newForge). One installation transport of the GitHub App backs both the
 // API client and the store's git credentials, so its cached installation
-// token is shared. The store commits as the App's bot (commitIdentity),
-// matches pr-urls with the forge's rule, clones the gitops repo
-// cfg.GitOpsRepoURL into cfg.GitOpsCloneDir with the credentials of
-// gitopsCredentials and is configured by opts; an identity that can't be
-// resolved or a failed clone is an error.
+// token is shared. The store commits as the App's bot
+// (github.CommitIdentity), matches pr-urls with the forge's rule, clones the
+// gitops repo cfg.GitOpsRepoURL into cfg.GitOpsCloneDir with the credentials
+// of github.GitopsCredentials and is configured by opts; an identity that
+// can't be resolved or a failed clone is an error.
 func newStoreAndForge(
 	ctx context.Context, app *github.App, cfg *config.Config, opts ...store.Option,
 ) (*store.GitHubStore, *forgegithub.Forge, error) {
@@ -237,7 +234,7 @@ func newStoreAndForge(
 	st, err := store.Open(ctx, store.CloneConfig{
 		URL:         cfg.GitOpsRepoURL,
 		Dir:         cfg.GitOpsCloneDir,
-		Credentials: gitopsCredentials(cfg, itr),
+		Credentials: github.GitopsCredentials(cfg.GitOpsRepoUsername, cfg.GitOpsRepoToken, itr),
 	}, identity, opts...)
 	if err != nil {
 		return nil, nil, err
@@ -247,14 +244,14 @@ func newStoreAndForge(
 
 // newForge returns the transport of the installation cfg.InstallationID of
 // app, the GitHub forge of cfg.GitHubURL over a client on that transport, and
-// the App's bot as the gitops commit identity (commitIdentity). Every client
-// is on app's API base (github.App.Client).
+// the App's bot as the gitops commit identity (github.CommitIdentity). Every
+// client is on app's API base (github.App.Client).
 func newForge(
 	ctx context.Context, app *github.App, cfg *config.Config,
 ) (*ghinstallation.Transport, *forgegithub.Forge, store.CommitIdentity, error) {
 	itr := app.InstallationTransport(cfg.InstallationID)
 	client := app.Client(itr)
-	identity, err := commitIdentity(ctx, app.Client(app.AppsTransport()), client, cfg.GitHubURL)
+	id, err := github.CommitIdentity(ctx, app.Client(app.AppsTransport()), client, cfg.GitHubURL)
 	if err != nil {
 		return nil, nil, store.CommitIdentity{}, fmt.Errorf("gitops commit identity: %w", err)
 	}
@@ -262,69 +259,7 @@ func newForge(
 	if err != nil {
 		return nil, nil, store.CommitIdentity{}, err
 	}
-	return itr, f, identity, nil
-}
-
-// commitIdentity returns the GitHub App's bot as the author and committer of
-// the gitops commits: name <slug>[bot] and email
-// <id>+<slug>[bot]@users.noreply.<host>, where host is the host name of
-// githubURL (GITHUB_URL) without its port, the slug comes from GET /app with
-// appClient (the App JWT) and the bot user id from GET /users/<slug>[bot]
-// with installClient (the installation).
-func commitIdentity(
-	ctx context.Context, appClient, installClient *gh.Client, githubURL string,
-) (store.CommitIdentity, error) {
-	web, err := url.Parse(githubURL)
-	if err != nil {
-		return store.CommitIdentity{}, fmt.Errorf("GITHUB_URL: %w", err)
-	}
-	app, _, err := appClient.Apps.Get(ctx, "")
-	if err != nil {
-		return store.CommitIdentity{}, fmt.Errorf("GET /app: %w", err)
-	}
-	if app.GetSlug() == "" {
-		return store.CommitIdentity{}, errors.New("GET /app: no slug")
-	}
-	login := app.GetSlug() + "[bot]"
-	user, _, err := installClient.Users.Get(ctx, login)
-	if err != nil {
-		return store.CommitIdentity{}, fmt.Errorf("GET /users/%s: %w", login, err)
-	}
-	if user.GetID() == 0 {
-		return store.CommitIdentity{}, fmt.Errorf("GET /users/%s: no id", login)
-	}
-	return store.CommitIdentity{
-		Name:  login,
-		Email: fmt.Sprintf("%d+%s@users.noreply.%s", user.GetID(), login, web.Hostname()),
-	}, nil
-}
-
-// defaultGitUsername is the basic-auth username of an installation token, and
-// of GITOPS_REPO_TOKEN when GITOPS_REPO_USERNAME is unset.
-const defaultGitUsername = "x-access-token"
-
-// gitopsCredentials authenticates the store's git calls with
-// cfg.GitOpsRepoToken, as cfg.GitOpsRepoUsername or defaultGitUsername, when
-// the token is set, and as the installation of itr (gitCredentials)
-// otherwise.
-func gitopsCredentials(cfg *config.Config, itr *ghinstallation.Transport) store.CredentialProvider {
-	if cfg.GitOpsRepoToken == "" {
-		return gitCredentials(itr)
-	}
-	user := cmp.Or(cfg.GitOpsRepoUsername, defaultGitUsername)
-	return func(context.Context) (string, string, error) {
-		return user, cfg.GitOpsRepoToken, nil
-	}
-}
-
-// gitCredentials authenticates the store's git calls as the installation of
-// itr: user x-access-token, with the installation token itr caches and
-// refreshes before it expires.
-func gitCredentials(itr *ghinstallation.Transport) store.CredentialProvider {
-	return func(ctx context.Context) (string, string, error) {
-		token, err := itr.Token(ctx)
-		return defaultGitUsername, token, err
-	}
+	return itr, f, store.CommitIdentity(id), nil
 }
 
 // closeStore removes the store's clone directory when it made one, logging a
@@ -413,32 +348,7 @@ func verifyAppCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("loading PEM: %w", err)
 			}
-			client := ghApp.Client(ghApp.AppsTransport())
-
-			app, _, err := client.Apps.Get(cmd.Context(), "")
-			if err != nil {
-				return fmt.Errorf("GET /app: %w", err)
-			}
-			fmt.Fprintln(cmd.OutOrStdout(), "App credentials OK")
-			fmt.Fprintf(cmd.OutOrStdout(), "  id:    %d\n", app.GetID())
-			fmt.Fprintf(cmd.OutOrStdout(), "  slug:  %s\n", app.GetSlug())
-			fmt.Fprintf(cmd.OutOrStdout(), "  name:  %s\n", app.GetName())
-			fmt.Fprintf(cmd.OutOrStdout(), "  owner: %s\n", app.GetOwner().GetLogin())
-			fmt.Fprintf(cmd.OutOrStdout(), "  url:   %s\n", app.GetHTMLURL())
-
-			insts, _, err := client.Apps.ListInstallations(cmd.Context(), nil)
-			if err != nil {
-				return fmt.Errorf("list installations: %w", err)
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "\nInstallations (%d):\n", len(insts))
-			if len(insts) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "  (none — install the App on an account before running `badil serve`)")
-			}
-			for _, ins := range insts {
-				fmt.Fprintf(cmd.OutOrStdout(), "  - id=%d  account=%s (%s)\n",
-					ins.GetID(), ins.GetAccount().GetLogin(), ins.GetAccount().GetType())
-			}
-			return nil
+			return github.VerifyApp(cmd.Context(), ghApp, cmd.OutOrStdout())
 		},
 	}
 }
