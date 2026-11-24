@@ -158,7 +158,7 @@ func serveCmd() *cobra.Command {
 			defer closeStore(ctx, st)
 			previewStatus.Start(ctx, st)
 
-			srv := server.NewServer(f, st, cfg.DeployToken,
+			srv := server.NewServer(f, f, st, cfg.DeployToken,
 				server.WithMetrics(m), server.WithNamespaces(namespaces),
 				server.WithStatus(cfg.StatusToken, previewStatus),
 				server.WithReadToken(cfg.ReadToken), server.WithPreviewTTL(ttl), server.WithWake(wake))

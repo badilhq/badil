@@ -42,7 +42,7 @@ func TestDeploy_NamespaceRefusals(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fg := &fakeGitops{catalog: []string{"backend-1"}}
 			fg.open(t)
-			srv := NewServer(fg, fg, "test-token", withFanOut(fg), WithNamespaces(tc.c))
+			srv := NewServer(fg, nil, fg, "test-token", withFanOut(fg), WithNamespaces(tc.c))
 			rec := postDeploy(t, srv, previewBody(), "test-token")
 
 			if rec.Code != tc.status {
@@ -64,11 +64,11 @@ func TestWithNamespaces(t *testing.T) {
 	fg := &fakeGitops{}
 	fg.open(t)
 	c := namespaceChecker{foreign: true}
-	srv := NewServer(fg, fg, "test-token", WithNamespaces(c))
+	srv := NewServer(fg, nil, fg, "test-token", WithNamespaces(c))
 	if srv.reconcileAPI().Namespaces != c || srv.deployAPI().Namespaces != c {
 		t.Error("the namespace check is not on the reconcile and deploy APIs")
 	}
-	if NewServer(fg, fg, "test-token").reconcileAPI().Namespaces != nil {
+	if NewServer(fg, nil, fg, "test-token").reconcileAPI().Namespaces != nil {
 		t.Error("a namespace check without WithNamespaces")
 	}
 }

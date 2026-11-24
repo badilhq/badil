@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"maps"
-	"net/http"
 	"slices"
 	"strconv"
 	"strings"
@@ -126,10 +125,6 @@ func (f *reconcileFake) UpsertComment(_ context.Context, _, _ string, _ int, bod
 	f.calls = append(f.calls, "upsert")
 	f.upserts = append(f.upserts, body)
 	return f.upsertErr
-}
-
-func (f *reconcileFake) ParseWebhook(*http.Request) (forge.Event, error) {
-	return forge.Event{}, errors.New("unexpected ParseWebhook")
 }
 
 // fanOut records body as posted on the open PRs of a preview.

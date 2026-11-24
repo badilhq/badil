@@ -19,18 +19,18 @@ func (s *Server) countDelivery(event string, status int) {
 }
 
 // handleWebhook has the forge verify, parse and check the delivery
-// (forge.Forge.ParseWebhook), then dispatches it to a per-event handler. A
-// rejected signature gets 401, and a delivery from any other installation,
-// or without one, gets 403. Parse and dispatch failures are answered with
-// 200: the delivery is authentic and there is nothing to re-queue, so a
-// non-2xx would only flag it as failed in Recent Deliveries. GitHub does not
-// automatically redeliver failed deliveries. Every delivery is counted with
-// its status; its event is "unverified" until the signature is checked, since
-// the event type is not covered by the signature.
+// (forge.WebhookParser.ParseWebhook), then dispatches it to a per-event
+// handler. A rejected signature gets 401, and a delivery from any other
+// installation, or without one, gets 403. Parse and dispatch failures are
+// answered with 200: the delivery is authentic and there is nothing to
+// re-queue, so a non-2xx would only flag it as failed in Recent Deliveries.
+// GitHub does not automatically redeliver failed deliveries. Every delivery
+// is counted with its status; its event is "unverified" until the signature
+// is checked, since the event type is not covered by the signature.
 func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	ev, err := s.forge.ParseWebhook(r)
+	ev, err := s.webhooks.ParseWebhook(r)
 	switch {
 	case errors.Is(err, forge.ErrUnverified):
 		s.countDelivery("unverified", http.StatusUnauthorized)

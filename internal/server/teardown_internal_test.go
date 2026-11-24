@@ -32,7 +32,7 @@ func newTeardownServer(t *testing.T, fg *fakeGitops, opts ...Option) (*Server, *
 	slog.SetDefault(slog.New(capture))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 	fg.open(t)
-	return NewServer(fg, fg, "t", append([]Option{withFanOut(fg)}, opts...)...), capture
+	return NewServer(fg, nil, fg, "t", append([]Option{withFanOut(fg)}, opts...)...), capture
 }
 
 // prEvent builds a pull_request event for acme/backend-1#42 on

@@ -73,7 +73,7 @@ func newWebhookServerForInstallation(t *testing.T, allowedInstallationID int64) 
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return server.NewServer(f, nil, "test-deploy-token"), capture.Records
+	return server.NewServer(f, f, nil, "test-deploy-token"), capture.Records
 }
 
 // signedRequest builds a POST to /webhooks/github with a valid HMAC-SHA256

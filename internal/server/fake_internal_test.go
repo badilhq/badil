@@ -2,8 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
-	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -250,10 +248,6 @@ func (f *fakeGitops) ListOpenPullRequests(_ context.Context, owner, repo string)
 		defer f.afterList()
 	}
 	return f.openPRs[owner+"/"+repo], nil
-}
-
-func (f *fakeGitops) ParseWebhook(*http.Request) (forge.Event, error) {
-	return forge.Event{}, errors.New("unexpected ParseWebhook")
 }
 
 func (f *fakeGitops) FetchServiceCatalogSHA(ctx context.Context) (*store.ServiceCatalog, string, error) {

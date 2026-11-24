@@ -30,7 +30,7 @@ func validBody() string {
 func newTestServer(t *testing.T, fg *fakeGitops) *Server {
 	t.Helper()
 	fg.open(t)
-	return NewServer(fg, fg, "test-token", withFanOut(fg))
+	return NewServer(fg, nil, fg, "test-token", withFanOut(fg))
 }
 
 func postDeploy(t *testing.T, srv *Server, body, bearer string) *httptest.ResponseRecorder {
@@ -372,7 +372,7 @@ func TestDeploy_PushUnauthorized(t *testing.T) {
 	fg := &fakeGitops{badilYAML: servicesWithCap}
 	fg.open(t)
 	fg.st = st
-	rec := postDeploy(t, NewServer(fg, fg, "test-token", withFanOut(fg)), previewBody(), "test-token")
+	rec := postDeploy(t, NewServer(fg, nil, fg, "test-token", withFanOut(fg)), previewBody(), "test-token")
 
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502 (body: %s)", rec.Code, rec.Body.String())
@@ -446,7 +446,7 @@ func TestWithMetrics_NilRecordsNothing(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			fg := &fakeGitops{catalog: []string{"backend-1"}}
 			fg.open(t)
-			srv := NewServer(fg, fg, "test-token", withFanOut(fg), opt)
+			srv := NewServer(fg, nil, fg, "test-token", withFanOut(fg), opt)
 			if rec := postDeploy(t, srv, validBody(), "test-token"); rec.Code != http.StatusOK {
 				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 			}

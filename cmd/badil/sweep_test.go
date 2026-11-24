@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"net/http"
 	"slices"
 	"strconv"
 	"strings"
@@ -119,10 +118,6 @@ func (f *loopFake) ListOpenPullRequests(context.Context, string, string) ([]forg
 	defer f.mu.Unlock()
 	f.listings++
 	return f.openPRs, f.openErr
-}
-
-func (f *loopFake) ParseWebhook(*http.Request) (forge.Event, error) {
-	return forge.Event{}, errUnexpected
 }
 
 // api is the lifecycle.SweepAPI over f: its store, forge and recorder, with
@@ -385,7 +380,7 @@ func checkRunCleanup(t *testing.T, tc runCleanupCase) {
 
 func TestStartSweepLoop_TrackedByServer(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		srv := server.NewServer(nil, nil, "t")
+		srv := server.NewServer(nil, nil, nil, "t")
 		ctx, cancel := context.WithCancel(context.Background())
 		startSweepLoop(ctx, srv, (&loopFake{}).api(), &loopFake{}, nil, time.Hour, 0)
 
@@ -403,7 +398,7 @@ func TestStartSweepLoop_TrackedByServer(t *testing.T) {
 
 func TestStartSweepLoop_OffStartsNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		srv := server.NewServer(nil, nil, "t")
+		srv := server.NewServer(nil, nil, nil, "t")
 		startSweepLoop(context.Background(), srv, (&loopFake{}).api(), &loopFake{}, nil, 0, 0)
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
