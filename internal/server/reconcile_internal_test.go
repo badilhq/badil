@@ -10,6 +10,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
+	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/metrics"
 )
@@ -60,7 +61,7 @@ func reconcileFake() *fakeGitops {
 func deliver(t *testing.T, s *Server, e forge.Event) {
 	t.Helper()
 	s.handlePullRequest(context.Background(), e)
-	if err := s.WaitBackground(context.Background()); err != nil {
+	if err := s.app.WaitBackground(context.Background()); err != nil {
 		t.Fatalf("WaitBackground: %v", err)
 	}
 }
@@ -80,7 +81,7 @@ func drain(started chan string) []string {
 
 func TestReconcile_ClosedButReopenedAndLabeledDeploys(t *testing.T) {
 	fg := reconcileFake()
-	s, _ := newTeardownServer(t, fg)
+	s, _ := newTeardownServer(t, fg, app.Config{})
 	deliver(t, s, prEvent("closed"))
 
 	if fg.prCalls != 1 {
@@ -109,7 +110,7 @@ func TestReconcile_ClosedFallsBackToPayloadTeardown(t *testing.T) {
 			fg := reconcileFake()
 			tc.set(fg)
 			fg.previews = pinnedAt(teardownSlug)
-			s, capture := newTeardownServer(t, fg)
+			s, capture := newTeardownServer(t, fg, app.Config{})
 			deliver(t, s, prEvent("closed"))
 
 			if fg.prCalls != tc.wantPRCalls {
@@ -154,7 +155,7 @@ func TestReconcile_ActionsStartReconcile(t *testing.T) {
 	for _, action := range []string{"opened", "reopened", "synchronize", "labeled", "unlabeled"} {
 		t.Run(action, func(t *testing.T) {
 			fg := reconcileFake()
-			s, _ := newTeardownServer(t, fg)
+			s, _ := newTeardownServer(t, fg, app.Config{})
 			deliver(t, s, labelEvent(action, "preview", "preview"))
 
 			if got := drain(fg.started); len(got) == 0 || got[0] != "catalog" {
@@ -168,7 +169,7 @@ func TestReconcile_OtherActionsStartNothing(t *testing.T) {
 	for _, action := range []string{"edited", "assigned"} {
 		t.Run(action, func(t *testing.T) {
 			fg := reconcileFake()
-			s, _ := newTeardownServer(t, fg)
+			s, _ := newTeardownServer(t, fg, app.Config{})
 			deliver(t, s, labelEvent(action, "preview", "preview"))
 
 			if got := drain(fg.started); len(got) != 0 {
@@ -180,7 +181,7 @@ func TestReconcile_OtherActionsStartNothing(t *testing.T) {
 
 func TestReconcile_LabeledDeploysFetchedHead(t *testing.T) {
 	fg := reconcileFake()
-	s, _ := newTeardownServer(t, fg)
+	s, _ := newTeardownServer(t, fg, app.Config{})
 	deliver(t, s, labelEvent("labeled", "preview", "preview"))
 
 	if fg.prCalls != 1 {
@@ -204,7 +205,7 @@ func TestReconcile_UnlabeledTearsDownWithReason(t *testing.T) {
 	fg := reconcileFake()
 	fg.pr = fetchedPR(true, "bug")
 	fg.previews = pinnedAt("feature-pricing")
-	s, _ := newTeardownServer(t, fg)
+	s, _ := newTeardownServer(t, fg, app.Config{})
 	deliver(t, s, labelEvent("unlabeled", "preview", "bug"))
 
 	if fg.teardownSlug != "feature-pricing" || fg.teardownOwner != "acme" ||
@@ -236,7 +237,7 @@ func TestReconcile_GuardSkipsPRRead(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			fg := reconcileFake()
-			s, _ := newTeardownServer(t, fg)
+			s, _ := newTeardownServer(t, fg, app.Config{})
 			deliver(t, s, tc.e)
 
 			if fg.prCalls != 0 || fg.capturedSlug != "" || fg.teardownSlug != "" {
@@ -249,7 +250,7 @@ func TestReconcile_GuardSkipsPRRead(t *testing.T) {
 
 func TestReconcile_MissingFields(t *testing.T) {
 	fg := reconcileFake()
-	s, capture := newTeardownServer(t, fg)
+	s, capture := newTeardownServer(t, fg, app.Config{})
 	e := labelEvent("labeled", "preview", "preview")
 	e.PullRequest.Owner, e.PullRequest.Repo, e.PullRequest.FullName = "", "", ""
 	deliver(t, s, e)
@@ -272,16 +273,16 @@ func TestReconcile_WaitBackgroundCoversReconcile(t *testing.T) {
 	fg.pr = fetchedPR(false)
 	fg.previews = pinnedAt("feature-pricing")
 	fg.applyGate = make(chan struct{})
-	s, _ := newTeardownServer(t, fg)
+	s, _ := newTeardownServer(t, fg, app.Config{})
 	s.handlePullRequest(context.Background(), labelEvent("unlabeled", "preview"))
 
 	expired, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := s.WaitBackground(expired); !errors.Is(err, context.Canceled) {
+	if err := s.app.WaitBackground(expired); !errors.Is(err, context.Canceled) {
 		t.Errorf("WaitBackground while blocked = %v, want context.Canceled", err)
 	}
 	close(fg.applyGate)
-	if err := s.WaitBackground(context.Background()); err != nil {
+	if err := s.app.WaitBackground(context.Background()); err != nil {
 		t.Fatalf("WaitBackground: %v", err)
 	}
 	if fg.teardownSlug != "feature-pricing" {
@@ -293,7 +294,7 @@ func TestReconcile_PanicRecovered(t *testing.T) {
 	fg := reconcileFake()
 	fg.pr = fetchedPR(false)
 	fg.applyPanic = true
-	s, capture := newTeardownServer(t, fg)
+	s, capture := newTeardownServer(t, fg, app.Config{})
 	deliver(t, s, labelEvent("unlabeled", "preview"))
 
 	r, attrs := teardownRecord(t, capture, "preview reconcile panicked")
@@ -321,7 +322,7 @@ func waitStarted(t *testing.T, started chan string, want string) {
 
 func TestJobs_NeverOverlap(t *testing.T) {
 	fg := &fakeGitops{applyGate: make(chan struct{}), pr: closedPR(), started: make(chan string, 4)}
-	s, _ := newTeardownServer(t, fg)
+	s, _ := newTeardownServer(t, fg, app.Config{})
 	s.handlePullRequest(context.Background(), prEvent("closed"))
 	s.handlePullRequest(context.Background(), prEvent("closed"))
 
@@ -334,7 +335,7 @@ func TestJobs_NeverOverlap(t *testing.T) {
 	}
 
 	close(fg.applyGate)
-	if err := s.WaitBackground(context.Background()); err != nil {
+	if err := s.app.WaitBackground(context.Background()); err != nil {
 		t.Fatalf("WaitBackground: %v", err)
 	}
 	if got := drain(fg.started); len(got) != 2 || got[0] != "catalog" || got[1] != "apply" {
@@ -342,43 +343,15 @@ func TestJobs_NeverOverlap(t *testing.T) {
 	}
 }
 
-func TestJobs_PanicReleasesLock(t *testing.T) {
-	s, _ := newTeardownServer(t, &fakeGitops{})
-	ctx := context.Background()
-
-	started := make(chan struct{})
-	panicked := make(chan any, 1)
-	s.runJob(ctx, func(rec any) { panicked <- rec }, func(context.Context) {
-		close(started)
-		panic("job 1 panic")
-	})
-	<-started
-	done := make(chan struct{})
-	s.runJob(ctx, func(any) {}, func(context.Context) { close(done) })
-
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("job 2 never ran: the panicking job kept the lock")
-	}
-	if err := s.WaitBackground(ctx); err != nil {
-		t.Fatalf("WaitBackground: %v", err)
-	}
-	if rec := <-panicked; rec != "job 1 panic" {
-		t.Errorf("panic = %v, want job 1 panic", rec)
-	}
-}
-
 func TestJobs_TimeoutStartsAfterLock(t *testing.T) {
 	const timeout = 200 * time.Millisecond
 	fg := reconcileFake()
-	s, _ := newTeardownServer(t, fg)
-	s.jobTimeout = timeout
+	s, _ := newTeardownServer(t, fg, app.Config{JobTimeout: timeout})
 	ctx := context.Background()
 
 	started := make(chan struct{})
 	gate := make(chan struct{})
-	s.runJob(ctx, func(any) {}, func(context.Context) {
+	s.app.RunJob(ctx, func(any) {}, func(context.Context) {
 		close(started)
 		<-gate
 	})
@@ -386,7 +359,7 @@ func TestJobs_TimeoutStartsAfterLock(t *testing.T) {
 	s.handlePullRequest(ctx, labelEvent("labeled", "preview", "preview"))
 	time.Sleep(3 * timeout)
 	close(gate)
-	if err := s.WaitBackground(ctx); err != nil {
+	if err := s.app.WaitBackground(ctx); err != nil {
 		t.Fatalf("WaitBackground: %v", err)
 	}
 
@@ -398,7 +371,7 @@ func TestJobs_TimeoutStartsAfterLock(t *testing.T) {
 
 func TestReconcile_RecordsMetrics(t *testing.T) {
 	m := metrics.New()
-	s, _ := newTeardownServer(t, reconcileFake(), WithMetrics(m))
+	s, _ := newTeardownServer(t, reconcileFake(), app.Config{Metrics: m}, WithMetrics(m))
 	deliver(t, s, labelEvent("labeled", "preview", "preview"))
 
 	expected := `
@@ -409,30 +382,5 @@ badil_reconciles_total{outcome="deployed"} 1
 	err := testutil.GatherAndCompare(m.Gatherer(), strings.NewReader(expected), "badil_reconciles_total")
 	if err != nil {
 		t.Error(err)
-	}
-}
-
-func TestGo_TrackedByWaitBackground(t *testing.T) {
-	s, _ := newTeardownServer(t, reconcileFake())
-	release := make(chan struct{})
-	done := make(chan struct{})
-	s.Go(func() {
-		<-release
-		close(done)
-	})
-
-	ctx, cancel := context.WithTimeout(context.Background(), quiet)
-	defer cancel()
-	if err := s.WaitBackground(ctx); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("WaitBackground before release = %v, want deadline exceeded", err)
-	}
-	close(release)
-	if err := s.WaitBackground(context.Background()); err != nil {
-		t.Fatalf("WaitBackground: %v", err)
-	}
-	select {
-	case <-done:
-	default:
-		t.Error("WaitBackground returned before f finished")
 	}
 }

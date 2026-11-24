@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
@@ -69,7 +70,8 @@ func newStatusServer(
 	fg.open(t)
 	m := metrics.New()
 	st := status.NewMemory()
-	return NewServer(fg, nil, fg, "test-deploy-token", WithMetrics(m), WithStatus(token, st)), st, m, capture
+	a := app.New(app.Config{Store: fg, Forge: fg, Metrics: m})
+	return NewServer(a, fg, nil, fg, "test-deploy-token", WithMetrics(m), WithStatus(token, st)), st, m, capture
 }
 
 func postStatus(srv *Server, path, body, authorization string) *httptest.ResponseRecorder {

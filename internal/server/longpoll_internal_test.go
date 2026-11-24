@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/store"
 )
@@ -60,7 +61,7 @@ func assertBlocked(t *testing.T, ch <-chan answer) {
 }
 
 func TestWait_NonFinalAnswersAtTheTimeout(t *testing.T) {
-	s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("backend-1", backend42)))
+	s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("backend-1", backend42)), app.Config{})
 	s.waitTimeout = 300 * time.Millisecond
 	a := await(t, startWait(context.Background(), s, "/v1/wait?repo=acme/backend-1&pr=42"))
 	if a.code != http.StatusOK || a.resp.State != "progressing" {
@@ -81,7 +82,7 @@ func TestWait_StatusEventEndsTheWaitEarly(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.path, func(t *testing.T) {
-			s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("backend-1", backend42)))
+			s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("backend-1", backend42)), app.Config{})
 			s.waitTimeout = time.Minute
 			ch := startWait(context.Background(), s, tc.path)
 			assertBlocked(t, ch)
@@ -98,7 +99,7 @@ func TestWait_StatusEventEndsTheWaitEarly(t *testing.T) {
 }
 
 func TestWait_NonFinalStatusKeepsWaiting(t *testing.T) {
-	s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("backend-1", backend42)))
+	s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("backend-1", backend42)), app.Config{})
 	s.waitTimeout = time.Minute
 	ctx, cancel := context.WithCancel(context.Background())
 	ch := startWait(ctx, s, "/v1/previews/feature-x/wait")
@@ -110,11 +111,11 @@ func TestWait_NonFinalStatusKeepsWaiting(t *testing.T) {
 }
 
 func TestWait_OutcomeEndsTheWaitEarly(t *testing.T) {
-	s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("backend-1", backend42)))
+	s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("backend-1", backend42)), app.Config{})
 	s.waitTimeout = time.Minute
 	ch := startWait(context.Background(), s, "/v1/wait?repo=acme/front&pr=9")
 	assertBlocked(t, ch)
-	s.RecordOutcome(lifecycle.Target{Owner: "acme", Repo: "front", Number: 9},
+	s.app.RecordOutcome(lifecycle.Target{Owner: "acme", Repo: "front", Number: 9},
 		lifecycle.ReconcileResult{Outcome: lifecycle.OutcomeSkipped, Reason: lifecycle.ServiceHeldReason})
 	if a := await(t, ch); a.resp.State != "refused" || a.resp.Reason != "service held by another pr" {
 		t.Errorf("answer = %+v, want refused service held by another pr", a.resp)
@@ -125,10 +126,10 @@ func TestWait_OutcomeEndsTheWaitEarly(t *testing.T) {
 // to a commit that deletes the preview wakes its waits: the PR's wait is
 // then pending, and the slug's 404.
 func TestWait_HeadMovingFetchWakes(t *testing.T) {
-	w := NewWake()
+	w := app.NewWake()
 	fg := readFake(readBadil, pinnedEntry("backend-1", backend42))
 	fg.storeOpts = []store.Option{store.WithHeadMoved(w.Notify)}
-	s, _, _ := newReadServer(t, fg, WithWake(w))
+	s, _, _ := newReadServer(t, fg, app.Config{Wake: w})
 	s.waitTimeout = time.Minute
 	byPR := startWait(context.Background(), s, "/v1/wait?repo=acme/backend-1&pr=42")
 	bySlug := startWait(context.Background(), s, "/v1/previews/feature-x/wait")
@@ -150,7 +151,7 @@ func TestWait_HeadMovingFetchWakes(t *testing.T) {
 // TestWait_GoroutinesReturnToBaseline checks that many waits, ended by their
 // client's disconnect or by a status event, leave no goroutine behind.
 func TestWait_GoroutinesReturnToBaseline(t *testing.T) {
-	s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("backend-1", backend42)))
+	s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("backend-1", backend42)), app.Config{})
 	s.waitTimeout = time.Minute
 	baseline := runtime.NumGoroutine()
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
@@ -30,7 +31,8 @@ func validBody() string {
 func newTestServer(t *testing.T, fg *fakeGitops) *Server {
 	t.Helper()
 	fg.open(t)
-	return NewServer(fg, nil, fg, "test-token", withFanOut(fg))
+	a := app.New(app.Config{Store: fg, Forge: fg, FanOut: fakeFanOut(fg)})
+	return NewServer(a, fg, nil, fg, "test-token")
 }
 
 func postDeploy(t *testing.T, srv *Server, body, bearer string) *httptest.ResponseRecorder {
@@ -372,7 +374,8 @@ func TestDeploy_PushUnauthorized(t *testing.T) {
 	fg := &fakeGitops{badilYAML: servicesWithCap}
 	fg.open(t)
 	fg.st = st
-	rec := postDeploy(t, NewServer(fg, nil, fg, "test-token", withFanOut(fg)), previewBody(), "test-token")
+	a := app.New(app.Config{Store: fg, Forge: fg, FanOut: fakeFanOut(fg)})
+	rec := postDeploy(t, NewServer(a, fg, nil, fg, "test-token"), previewBody(), "test-token")
 
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502 (body: %s)", rec.Code, rec.Body.String())
@@ -439,14 +442,15 @@ func TestDeploy_PreviewLimitReadErrors(t *testing.T) {
 // nil *metrics.Metrics deploys a new preview, which lifecycle records through
 // the server's recorder, without recording or panicking.
 func TestWithMetrics_NilRecordsNothing(t *testing.T) {
-	for name, opt := range map[string]Option{
-		"untyped nil":          WithMetrics(nil),
-		"nil *metrics.Metrics": WithMetrics((*metrics.Metrics)(nil)),
+	for name, m := range map[string]Recorder{
+		"untyped nil":          nil,
+		"nil *metrics.Metrics": (*metrics.Metrics)(nil),
 	} {
 		t.Run(name, func(t *testing.T) {
 			fg := &fakeGitops{catalog: []string{"backend-1"}}
 			fg.open(t)
-			srv := NewServer(fg, nil, fg, "test-token", withFanOut(fg), opt)
+			a := app.New(app.Config{Store: fg, Forge: fg, Metrics: m, FanOut: fakeFanOut(fg)})
+			srv := NewServer(a, fg, nil, fg, "test-token", WithMetrics(m))
 			if rec := postDeploy(t, srv, validBody(), "test-token"); rec.Code != http.StatusOK {
 				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 			}

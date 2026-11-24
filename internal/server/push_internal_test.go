@@ -13,6 +13,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
+	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
@@ -61,7 +62,8 @@ func newPushServer(t *testing.T, fg *fakeGitops) (*Server, *metrics.Metrics, *Lo
 	m := metrics.New()
 	fg.open(t)
 	pf := &pushForge{}
-	return NewServer(pf, pf, fg, "t", WithMetrics(m), withFanOut(fg)), m, capture
+	a := app.New(app.Config{Store: fg, Forge: pf, Metrics: m, FanOut: fakeFanOut(fg)})
+	return NewServer(a, pf, pf, fg, "t", WithMetrics(m)), m, capture
 }
 
 // pushPayload is a push of ref to repo, whose default branch is main.
@@ -98,7 +100,7 @@ func push(t *testing.T, s *Server, ev forge.Event) int {
 func pushAndWait(t *testing.T, s *Server, ev forge.Event) int {
 	t.Helper()
 	code := push(t, s, ev)
-	if err := s.WaitBackground(context.Background()); err != nil {
+	if err := s.app.WaitBackground(context.Background()); err != nil {
 		t.Fatalf("WaitBackground: %v", err)
 	}
 	return code
@@ -184,11 +186,11 @@ func TestPush_WaitBackgroundWaitsForSync(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), quiet)
 	defer cancel()
-	if err := s.WaitBackground(ctx); err == nil {
+	if err := s.app.WaitBackground(ctx); err == nil {
 		t.Fatal("WaitBackground returned while the sync was running")
 	}
 	close(fg.applyGate)
-	if err := s.WaitBackground(context.Background()); err != nil {
+	if err := s.app.WaitBackground(context.Background()); err != nil {
 		t.Fatalf("WaitBackground: %v", err)
 	}
 	if got := fg.synced(); len(got) != 2 {

@@ -15,11 +15,11 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
+	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
-	"github.com/badilhq/badil/internal/server"
 	"github.com/badilhq/badil/internal/store"
 	"github.com/badilhq/badil/internal/store/storetest"
 )
@@ -380,17 +380,17 @@ func checkRunCleanup(t *testing.T, tc runCleanupCase) {
 
 func TestStartSweepLoop_TrackedByServer(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		srv := server.NewServer(nil, nil, nil, "t")
+		a := app.New(app.Config{})
 		ctx, cancel := context.WithCancel(context.Background())
-		startSweepLoop(ctx, srv, (&loopFake{}).api(), &loopFake{}, nil, time.Hour, 0)
+		startSweepLoop(ctx, a, (&loopFake{}).api(), &loopFake{}, nil, time.Hour, 0)
 
 		short, cancelShort := context.WithTimeout(context.Background(), time.Second)
 		defer cancelShort()
-		if err := srv.WaitBackground(short); !errors.Is(err, context.DeadlineExceeded) {
+		if err := a.WaitBackground(short); !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("WaitBackground with the loop running = %v, want deadline exceeded", err)
 		}
 		cancel()
-		if err := srv.WaitBackground(context.Background()); err != nil {
+		if err := a.WaitBackground(context.Background()); err != nil {
 			t.Fatalf("WaitBackground: %v", err)
 		}
 	})
@@ -398,12 +398,12 @@ func TestStartSweepLoop_TrackedByServer(t *testing.T) {
 
 func TestStartSweepLoop_OffStartsNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		srv := server.NewServer(nil, nil, nil, "t")
-		startSweepLoop(context.Background(), srv, (&loopFake{}).api(), &loopFake{}, nil, 0, 0)
+		a := app.New(app.Config{})
+		startSweepLoop(context.Background(), a, (&loopFake{}).api(), &loopFake{}, nil, 0, 0)
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		if err := srv.WaitBackground(ctx); err != nil {
+		if err := a.WaitBackground(ctx); err != nil {
 			t.Errorf("WaitBackground = %v, want nil", err)
 		}
 	})

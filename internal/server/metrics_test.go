@@ -10,6 +10,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
+	"github.com/badilhq/badil/internal/app"
 	forgegithub "github.com/badilhq/badil/internal/forge/github"
 	"github.com/badilhq/badil/internal/github"
 	"github.com/badilhq/badil/internal/metrics"
@@ -19,7 +20,7 @@ import (
 // newMetricsServer is newWebhookServer recording into a fresh *Metrics.
 func newMetricsServer(t *testing.T) (*server.Server, *metrics.Metrics) {
 	t.Helper()
-	app, err := github.NewApp(github.AppConfig{
+	ghApp, err := github.NewApp(github.AppConfig{
 		AppID:         1,
 		PrivateKey:    generateTestKey(t),
 		WebhookSecret: testWebhookSecret,
@@ -33,11 +34,12 @@ func newMetricsServer(t *testing.T) (*server.Server, *metrics.Metrics) {
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
 	m := metrics.New()
-	f, err := forgegithub.New(nil, app, testInstallationID, "https://github.com")
+	f, err := forgegithub.New(nil, ghApp, testInstallationID, "https://github.com")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return server.NewServer(f, f, nil, "test-deploy-token", server.WithMetrics(m)), m
+	a := app.New(app.Config{Forge: f, Metrics: m})
+	return server.NewServer(a, f, f, nil, "test-deploy-token", server.WithMetrics(m)), m
 }
 
 func TestWebhookMetrics(t *testing.T) {

@@ -137,8 +137,8 @@ func (s *Server) handleSlugWait(w http.ResponseWriter, r *http.Request) {
 
 // longPoll answers r with eval's response: at once when it is final,
 // errNoPreview (404) or another error (503); otherwise once a
-// re-evaluation, on each Notify of s.wake, changes its state or reason or is
-// final or an error. When
+// re-evaluation, on each Notify of the app's wake, changes its state or
+// reason or is final or an error. When
 // waitTimeout passes, or the HTTP server's shutdown starts, it answers the
 // current response. The client's disconnect ends it without an answer.
 func (s *Server) longPoll(w http.ResponseWriter, r *http.Request, eval func(context.Context) (*WaitResponse, error)) {
@@ -146,7 +146,7 @@ func (s *Server) longPoll(w http.ResponseWriter, r *http.Request, eval func(cont
 	route := routePattern(r)
 	timer := time.NewTimer(s.waitTimeout)
 	defer timer.Stop()
-	woken := s.wake.wait()
+	woken := s.app.Wake().Wait()
 	first, err := eval(ctx)
 	current := first
 	for {
@@ -171,7 +171,7 @@ func (s *Server) longPoll(w http.ResponseWriter, r *http.Request, eval func(cont
 			writeJSON(ctx, w, http.StatusOK, current)
 			return
 		case <-woken:
-			woken = s.wake.wait()
+			woken = s.app.Wake().Wait()
 			current, err = eval(ctx)
 		}
 	}
@@ -190,8 +190,8 @@ func (s *Server) evalPR(ctx context.Context, q prQuery) (*WaitResponse, error) {
 	if len(catalog.ServicesForRepo(s.forge.ParseRepoURL, q.owner, q.repo)) == 0 {
 		return newWaitResponse(stateRefused, lifecycle.RepoNotInCatalogReason, "", q.sha), nil
 	}
-	key := lifecycle.PRKey(lifecycle.Target{Owner: q.owner, Repo: q.repo, Number: q.number})
-	if o, ok := s.outcomes.get(key); ok && (q.sha == "" || shaMatch(q.sha, o.HeadSHA)) {
+	target := lifecycle.Target{Owner: q.owner, Repo: q.repo, Number: q.number}
+	if o, ok := s.app.LatestOutcome(target); ok && (q.sha == "" || shaMatch(q.sha, o.HeadSHA)) {
 		if state, reason, decided := outcomeState(o.ReconcileResult); decided {
 			return newWaitResponse(state, reason, "", cmp.Or(q.sha, o.HeadSHA)), nil
 		}

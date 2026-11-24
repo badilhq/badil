@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/lifecycle"
 )
 
@@ -34,14 +35,14 @@ func TestQueueReconcile_WaitsForWebhookReconciles(t *testing.T) {
 	fg := &fakeGitops{
 		badilYAML: servicesWithPreview, applyGate: make(chan struct{}), pr: closedPR(), started: make(chan string, 8),
 	}
-	s, _ := newTeardownServer(t, fg)
+	s, _ := newTeardownServer(t, fg, app.Config{})
 	ctx := context.Background()
 	s.handlePullRequest(ctx, prEvent("closed"))
 	waitStarted(t, fg.started, "catalog")
 	waitStarted(t, fg.started, "apply")
 
 	results := make(chan lifecycle.ReconcileResult, 1)
-	s.QueueReconcile(ctx, catchUpEvent(), func(res lifecycle.ReconcileResult) { results <- res })
+	s.app.QueueReconcile(ctx, catchUpEvent(), func(res lifecycle.ReconcileResult) { results <- res })
 	select {
 	case got := <-fg.started:
 		t.Fatalf("catch-up reconcile reached %q while the webhook reconcile held the gate", got)
@@ -49,7 +50,7 @@ func TestQueueReconcile_WaitsForWebhookReconciles(t *testing.T) {
 	}
 
 	close(fg.applyGate)
-	if err := s.WaitBackground(ctx); err != nil {
+	if err := s.app.WaitBackground(ctx); err != nil {
 		t.Fatalf("WaitBackground: %v", err)
 	}
 	if got := drain(fg.started); len(got) != 2 || got[0] != "catalog" || got[1] != "apply" {
@@ -64,10 +65,10 @@ func TestQueueReconcile_PanicIsAFailure(t *testing.T) {
 	fg := reconcileFake()
 	fg.pr = closedPR()
 	fg.applyPanic = true
-	s, capture := newTeardownServer(t, fg)
+	s, capture := newTeardownServer(t, fg, app.Config{})
 	results := make(chan lifecycle.ReconcileResult, 1)
-	s.QueueReconcile(context.Background(), catchUpEvent(), func(res lifecycle.ReconcileResult) { results <- res })
-	if err := s.WaitBackground(context.Background()); err != nil {
+	s.app.QueueReconcile(context.Background(), catchUpEvent(), func(res lifecycle.ReconcileResult) { results <- res })
+	if err := s.app.WaitBackground(context.Background()); err != nil {
 		t.Fatalf("WaitBackground: %v", err)
 	}
 

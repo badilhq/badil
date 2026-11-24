@@ -294,12 +294,10 @@ func (f *fakeGitops) invalidated() (int, int) {
 	return f.invalidations, f.catalogInvalidations
 }
 
-// withFanOut plugs f's FanOutPRComments in as the server's fan-out.
-func withFanOut(f *fakeGitops) Option {
-	return func(s *Server) {
-		s.fanOut = func(ctx context.Context, _ forge.Forge, vals preview.Values, body string) error {
-			return f.FanOutPRComments(ctx, vals, body)
-		}
+// fakeFanOut is the fan-out that calls f's FanOutPRComments.
+func fakeFanOut(f *fakeGitops) lifecycle.FanOutFunc {
+	return func(ctx context.Context, _ forge.Forge, vals preview.Values, body string) error {
+		return f.FanOutPRComments(ctx, vals, body)
 	}
 }
 

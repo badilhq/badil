@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/badilhq/badil/internal/app"
 	forgegithub "github.com/badilhq/badil/internal/forge/github"
 	"github.com/badilhq/badil/internal/github"
 	"github.com/badilhq/badil/internal/server"
@@ -55,7 +56,7 @@ func newWebhookServer(t *testing.T) (*server.Server, func() []slog.Record) {
 // allowed installation ID.
 func newWebhookServerForInstallation(t *testing.T, allowedInstallationID int64) (*server.Server, func() []slog.Record) {
 	t.Helper()
-	app, err := github.NewApp(github.AppConfig{
+	ghApp, err := github.NewApp(github.AppConfig{
 		AppID:         1,
 		PrivateKey:    generateTestKey(t),
 		WebhookSecret: testWebhookSecret,
@@ -69,11 +70,12 @@ func newWebhookServerForInstallation(t *testing.T, allowedInstallationID int64) 
 	slog.SetDefault(slog.New(capture))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
-	f, err := forgegithub.New(nil, app, allowedInstallationID, "https://github.com")
+	f, err := forgegithub.New(nil, ghApp, allowedInstallationID, "https://github.com")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return server.NewServer(f, f, nil, "test-deploy-token"), capture.Records
+	a := app.New(app.Config{Forge: f})
+	return server.NewServer(a, f, f, nil, "test-deploy-token"), capture.Records
 }
 
 // signedRequest builds a POST to /webhooks/github with a valid HMAC-SHA256

@@ -129,7 +129,7 @@ func (s *Server) handleStatusEvent(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if recorded {
-			s.wake.Notify()
+			s.app.Wake().Notify()
 		}
 	}
 
