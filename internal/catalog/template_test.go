@@ -1,11 +1,11 @@
-package store_test
+package catalog_test
 
 import (
 	"os"
 	"reflect"
 	"testing"
 
-	"github.com/badilhq/badil/internal/store"
+	"github.com/badilhq/badil/internal/catalog"
 )
 
 // TestParseCatalog_ShippedFiles parses the badil.yaml files badil ships: the
@@ -24,7 +24,7 @@ func TestParseCatalog_ShippedFiles(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			c, err := store.ParseCatalog(raw)
+			c, err := catalog.Parse(raw)
 			if err != nil {
 				t.Fatalf("ParseCatalog: %v", err)
 			}
