@@ -9,7 +9,7 @@ import (
 )
 
 // partNames returns the service names then the dependency names of vals.
-func partNames(vals preview.PreviewValues) []string {
+func partNames(vals preview.Values) []string {
 	var out []string
 	for _, s := range vals.Services {
 		out = append(out, s.Name)

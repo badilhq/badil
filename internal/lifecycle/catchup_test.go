@@ -110,7 +110,7 @@ func TestCatchUp_DecisionOrder(t *testing.T) {
 	emptyNamed := listed(7, "s7", "preview:")
 	f := &reconcileFake{
 		Metrics: metrics.New(),
-		previews: map[string]*preview.PreviewValues{
+		previews: map[string]*preview.Values{
 			"feature-3": values(pinnedAt(pinned, "s3")),
 			"feature-4": values(pinnedAt(stale, "old")),
 			"a":         values(pinnedAt(conflict, "s5")),
@@ -166,7 +166,7 @@ func TestCatchUp_PinnedPRURLInAnotherCase(t *testing.T) {
 	entry := pinnedBy("front", "https://github.com/Acme/Front/pull/7")
 	entry.CommitSha = "s7"
 	f := &reconcileFake{
-		previews: map[string]*preview.PreviewValues{"feature-7": values(entry)},
+		previews: map[string]*preview.Values{"feature-7": values(entry)},
 		openPRs:  map[string][]forge.PullRequest{"acme/front": {pr}},
 	}
 	r := &reconciles{}

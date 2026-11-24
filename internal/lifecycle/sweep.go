@@ -23,7 +23,7 @@ const (
 type SweepStore interface {
 	Applier
 	ListPreviews(ctx context.Context) ([]string, error)
-	GetPreview(ctx context.Context, slug string) (*preview.PreviewValues, string, error)
+	GetPreview(ctx context.Context, slug string) (*preview.Values, string, error)
 }
 
 // SweepAPI is what Sweep uses: the store, the forge, the Recorder and the
@@ -165,7 +165,7 @@ type sweepPlan struct {
 type sweepDelete struct {
 	slug string
 	rule string
-	vals preview.PreviewValues
+	vals preview.Values
 }
 
 // sweepSync is a preview step 4 rewrote.
@@ -402,7 +402,7 @@ func afterSync(
 }
 
 // hasPin reports whether any entry of vals is pinned to a commit.
-func hasPin(vals preview.PreviewValues) bool {
+func hasPin(vals preview.Values) bool {
 	for _, svc := range vals.Services {
 		if svc.CommitSha != "" {
 			return true
@@ -413,7 +413,7 @@ func hasPin(vals preview.PreviewValues) bool {
 
 // expired reports whether the newest updated-at of vals' pinned entries is
 // before cutoff. A preview without a parseable updated-at never expires.
-func expired(vals preview.PreviewValues, cutoff time.Time) bool {
+func expired(vals preview.Values, cutoff time.Time) bool {
 	last, ok := preview.LastDeploy(vals)
 	return ok && last.Before(cutoff)
 }
@@ -421,7 +421,7 @@ func expired(vals preview.PreviewValues, cutoff time.Time) bool {
 // pinnedPRs returns one Target per distinct PR referenced by a pinned entry of
 // vals, in file order. PRs compare on lowercase owner/repo and number. Entries
 // without metadata or with a pr-url parse rejects are skipped.
-func pinnedPRs(parse preview.PRURLParser, slug string, vals preview.PreviewValues) []Target {
+func pinnedPRs(parse preview.PRURLParser, slug string, vals preview.Values) []Target {
 	var targets []Target
 	seen := map[string]bool{}
 	for _, svc := range vals.Services {

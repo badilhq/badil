@@ -38,7 +38,7 @@ type served struct {
 // holding feature-x, pinned by acme/backend-1#42 with no status yet.
 func serveWaits(t *testing.T) served {
 	t.Helper()
-	previews := map[string]*preview.PreviewValues{"feature-x": {Services: []preview.ServiceEntry{{
+	previews := map[string]*preview.Values{"feature-x": {Services: []preview.ServiceEntry{{
 		Name: "backend-1", CommitSha: "abc1234",
 		Metadata: &preview.Metadata{PRURL: "https://github.com/acme/backend-1/pull/42"},
 	}}}}

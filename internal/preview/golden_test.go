@@ -15,6 +15,8 @@ import (
 // current encoder output instead of asserting against it. Use sparingly:
 //
 //	go test -run TestGoldenYAML -update ./internal/preview
+//
+//nolint:gochecknoglobals // go test parses -update before any test runs, so the flag is registered at package init
 var updateGolden = flag.Bool("update", false, "rewrite golden fixture from current output")
 
 // goldenRepos is the catalog's service repos for the golden fixture.

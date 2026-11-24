@@ -30,10 +30,14 @@ import (
 // through redirectURL; ngrokAPI is the well-known local URL of the ngrok
 // inspector.
 const (
-	manifestServerHost = "127.0.0.1"
-	ngrokAPI           = "http://127.0.0.1:4040/api/tunnels"
-	manifestTimeout    = 5 * time.Minute
-	webhookPath        = "/webhooks/github"
+	manifestServerHost        = "127.0.0.1"
+	ngrokAPI                  = "http://127.0.0.1:4040/api/tunnels"
+	manifestTimeout           = 5 * time.Minute
+	webhookPath               = "/webhooks/github"
+	stateBytes                = 16 // random bytes of the manifest flow's state
+	deployTokenBytes          = 32 // random bytes of BADIL_DEPLOY_TOKEN
+	callbackReadHeaderTimeout = 5 * time.Second
+	ngrokTimeout              = 2 * time.Second
 )
 
 // bootstrapAppCmd creates a GitHub App via the manifest flow and writes its
@@ -127,9 +131,9 @@ func runBootstrap(ctx context.Context, stdin io.Reader, stdout io.Writer, opts b
 	}
 	fmt.Fprintln(stdout)
 
-	state := randomHex(16)
+	state := randomHex(stateBytes)
 
-	ln, err := net.Listen("tcp", manifestServerHost+":0")
+	ln, err := new(net.ListenConfig).Listen(ctx, "tcp", manifestServerHost+":0")
 	if err != nil {
 		return fmt.Errorf("listening: %w", err)
 	}
@@ -163,7 +167,7 @@ func runBootstrap(ctx context.Context, stdin io.Reader, stdout io.Writer, opts b
 	errCh := make(chan error, 1)
 	srv := &http.Server{
 		Handler:           bootstrapMux(string(manifestJSON), state, opts.owner, opts.githubURL, codeCh, errCh),
-		ReadHeaderTimeout: 5 * time.Second,
+		ReadHeaderTimeout: callbackReadHeaderTimeout,
 	}
 	go func() {
 		if serveErr := srv.Serve(ln); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
@@ -186,6 +190,12 @@ func runBootstrap(ctx context.Context, stdin io.Reader, stdout io.Writer, opts b
 		return fmt.Errorf("timed out waiting for GitHub callback: %w", ctx.Err())
 	}
 
+	return completeApp(ctx, stdout, opts, code)
+}
+
+// completeApp exchanges the manifest code for the App's credentials, writes
+// the PEM and .env files and prints the next steps.
+func completeApp(ctx context.Context, stdout io.Writer, opts bootstrapOpts, code string) error {
 	client, err := github.NewClient(opts.githubAPIURL)
 	if err != nil {
 		return fmt.Errorf("GITHUB_API_URL: %w", err)
@@ -201,7 +211,7 @@ func runBootstrap(ctx context.Context, stdin io.Reader, stdout io.Writer, opts b
 	if writeErr := os.WriteFile(opts.pemPath, []byte(conv.GetPEM()), 0o600); writeErr != nil {
 		return fmt.Errorf("writing PEM: %w", writeErr)
 	}
-	deployToken := randomHex(32)
+	deployToken := randomHex(deployTokenBytes)
 	envBody := renderEnv(envValues{
 		AppID:         conv.GetID(),
 		PEMPath:       opts.pemPath,
@@ -384,10 +394,17 @@ func resolveWebhookURL(flag string, ngrok func() (string, error)) (string, error
 // readNgrokTunnel queries the local ngrok inspector for the first https
 // public_url. Fails fast with an actionable message if ngrok isn't running.
 func readNgrokTunnel() (string, error) {
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get(ngrokAPI)
+	unreachable := func(err error) error {
+		return fmt.Errorf("ngrok inspector not reachable at %s — is `ngrok http 8080` running? (%w)", ngrokAPI, err)
+	}
+	client := &http.Client{Timeout: ngrokTimeout}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, ngrokAPI, nil)
 	if err != nil {
-		return "", fmt.Errorf("ngrok inspector not reachable at %s — is `ngrok http 8080` running? (%w)", ngrokAPI, err)
+		return "", unreachable(err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", unreachable(err)
 	}
 	defer resp.Body.Close()
 	var body struct {
@@ -451,13 +468,14 @@ export LISTEN_ADDR=:8080
 // non-fatal; the URL is printed so the user can open it by hand.
 func openBrowser(url string) error {
 	var cmd *exec.Cmd
+	// The browser outlives the command: no context may kill it.
 	switch runtime.GOOS {
 	case "darwin":
-		cmd = exec.Command("open", url)
+		cmd = exec.CommandContext(context.Background(), "open", url)
 	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+		cmd = exec.CommandContext(context.Background(), "rundll32", "url.dll,FileProtocolHandler", url)
 	default:
-		cmd = exec.Command("xdg-open", url)
+		cmd = exec.CommandContext(context.Background(), "xdg-open", url)
 	}
 	return cmd.Start()
 }

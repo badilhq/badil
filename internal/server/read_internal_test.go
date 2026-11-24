@@ -80,7 +80,7 @@ func pinnedEntry(service, prURL string) preview.ServiceEntry {
 func readFake(badil string, pinned preview.ServiceEntry) *fakeGitops {
 	return &fakeGitops{
 		badilYAML: badil,
-		previews: map[string]*preview.PreviewValues{
+		previews: map[string]*preview.Values{
 			"feature-x": {Services: []preview.ServiceEntry{pinned}},
 			"bare":      {},
 		},
@@ -465,7 +465,10 @@ func TestRecordCatchUpSkip_ListingTime(t *testing.T) {
 		listedAt      func(recorded time.Time) time.Time
 		state, reason string
 	}{
-		{name: "listed before", listedAt: func(r time.Time) time.Time { return r.Add(-time.Second) }, state: "progressing"},
+		{
+			name: "listed before", listedAt: func(r time.Time) time.Time { return r.Add(-time.Second) },
+			state: "progressing",
+		},
 		{name: "listed at", listedAt: func(r time.Time) time.Time { return r }, state: "progressing"},
 		{
 			name: "listed after", listedAt: func(r time.Time) time.Time { return r.Add(time.Second) },

@@ -46,7 +46,7 @@ type syncFake struct {
 // broken.
 func newSyncFake(t *testing.T, unchanged, changed, broken []string) *syncFake {
 	t.Helper()
-	previews := map[string]*preview.PreviewValues{}
+	previews := map[string]*preview.Values{}
 	for _, slug := range unchanged {
 		previews[slug] = values(pin("backend-1", pr42, recent))
 	}
@@ -119,7 +119,7 @@ func (f *syncFake) api() lifecycle.SyncAPI {
 		Store:    f,
 		Forge:    storetest.GitHubForge,
 		Recorder: f,
-		FanOut: func(context.Context, forge.Forge, preview.PreviewValues, string) error {
+		FanOut: func(context.Context, forge.Forge, preview.Values, string) error {
 			return nil
 		},
 	}

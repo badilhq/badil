@@ -13,7 +13,7 @@ import (
 // AppConfig holds the configuration for a GitHub App.
 type AppConfig struct {
 	AppID         int64
-	PrivateKey    []byte //nolint:gosec // intentional field name for PEM-encoded RSA private key
+	PrivateKey    []byte
 	WebhookSecret string
 	// APIURL is the API base of the GitHub host (GITHUB_API_URL), "" or
 	// DefaultAPIURL for the default.

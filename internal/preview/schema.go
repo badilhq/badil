@@ -2,12 +2,18 @@ package preview
 
 import "github.com/invopop/jsonschema"
 
+// nameKey is the yaml key of the name of a service entry, a dependency and a dependency chart.
+const nameKey = "name"
+
+// repoURLKey is the yaml key of the repo URL of a service entry and a dependency chart.
+const repoURLKey = "repoURL"
+
 // JSONSchemaExtend sets the constraints of a service entry that reflection
 // does not produce: name, repoURL, branch, imageTag and chart are required,
 // imageTag is non-empty, and commitSha and metadata are set together (a
 // pinned entry carries both).
 func (ServiceEntry) JSONSchemaExtend(s *jsonschema.Schema) {
-	s.Required = []string{"name", "repoURL", "branch", "imageTag", "chart"}
+	s.Required = []string{nameKey, repoURLKey, "branch", "imageTag", "chart"}
 	s.DependentRequired = map[string][]string{
 		"commitSha": {"metadata"},
 		"metadata":  {"commitSha"},
@@ -55,7 +61,7 @@ func (Metadata) JSONSchemaExtend(s *jsonschema.Schema) {
 // dependencies, rejects other root keys, fixes apiVersion to APIVersion and
 // makes gitopsRepoURL non-empty: the published contract of a preview values
 // file.
-func (PreviewValues) JSONSchemaExtend(s *jsonschema.Schema) {
+func (Values) JSONSchemaExtend(s *jsonschema.Schema) {
 	s.Required = []string{"apiVersion", "gitopsRepoURL", "services", "dependencies"}
 	s.AdditionalProperties = jsonschema.FalseSchema
 	if p, ok := s.Properties.Get("apiVersion"); ok {
@@ -70,13 +76,13 @@ func (PreviewValues) JSONSchemaExtend(s *jsonschema.Schema) {
 // valueFiles, when present, a non-empty list, and requires host and
 // hostParam together. values stays a free-form object.
 func (DependencyEntry) JSONSchemaExtend(s *jsonschema.Schema) {
-	s.Required = []string{"name", "chart"}
+	s.Required = []string{nameKey, "chart"}
 	const host, hostParam = "host", "hostParam"
 	s.DependentRequired = map[string][]string{
 		host:      {hostParam},
 		hostParam: {host},
 	}
-	for _, name := range []string{"name", hostParam, host} {
+	for _, name := range []string{nameKey, hostParam, host} {
 		if p, ok := s.Properties.Get(name); ok {
 			p.MinLength = new(uint64(1))
 		}
@@ -88,22 +94,22 @@ func (DependencyEntry) JSONSchemaExtend(s *jsonschema.Schema) {
 // oci:// or https:// URL. name is rejected with an OCIScheme repoURL and
 // required otherwise.
 func (DependencyChart) JSONSchemaExtend(s *jsonschema.Schema) {
-	s.Required = []string{"repoURL", "version"}
-	for _, name := range []string{"repoURL", "name", "version"} {
+	s.Required = []string{repoURLKey, "version"}
+	for _, name := range []string{repoURLKey, nameKey, "version"} {
 		if p, ok := s.Properties.Get(name); ok {
 			p.MinLength = new(uint64(1))
 		}
 	}
-	if p, ok := s.Properties.Get("repoURL"); ok {
+	if p, ok := s.Properties.Get(repoURLKey); ok {
 		p.Pattern = "^(oci|https)://"
 	}
 	oci := jsonschema.NewProperties()
-	oci.Set("repoURL", &jsonschema.Schema{Pattern: "^" + OCIScheme})
+	oci.Set(repoURLKey, &jsonschema.Schema{Pattern: "^" + OCIScheme})
 	noName := jsonschema.NewProperties()
-	noName.Set("name", jsonschema.FalseSchema)
+	noName.Set(nameKey, jsonschema.FalseSchema)
 	s.If = &jsonschema.Schema{Properties: oci}
 	s.Then = &jsonschema.Schema{Properties: noName}
-	s.Else = &jsonschema.Schema{Required: []string{"name"}}
+	s.Else = &jsonschema.Schema{Required: []string{nameKey}}
 }
 
 // reserve maps each of keys to the false schema in the properties of s, so

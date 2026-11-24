@@ -90,7 +90,7 @@ func (f *loopFake) counts() (int, int) {
 	return f.calls, f.maxActive
 }
 
-func (f *loopFake) GetPreview(context.Context, string) (*preview.PreviewValues, string, error) {
+func (f *loopFake) GetPreview(context.Context, string) (*preview.Values, string, error) {
 	return nil, "", store.ErrNotFound
 }
 
@@ -106,7 +106,7 @@ func (f *loopFake) UpsertComment(context.Context, string, string, int, string) e
 	return errUnexpected
 }
 
-func (f *loopFake) FanOutPRComments(context.Context, preview.PreviewValues, string) error {
+func (f *loopFake) FanOutPRComments(context.Context, preview.Values, string) error {
 	return errUnexpected
 }
 
@@ -132,7 +132,7 @@ func (f *loopFake) api() lifecycle.SweepAPI {
 		Store:    f,
 		Forge:    f,
 		Recorder: f,
-		FanOut: func(ctx context.Context, _ forge.Forge, vals preview.PreviewValues, body string) error {
+		FanOut: func(ctx context.Context, _ forge.Forge, vals preview.Values, body string) error {
 			return f.FanOutPRComments(ctx, vals, body)
 		},
 	}
@@ -316,20 +316,23 @@ func TestRunSweepLoop_NoCatchUpAfterShutdown(t *testing.T) {
 	})
 }
 
+// runCleanupCase is a case of TestRunCleanup_ExitsWithTheSweepsError.
+type runCleanupCase struct {
+	name      string
+	listErr   error
+	openErr   error
+	openPRs   []forge.PullRequest
+	sweepDone bool
+	wantErr   string
+	wantLog   string
+}
+
 func TestRunCleanup_ExitsWithTheSweepsError(t *testing.T) {
 	labelled := forge.PullRequest{
 		Open: true, HeadRef: "feature/x", HeadSHA: "abc", URL: "https://github.com/acme/front/pull/7",
 		Labels: []string{"preview"}, FullName: "acme/front", HeadFullName: "acme/front", Number: 7,
 	}
-	cases := []struct {
-		name      string
-		listErr   error
-		openErr   error
-		openPRs   []forge.PullRequest
-		sweepDone bool
-		wantErr   string
-		wantLog   string
-	}{
+	cases := []runCleanupCase{
 		{name: "failed sweep", listErr: errors.New("boom"), wantErr: "boom"},
 		{
 			name: "sweep out of time", sweepDone: true, listErr: context.DeadlineExceeded,
@@ -346,34 +349,37 @@ func TestRunCleanup_ExitsWithTheSweepsError(t *testing.T) {
 		},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			logs := captureText(t)
-			f := &loopFake{listErr: tc.listErr, openErr: tc.openErr, openPRs: tc.openPRs}
-			reconcile := reconcileNow(lifecycle.ReconcileAPI{Store: f, Forge: f, Recorder: f, FanOut: f.api().FanOut})
-			c := lifecycle.NewCatchUp(lifecycle.CatchUpAPI{Store: f, Forge: f, Recorder: f}, reconcile)
-			sweepCtx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			if tc.sweepDone {
-				cancel()
-			}
+		t.Run(tc.name, func(t *testing.T) { checkRunCleanup(t, tc) })
+	}
+}
 
-			err := runCleanup(context.Background(), sweepCtx, f.api(), c, time.Now(), 0)
-			if tc.wantErr == "" && err != nil {
-				t.Errorf("runCleanup = %v, want nil", err)
-			}
-			if tc.wantErr != "" && (err == nil || err.Error() != tc.wantErr) {
-				t.Errorf("runCleanup = %v, want the sweep's %q", err, tc.wantErr)
-			}
-			if f.listings != 1 {
-				t.Errorf("catch-up listings = %d, want 1", f.listings)
-			}
-			if tc.wantLog != "" && !strings.Contains(logs.String(), `msg="`+tc.wantLog+`"`) {
-				t.Errorf("logs = %s, want %q", logs, tc.wantLog)
-			}
-			if !strings.Contains(logs.String(), `msg=catch-up `) {
-				t.Errorf("logs = %s, want the catch-up line", logs)
-			}
-		})
+// checkRunCleanup runs the case tc of TestRunCleanup_ExitsWithTheSweepsError.
+func checkRunCleanup(t *testing.T, tc runCleanupCase) {
+	logs := captureText(t)
+	f := &loopFake{listErr: tc.listErr, openErr: tc.openErr, openPRs: tc.openPRs}
+	reconcile := reconcileNow(lifecycle.ReconcileAPI{Store: f, Forge: f, Recorder: f, FanOut: f.api().FanOut})
+	c := lifecycle.NewCatchUp(lifecycle.CatchUpAPI{Store: f, Forge: f, Recorder: f}, reconcile)
+	sweepCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if tc.sweepDone {
+		cancel()
+	}
+
+	err := runCleanup(context.Background(), sweepCtx, f.api(), c, time.Now(), 0)
+	if tc.wantErr == "" && err != nil {
+		t.Errorf("runCleanup = %v, want nil", err)
+	}
+	if tc.wantErr != "" && (err == nil || err.Error() != tc.wantErr) {
+		t.Errorf("runCleanup = %v, want the sweep's %q", err, tc.wantErr)
+	}
+	if f.listings != 1 {
+		t.Errorf("catch-up listings = %d, want 1", f.listings)
+	}
+	if tc.wantLog != "" && !strings.Contains(logs.String(), `msg="`+tc.wantLog+`"`) {
+		t.Errorf("logs = %s, want %q", logs, tc.wantLog)
+	}
+	if !strings.Contains(logs.String(), `msg=catch-up `) {
+		t.Errorf("logs = %s, want the catch-up line", logs)
 	}
 }
 
@@ -443,17 +449,20 @@ func TestParseCleanupInterval(t *testing.T) {
 	}
 }
 
+// countPreviewsCase is a case of TestCountPreviews.
+type countPreviewsCase struct {
+	name        string
+	metrics     bool
+	listErr     error
+	block       bool
+	wantCalls   int
+	want        float64
+	wantElapsed time.Duration
+	wantLog     string
+}
+
 func TestCountPreviews(t *testing.T) {
-	cases := []struct {
-		name        string
-		metrics     bool
-		listErr     error
-		block       bool
-		wantCalls   int
-		want        float64
-		wantElapsed time.Duration
-		wantLog     string
-	}{
+	cases := []countPreviewsCase{
 		{name: "metrics enabled", metrics: true, wantCalls: 1, want: 2},
 		{name: "metrics disabled"},
 		{
@@ -467,37 +476,38 @@ func TestCountPreviews(t *testing.T) {
 		},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				logs := captureText(t)
+		t.Run(tc.name, func(t *testing.T) { synctest.Test(t, func(t *testing.T) { checkCountPreviews(t, tc) }) })
+	}
+}
 
-				f := &loopFake{slugs: []string{"a", "b"}, listErr: tc.listErr}
-				if tc.block {
-					f.block = make(chan struct{})
-				}
-				var m *metrics.Metrics
-				if tc.metrics {
-					m = metrics.New()
-					m.PreviewsListed(1)
-				}
+// checkCountPreviews runs the case tc of TestCountPreviews.
+func checkCountPreviews(t *testing.T, tc countPreviewsCase) {
+	logs := captureText(t)
 
-				start := time.Now()
-				countPreviews(context.Background(), f, m)
+	f := &loopFake{slugs: []string{"a", "b"}, listErr: tc.listErr}
+	if tc.block {
+		f.block = make(chan struct{})
+	}
+	var m *metrics.Metrics
+	if tc.metrics {
+		m = metrics.New()
+		m.PreviewsListed(1)
+	}
 
-				if elapsed := time.Since(start); elapsed != tc.wantElapsed {
-					t.Errorf("countPreviews returned after %v, want %v", elapsed, tc.wantElapsed)
-				}
-				if calls, _ := f.counts(); calls != tc.wantCalls {
-					t.Errorf("listings = %d, want %d", calls, tc.wantCalls)
-				}
-				if m != nil {
-					assertPreviews(t, m, tc.want)
-				}
-				if got := strings.TrimSpace(logs.String()); got != tc.wantLog {
-					t.Errorf("logs = %q, want %q", got, tc.wantLog)
-				}
-			})
-		})
+	start := time.Now()
+	countPreviews(context.Background(), f, m)
+
+	if elapsed := time.Since(start); elapsed != tc.wantElapsed {
+		t.Errorf("countPreviews returned after %v, want %v", elapsed, tc.wantElapsed)
+	}
+	if calls, _ := f.counts(); calls != tc.wantCalls {
+		t.Errorf("listings = %d, want %d", calls, tc.wantCalls)
+	}
+	if m != nil {
+		assertPreviews(t, m, tc.want)
+	}
+	if got := strings.TrimSpace(logs.String()); got != tc.wantLog {
+		t.Errorf("logs = %q, want %q", got, tc.wantLog)
 	}
 }
 

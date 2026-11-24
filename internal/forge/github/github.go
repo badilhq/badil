@@ -64,9 +64,9 @@ func classifyHTTPError(resp *gh.Response, err error) error {
 	}
 	switch resp.StatusCode {
 	case http.StatusNotFound:
-		return fmt.Errorf("%w: %v", forge.ErrNotFound, err)
+		return fmt.Errorf("%w: %w", forge.ErrNotFound, err)
 	case http.StatusUnauthorized, http.StatusForbidden:
-		return fmt.Errorf("%w: %v", forge.ErrUnauthorized, err)
+		return fmt.Errorf("%w: %w", forge.ErrUnauthorized, err)
 	}
 	return err
 }

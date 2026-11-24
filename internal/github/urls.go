@@ -26,14 +26,23 @@ func ParseWebURL(raw string) (string, error) {
 		return "", fmt.Errorf("must not have a path, got %q", u.EscapedPath())
 	}
 	host := strings.ToLower(u.Host)
-	if port := u.Port(); port == "" || port == defaultPorts[u.Scheme] {
+	if port := u.Port(); port == "" || port == defaultPort(u.Scheme) {
 		host = strings.TrimSuffix(strings.TrimSuffix(host, port), ":")
 	}
 	return u.Scheme + "://" + host, nil
 }
 
-// defaultPorts are the ports ParseWebURL drops, by scheme.
-var defaultPorts = map[string]string{"https": "443", "http": "80"}
+// defaultPort returns the port ParseWebURL drops for scheme, "" for none.
+func defaultPort(scheme string) string {
+	switch scheme {
+	case "https":
+		return "443"
+	case "http":
+		return "80"
+	default:
+		return ""
+	}
+}
 
 // ValidateAPIURL validates raw as a GITHUB_API_URL: an https or http URL with
 // a host, no user info, query or fragment, and any path. Its error reads after

@@ -12,12 +12,13 @@ make test
 make lint    # golangci-lint
 ```
 
-Two checks are required before merge, on every PR:
+Three checks are required before merge, on every PR:
 
 - `test` (`CI` workflow): gofmt, `go vet`, `go build` and `go test -race`.
 - `lint` (`Charts` workflow): `helm lint`, `ct lint` and chart render checks.
+- `golangci-lint` (`CI` workflow): golangci-lint with `.golangci.yml`.
 
-CI does not run golangci-lint; run `make lint` locally.
+Run `make lint` before pushing; the `golangci-lint` check runs the same linters.
 
 ## Pull requests
 

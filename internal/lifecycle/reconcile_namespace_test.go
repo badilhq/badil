@@ -86,7 +86,7 @@ func TestReconcile_NamespaceNotCheckedForExistingPreview(t *testing.T) {
 	capture := captureLogs(t)
 	f := &reconcileFake{
 		pr:       fetchedPR("front", true, "preview:pricing"),
-		previews: map[string]*preview.PreviewValues{"pricing": values(preview.ServiceEntry{Name: "api"})},
+		previews: map[string]*preview.Values{"pricing": values(preview.ServiceEntry{Name: "api"})},
 	}
 	res := reconcileWith(t, f, &checker{t: t})
 
@@ -162,7 +162,7 @@ func TestDeployPR_NamespaceNotCheckedForExistingPreview(t *testing.T) {
 	captureLogs(t)
 	f := &reconcileFake{
 		Metrics:  metrics.New(),
-		previews: map[string]*preview.PreviewValues{"pricing": values(preview.ServiceEntry{Name: "api"})},
+		previews: map[string]*preview.Values{"pricing": values(preview.ServiceEntry{Name: "api"})},
 	}
 	if err := deployWith(t, f, &checker{t: t}); err != nil {
 		t.Fatalf("deploy: %v", err)

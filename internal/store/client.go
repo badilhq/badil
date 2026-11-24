@@ -128,10 +128,11 @@ func Open(
 }
 
 // RepoFullName returns the full name of a repo from its URL path: the path
-// without its leading "/", a trailing "/" and then a trailing ".git". ok is
-// false when that leaves fewer than two segments or an empty one.
-func RepoFullName(path string) (fullName string, ok bool) {
-	fullName = strings.TrimPrefix(path, "/")
+// without its leading "/", a trailing "/" and then a trailing ".git". The
+// second result is false when that leaves fewer than two segments or an empty
+// one.
+func RepoFullName(path string) (string, bool) {
+	fullName := strings.TrimPrefix(path, "/")
 	fullName = strings.TrimSuffix(strings.TrimSuffix(fullName, "/"), ".git")
 	segments := strings.Split(fullName, "/")
 	return fullName, len(segments) >= 2 && !slices.Contains(segments, "")
@@ -223,7 +224,7 @@ func previewPath(slug string) string {
 // GetPreview reads previews/<slug>/values.yaml from the gitops clone and
 // returns the parsed values plus the file's blob SHA. Returns ErrNotFound
 // when the file does not exist.
-func (c *GitHubStore) GetPreview(ctx context.Context, slug string) (*preview.PreviewValues, string, error) {
+func (c *GitHubStore) GetPreview(ctx context.Context, slug string) (*preview.Values, string, error) {
 	raw, sha, err := c.clone.readFile(ctx, previewPath(slug))
 	if err != nil {
 		return nil, "", err
@@ -236,8 +237,8 @@ func (c *GitHubStore) GetPreview(ctx context.Context, slug string) (*preview.Pre
 }
 
 // parsePreview parses raw, the content of previews/<slug>/values.yaml.
-func parsePreview(slug string, raw []byte) (*preview.PreviewValues, error) {
-	var vals preview.PreviewValues
+func parsePreview(slug string, raw []byte) (*preview.Values, error) {
+	var vals preview.Values
 	if err := yaml.Unmarshal(raw, &vals); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", previewPath(slug), err)
 	}
@@ -255,7 +256,7 @@ const previewIndent = 2
 
 // marshalPreview encodes vals with the same indentation rules used for the
 // golden fixture (2-space indent).
-func marshalPreview(vals preview.PreviewValues) ([]byte, error) {
+func marshalPreview(vals preview.Values) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(previewIndent)

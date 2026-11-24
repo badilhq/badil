@@ -608,6 +608,7 @@ func TestCredentials_BeforeEachGitCall(t *testing.T) {
 // Done is called: when a read starts waiting on a check in flight.
 type notifyCtx struct {
 	context.Context
+
 	once    sync.Once
 	waiting chan struct{}
 }
@@ -660,11 +661,11 @@ func TestFreshness_CancelledRefreshRetriedByWaiter(t *testing.T) {
 	<-waiterCtx.waiting
 	cancel()
 
-	if err := <-starterErr; !errors.Is(err, context.Canceled) {
-		t.Errorf("starter GetPreview = %v, want context.Canceled", err)
+	if gotStarterErr := <-starterErr; !errors.Is(gotStarterErr, context.Canceled) {
+		t.Errorf("starter GetPreview = %v, want context.Canceled", gotStarterErr)
 	}
-	if err := <-waiterErr; err != nil {
-		t.Errorf("waiter GetPreview = %v, want the check retried", err)
+	if gotWaiterErr := <-waiterErr; gotWaiterErr != nil {
+		t.Errorf("waiter GetPreview = %v, want the check retried", gotWaiterErr)
 	}
 }
 

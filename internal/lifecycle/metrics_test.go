@@ -64,7 +64,7 @@ func TestReconcileMetrics_Outcomes(t *testing.T) {
 	held := values(pin("front", "https://github.com/acme/front/pull/7", recent))
 	fork := fetchedPR("front", true, "preview")
 	fork.HeadFullName = "octocat/front"
-	branchPreview := map[string]*preview.PreviewValues{"feature-pricing": onlyFront42()}
+	branchPreview := map[string]*preview.Values{"feature-pricing": onlyFront42()}
 	cases := []struct {
 		name string
 		f    *reconcileFake
@@ -101,7 +101,7 @@ func TestReconcileMetrics_Outcomes(t *testing.T) {
 			name: "held skip after cleanup",
 			f: &reconcileFake{
 				pr: fetchedPR("front", true, "preview:pricing"),
-				previews: map[string]*preview.PreviewValues{
+				previews: map[string]*preview.Values{
 					"pricing": held, "feature-pricing": onlyFront42(),
 				},
 			},
@@ -162,7 +162,7 @@ func TestReconcileMetrics_Outcomes(t *testing.T) {
 			name: "payload teardown",
 			f: &reconcileFake{
 				catalogErr: errors.New("boom"),
-				previews:   map[string]*preview.PreviewValues{"feature-x": onlyFront42()},
+				previews:   map[string]*preview.Values{"feature-x": onlyFront42()},
 			},
 			ev: lifecycle.Event{Target: event("", "front", "").Target, Action: "closed", HeadRef: "feature/x"},
 			want: map[string]float64{
@@ -186,16 +186,16 @@ func TestReconcileMetrics_Outcomes(t *testing.T) {
 func TestTeardownMetrics_Results(t *testing.T) {
 	cases := []struct {
 		name     string
-		previews map[string]*preview.PreviewValues
+		previews map[string]*preview.Values
 		raw      map[string]string
 		result   string
 	}{
 		{name: "noop", result: "noop"},
 		{name: "error", raw: map[string]string{"previews/feature-x/values.yaml": "services: [\n"}, result: "error"},
-		{name: "deleted", previews: map[string]*preview.PreviewValues{"feature-x": onlyFront42()}, result: "deleted"},
+		{name: "deleted", previews: map[string]*preview.Values{"feature-x": onlyFront42()}, result: "deleted"},
 		{
 			name: "unpinned",
-			previews: map[string]*preview.PreviewValues{"feature-x": values(
+			previews: map[string]*preview.Values{"feature-x": values(
 				pinnedBy("api", "https://github.com/acme/monorepo/pull/7"), pinnedBy("front", front42),
 			)},
 			result: "unpinned",
@@ -220,7 +220,7 @@ func TestTeardownMetrics_WebhookDeleteDecrementsPreviews(t *testing.T) {
 	captureLogs(t)
 	f := &reconcileFake{
 		Metrics:  metrics.New(),
-		previews: map[string]*preview.PreviewValues{"feature-x": onlyFront42()},
+		previews: map[string]*preview.Values{"feature-x": onlyFront42()},
 	}
 	f.PreviewsListed(2)
 	target := event("", "front", "").Target
@@ -250,7 +250,7 @@ func TestSweepMetrics(t *testing.T) {
 	captureLogs(t)
 	f := &fakeAPI{
 		Metrics: metrics.New(),
-		previews: map[string]*preview.PreviewValues{
+		previews: map[string]*preview.Values{
 			"unpinned": values(preview.ServiceEntry{Name: "backend-1"}),
 			"expired":  values(pin("backend-1", pr42, stale)),
 			"closed":   values(pin("backend-2", pr7, recent)),

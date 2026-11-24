@@ -38,7 +38,7 @@ func Backoff(n int) time.Duration {
 const MaxAttempts = maxAttempts
 
 // PutPreview puts vals at previews/<slug>/values.yaml in t.
-func PutPreview(t *Tree, slug string, vals preview.PreviewValues) error {
+func PutPreview(t *Tree, slug string, vals preview.Values) error {
 	return t.putPreview(slug, vals)
 }
 

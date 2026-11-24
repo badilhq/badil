@@ -69,7 +69,7 @@ func encodeValues(t *testing.T, v any) []byte {
 }
 
 func TestMetadata_DecodesSingleQuotedValues(t *testing.T) {
-	var vals preview.PreviewValues
+	var vals preview.Values
 	if err := yaml.Unmarshal([]byte(singleQuotedValues), &vals); err != nil {
 		t.Fatalf("decode: %v", err)
 	}

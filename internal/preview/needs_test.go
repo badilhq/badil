@@ -45,7 +45,7 @@ func pinnedEntry(name string) preview.ServiceEntry {
 }
 
 // names returns the service names then the dependency names of vals.
-func names(vals preview.PreviewValues) ([]string, []string) {
+func names(vals preview.Values) ([]string, []string) {
 	var services, deps []string
 	for _, s := range vals.Services {
 		services = append(services, s.Name)
@@ -153,7 +153,7 @@ func TestApplyCatalog_Needs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cat := tt.catalog()
-			got := preview.ApplyCatalog(preview.PreviewValues{Services: tt.services}, cat)
+			got := preview.ApplyCatalog(preview.Values{Services: tt.services}, cat)
 			services, deps := names(got.Values)
 			if !reflect.DeepEqual(services, tt.wantServices) || !reflect.DeepEqual(deps, tt.wantDeps) {
 				t.Errorf("services/dependencies = %v/%v, want %v/%v", services, deps, tt.wantServices, tt.wantDeps)

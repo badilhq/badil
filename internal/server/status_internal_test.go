@@ -31,8 +31,8 @@ const statusUpdatedAt = "2026-11-19T21:00:00Z"
 
 // statusPreviews is feature-x: backend-1 pinned at a short SHA, front
 // tracking its branch, and the dependency postgres.
-func statusPreviews() map[string]*preview.PreviewValues {
-	return map[string]*preview.PreviewValues{
+func statusPreviews() map[string]*preview.Values {
+	return map[string]*preview.Values{
 		"feature-x": {
 			APIVersion: preview.APIVersion,
 			Services: []preview.ServiceEntry{

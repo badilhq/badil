@@ -25,7 +25,7 @@ func deployFirst(t *testing.T, f *reconcileFake, ev lifecycle.Event) *logCapture
 }
 
 // setPreview commits vals as the preview slug of f's remote.
-func (f *reconcileFake) setPreview(t *testing.T, slug string, vals preview.PreviewValues) {
+func (f *reconcileFake) setPreview(t *testing.T, slug string, vals preview.Values) {
 	t.Helper()
 	f.g.remote.Set("previews/"+slug+"/values.yaml", marshal(t, vals))
 }
@@ -108,7 +108,7 @@ func TestReconcile_SomeServicesUnchanged(t *testing.T) {
 func TestReconcile_CleanupDecidesSkipUnchanged(t *testing.T) {
 	cases := []struct {
 		name          string
-		file          *preview.PreviewValues
+		file          *preview.Values
 		raw           string
 		skipUnchanged bool
 	}{

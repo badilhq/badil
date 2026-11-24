@@ -76,7 +76,7 @@ type PRJSON struct {
 // it is read with.
 type previewView struct {
 	slug    string
-	vals    *preview.PreviewValues
+	vals    *preview.Values
 	catalog *store.ServiceCatalog
 }
 

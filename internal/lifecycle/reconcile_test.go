@@ -51,7 +51,7 @@ type reconcileFake struct {
 	prErr       error
 	fanErr      error
 	upsertErr   error
-	previews    map[string]*preview.PreviewValues
+	previews    map[string]*preview.Values
 	raw         map[string]string
 	maxPreviews int
 	files       []forge.ChangedFile
@@ -75,7 +75,7 @@ func (f *reconcileFake) FetchServiceCatalog(ctx context.Context) (*store.Service
 	return f.g.st.FetchServiceCatalog(ctx)
 }
 
-func (f *reconcileFake) GetPreview(ctx context.Context, slug string) (*preview.PreviewValues, string, error) {
+func (f *reconcileFake) GetPreview(ctx context.Context, slug string) (*preview.Values, string, error) {
 	return f.g.st.GetPreview(ctx, slug)
 }
 
@@ -133,7 +133,7 @@ func (f *reconcileFake) ParseWebhook(*http.Request) (forge.Event, error) {
 }
 
 // fanOut records body as posted on the open PRs of a preview.
-func (f *reconcileFake) fanOut(_ context.Context, _ forge.Forge, _ preview.PreviewValues, body string) error {
+func (f *reconcileFake) fanOut(_ context.Context, _ forge.Forge, _ preview.Values, body string) error {
 	f.calls = append(f.calls, "fanout")
 	f.fanOuts = append(f.fanOuts, body)
 	return f.fanErr
@@ -264,7 +264,7 @@ func TestReconcile_LabeledButFetchedUnlabeledTearsDown(t *testing.T) {
 	capture := captureLogs(t)
 	f := &reconcileFake{
 		pr:       fetchedPR("front", true, "bug"),
-		previews: map[string]*preview.PreviewValues{"feature-pricing": values(pinnedBy("front", front42))},
+		previews: map[string]*preview.Values{"feature-pricing": values(pinnedBy("front", front42))},
 	}
 	lifecycle.ReconcilePR(context.Background(), f.api(t), event("labeled", "front", "preview", "preview"))
 
@@ -285,7 +285,7 @@ func TestReconcile_UnlabeledClosedTearsDownAsClosed(t *testing.T) {
 	captureLogs(t)
 	f := &reconcileFake{
 		pr: fetchedPR("front", false),
-		previews: map[string]*preview.PreviewValues{"feature-pricing": values(
+		previews: map[string]*preview.Values{"feature-pricing": values(
 			pinnedBy("api", "https://github.com/acme/monorepo/pull/7"), pinnedBy("front", front42),
 		)},
 	}
@@ -486,7 +486,7 @@ func TestReconcile_PushFailure(t *testing.T) {
 	f := &reconcileFake{
 		Metrics:    metrics.New(),
 		pr:         fetchedPR("front", true, "preview:pricing"),
-		previews:   map[string]*preview.PreviewValues{"feature-pricing": values(pinnedBy("front", front42))},
+		previews:   map[string]*preview.Values{"feature-pricing": values(pinnedBy("front", front42))},
 		beforePush: func(*storetest.Remote) error { return errors.New("push boom") },
 	}
 	lifecycle.ReconcilePR(context.Background(), f.api(t),
@@ -582,7 +582,7 @@ func TestReconcile_MonorepoDeployOneCommit(t *testing.T) {
 	captureLogs(t)
 	f := &reconcileFake{
 		pr: fetchedPR("monorepo", true, "preview:pricing"),
-		previews: map[string]*preview.PreviewValues{"feature-pricing": values(
+		previews: map[string]*preview.Values{"feature-pricing": values(
 			pinnedBy("api", "https://github.com/acme/monorepo/pull/42"), pinnedBy("front", front42),
 		)},
 	}
@@ -609,7 +609,7 @@ func TestReconcile_TeardownOnRetriedTree(t *testing.T) {
 	f := &reconcileFake{
 		Metrics:  metrics.New(),
 		pr:       fetchedPR("front", false),
-		previews: map[string]*preview.PreviewValues{"feature-pricing": onlyFront42()},
+		previews: map[string]*preview.Values{"feature-pricing": onlyFront42()},
 	}
 	raced := false
 	f.beforePush = func(r *storetest.Remote) error {

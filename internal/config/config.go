@@ -17,7 +17,7 @@ const DefaultGitHubURL = "https://github.com"
 // Config holds all application configuration.
 type Config struct {
 	AppID          int64
-	PrivateKey     []byte //nolint:gosec // intentional field name
+	PrivateKey     []byte
 	WebhookSecret  string
 	InstallationID int64
 	// GitOpsRepoURL is the http(s) clone URL of the gitops repo.

@@ -11,7 +11,7 @@ import (
 
 // FanOutFunc posts body on the open PRs of vals through f. FanOutPRComments
 // is the one badil runs.
-type FanOutFunc func(ctx context.Context, f forge.Forge, vals preview.PreviewValues, body string) error
+type FanOutFunc func(ctx context.Context, f forge.Forge, vals preview.Values, body string) error
 
 // FanOutPRComments posts (or updates) the same markdown body as badil's
 // comment (forge.Forge.UpsertComment) on every open PR referenced in
@@ -19,7 +19,7 @@ type FanOutFunc func(ctx context.Context, f forge.Forge, vals preview.PreviewVal
 // never overwrites their teardown comment. Failures on individual services
 // (including a PR state lookup) are collected but do not abort the loop —
 // best-effort delivery.
-func FanOutPRComments(ctx context.Context, f forge.Forge, vals preview.PreviewValues, body string) error {
+func FanOutPRComments(ctx context.Context, f forge.Forge, vals preview.Values, body string) error {
 	var errs []error
 	for _, svc := range vals.Services {
 		if svc.Metadata == nil || svc.Metadata.PRURL == "" {

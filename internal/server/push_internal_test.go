@@ -104,10 +104,10 @@ func pushAndWait(t *testing.T, s *Server, ev forge.Event) int {
 }
 
 // previewFiles returns an empty preview file for each slug.
-func previewFiles(slugs ...string) map[string]*preview.PreviewValues {
-	files := map[string]*preview.PreviewValues{}
+func previewFiles(slugs ...string) map[string]*preview.Values {
+	files := map[string]*preview.Values{}
 	for _, slug := range slugs {
-		files[slug] = &preview.PreviewValues{}
+		files[slug] = &preview.Values{}
 	}
 	return files
 }

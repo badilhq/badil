@@ -223,7 +223,7 @@ func testCatalog(services ...string) *store.ServiceCatalog {
 
 // assertCatalogFacts checks that vals has the apiVersion and gitops repo of
 // testCatalog and, in order, the services of want, each "name repoURL branch".
-func assertCatalogFacts(t *testing.T, vals preview.PreviewValues, want []string) {
+func assertCatalogFacts(t *testing.T, vals preview.Values, want []string) {
 	t.Helper()
 	got := make([]string, 0, len(vals.Services))
 	for _, svc := range vals.Services {
@@ -238,7 +238,7 @@ func assertCatalogFacts(t *testing.T, vals preview.PreviewValues, want []string)
 
 // assertWrittenHosts checks that the exposed backend-1 carries its host and
 // backend-2 none, both in the returned values and in the written file.
-func assertWrittenHosts(t *testing.T, vals preview.PreviewValues, written, slug string) {
+func assertWrittenHosts(t *testing.T, vals preview.Values, written, slug string) {
 	t.Helper()
 	want := "backend-1-" + slug + ".127.0.0.1.nip.io"
 	for _, svc := range vals.Services {
@@ -302,9 +302,9 @@ const defaultChartYAML = "    chart:\n" +
 	"      hostParam: app.ingress.host\n"
 
 // decode returns the preview file content parsed.
-func decode(t *testing.T, content string) preview.PreviewValues {
+func decode(t *testing.T, content string) preview.Values {
 	t.Helper()
-	var vals preview.PreviewValues
+	var vals preview.Values
 	if err := yaml.Unmarshal([]byte(content), &vals); err != nil {
 		t.Fatalf("parse preview file: %v\n%s", err, content)
 	}
@@ -313,7 +313,7 @@ func decode(t *testing.T, content string) preview.PreviewValues {
 
 // assertWritten fails t unless the file s wrote parses to want
 // (preview.Equal).
-func assertWritten(t *testing.T, s *writeServer, want preview.PreviewValues) {
+func assertWritten(t *testing.T, s *writeServer, want preview.Values) {
 	t.Helper()
 	if got := decode(t, s.written()); !preview.Equal(got, want) {
 		t.Errorf("written = %+v, want %+v", got, want)
@@ -371,10 +371,10 @@ type writeServer struct {
 	fake      *gitopsFake
 }
 
-func (s *writeServer) start(t *testing.T, opts ...store.Option) *store.GitHubStore {
+func (s *writeServer) start(t *testing.T) *store.GitHubStore {
 	t.Helper()
 	s.fake = newFileFake(t, slugPath, s.files, s.conflicts, nil)
-	return s.fake.open(t, opts...)
+	return s.fake.open(t)
 }
 
 // puts returns the number of pushes.
@@ -519,7 +519,10 @@ func TestDeploy_Created(t *testing.T) {
 	}{
 		{name: "create", want: true},
 		{name: "update", files: []string{pinnedFile("abc1234567890", "0000000old")}},
-		{name: "create lost to a push race", files: []string{"", pinnedFile("abc1234567890", "0000000old")}, conflicts: 1},
+		{
+			name: "create lost to a push race", files: []string{"", pinnedFile("abc1234567890", "0000000old")},
+			conflicts: 1,
+		},
 		{name: "unchanged", files: []string{pinnedFile()}},
 	}
 	for _, tt := range tests {
