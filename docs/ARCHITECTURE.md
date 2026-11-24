@@ -178,3 +178,33 @@ badil never reads, writes or drops data stores.
 - Data that lives in the preview namespace is pruned with it on teardown, sweep or expiry.
 - Data outside the namespace is owned, and dropped, by whatever provisions it.
 - The [`app`](../charts/app) chart only offers `envFrom` and `initContainers` to wire a data provider.
+
+## Code layers
+
+badil's Go packages are grouped in layers, and each package imports only what its row allows.
+
+| Layer | Packages | Imports |
+|---|---|---|
+| Domain | `internal/preview`, `internal/catalog` | The standard library, yaml.v3, doublestar, jsonschema and other domain packages. |
+| Use cases and ports | `internal/forge`, `internal/lifecycle`, `internal/app` | The same libraries, domain and use-case packages. |
+| Adapters | `internal/store` (with `internal/store/storetest`), `internal/forge/github` (with `internal/forge/github/githubtest`), `internal/github`, `internal/github/manifest`, `internal/namespace`, `internal/status`, `internal/status/kube`, `internal/metrics`, `internal/server` (with `internal/server/mocks`), `internal/api`, `internal/apiclient`, `internal/config` | Any library, domain and use cases, and another adapter only as listed below. |
+| Tooling | `internal/chartvalues`, `internal/fakegithub`, `internal/archtest`, `cmd/schemagen`, `cmd/fakegithub` | Anything. |
+| Composition root | `cmd/badil` | Anything. |
+
+Allowed adapter imports:
+
+- `internal/forge/github` → `internal/github`
+- `internal/github/manifest` → `internal/github`
+- `internal/server` → `internal/api`
+- `internal/apiclient` → `internal/api`
+- `internal/status/kube` → `internal/status`
+- `internal/config` → `internal/github`
+
+Domain and use-case packages never reach go-git, go-github, ghinstallation, client-go, Prometheus, chi or cobra, not even through another package.
+
+How it is checked:
+
+- The depguard rules of `.golangci.yml` check each file's imports (CI job `golangci-lint`).
+- `internal/archtest` checks each package's transitive imports (CI job `test`).
+- Test files are exempt from both.
+- A new package is added to the table above, to a depguard rule and to the map of `internal/archtest`.
