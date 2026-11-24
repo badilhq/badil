@@ -136,7 +136,7 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	// preview does not exist and preview.maxPreviews previews already do, or
 	// when the preview does not exist and its namespace is not a preview's;
 	// a failed namespace check is a 502.
-	result, fanErr, err := lifecycle.DeployPR(ctx, s.deployAPI(), services, slug, inputs)
+	result, fanErr, err := lifecycle.DeployPR(ctx, s.app.DeployAPI(), services, slug, inputs)
 	if errors.Is(err, lifecycle.ErrPreviewLimit) {
 		msg := fmt.Sprintf("preview limit (%d) reached", services.MaxPreviews)
 		logger.WarnContext(ctx, "deploy failed", slog.String("op", "preview limit"), slog.String("err", msg))

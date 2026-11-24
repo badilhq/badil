@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/server"
@@ -44,11 +45,13 @@ func serveWaits(t *testing.T) served {
 		Metadata: &preview.Metadata{PRURL: "https://github.com/acme/backend-1/pull/42"},
 	}}}}
 	previewStatus := status.NewMemory()
-	wake := server.NewWake()
+	wake := app.NewWake()
 	remote, st := storetest.Gitops(t, "services:\n  backend-1:\n    repo: https://github.com/acme/backend-1.git\n",
 		previews, nil, nil, statusHooks(previewStatus, wake)...)
-	srv := server.NewServer(&loopFake{}, nil, st, "",
-		server.WithReadToken(serveReadToken), server.WithStatus("", previewStatus), server.WithWake(wake))
+	f := &loopFake{}
+	a := app.New(app.Config{Store: st, Forge: f, Wake: wake})
+	srv := server.NewServer(a, f, nil, st, "",
+		server.WithReadToken(serveReadToken), server.WithStatus("", previewStatus))
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

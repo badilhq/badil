@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"sync"
@@ -10,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/status"
@@ -65,15 +65,6 @@ func WithMetrics(m Recorder) Option {
 	}
 }
 
-// WithNamespaces checks the namespace of each new preview through c before
-// it is written (lifecycle.NamespaceChecker). Without it, no namespace is
-// checked.
-func WithNamespaces(c lifecycle.NamespaceChecker) Option {
-	return func(s *Server) {
-		s.namespaces = c
-	}
-}
-
 // WithStatus enables POST /webhooks/status, authenticated by the Bearer
 // token, recording into st. An empty token leaves the route unregistered.
 func WithStatus(token string, st *status.Store) Option {
@@ -99,28 +90,15 @@ func WithPreviewTTL(ttl time.Duration) Option {
 	}
 }
 
-// WithWake has the wait routes block on w, which the caller also notifies
-// on the changes the server does not see itself: a landed Apply
-// (store.WithApplied) and a fetch that moved the gitops head
-// (store.WithHeadMoved). Without it, the server makes its own.
-func WithWake(w *Wake) Option {
-	return func(s *Server) {
-		s.wake = w
-	}
-}
-
 type Server struct {
+	// app runs the reconciles, holds their outcomes and the wake of the
+	// waits, and builds the lifecycle APIs.
+	app   *app.App
 	forge forge.Forge
 	// webhooks verifies and parses the deliveries of /webhooks/github.
-	webhooks forge.WebhookParser
-	store    storeAPI
-	// fanOut posts a preview's summary on its open PRs:
-	// lifecycle.FanOutPRComments.
-	fanOut  lifecycle.FanOutFunc
-	metrics Recorder
-	// namespaces checks the namespace of a new preview, nil when none is
-	// checked.
-	namespaces  lifecycle.NamespaceChecker
+	webhooks    forge.WebhookParser
+	store       storeAPI
+	metrics     Recorder
 	deployToken string
 	// statusToken authenticates POST /webhooks/status, "" when it is
 	// disabled.
@@ -132,32 +110,22 @@ type Server struct {
 	// previewTTL is the in-server sweep's TTL, 0 when it does not expire
 	// previews.
 	previewTTL time.Duration
-	// outcomes holds the latest reconcile outcome of each PR.
-	outcomes *outcomes
-	// wake is notified on every change a wait may be waiting for.
-	wake *Wake
 	// waitTimeout is the longest a wait blocks.
 	waitTimeout time.Duration
 	// shutdown is closed when the HTTP server's shutdown starts (EndWaits).
 	shutdown     chan struct{}
 	shutdownOnce sync.Once
 	router       chi.Router
-	// bg tracks background jobs (reconciles), queued or running,
-	// for WaitBackground.
-	bg sync.WaitGroup
-	// jobs serializes background jobs: at most one runs at a time.
-	jobs sync.Mutex
-	// jobTimeout caps each background job, counted from when it holds jobs.
-	jobTimeout time.Duration
 	// syncer runs the config syncs, one at a time.
 	syncer *lifecycle.Syncer
 }
 
 // NewServer returns the server of the webhooks webhooks parses, over the
-// forge f and the gitops repo st, configured by opts. The deploy API is
-// served only when deployToken is set, and the read API when deployToken or
-// the read token is.
+// application services a (non-nil), the forge f and the gitops repo st,
+// configured by opts. The deploy API is served only when deployToken is set,
+// and the read API when deployToken or the read token is.
 func NewServer(
+	a *app.App,
 	f forge.Forge,
 	webhooks forge.WebhookParser,
 	st storeAPI,
@@ -165,24 +133,19 @@ func NewServer(
 	opts ...Option,
 ) *Server {
 	s := &Server{
+		app:         a,
 		forge:       f,
 		webhooks:    webhooks,
 		store:       st,
-		fanOut:      lifecycle.FanOutPRComments,
 		metrics:     nopRecorder{},
 		deployToken: deployToken,
-		jobTimeout:  ReconcileTimeout,
-		outcomes:    newOutcomes(),
 		waitTimeout: waitTimeout,
 		shutdown:    make(chan struct{}),
 	}
 	for _, opt := range opts {
 		opt(s)
 	}
-	if s.wake == nil {
-		s.wake = NewWake()
-	}
-	s.syncer = lifecycle.NewSyncer(s.syncAPI(), syncTimeout)
+	s.syncer = lifecycle.NewSyncer(a.SyncAPI(), syncTimeout)
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -211,28 +174,6 @@ func NewServer(
 	return s
 }
 
-// reconcileAPI is the store, the forge, the metrics, the fan-out and the
-// namespace check as lifecycle.ReconcilePR expects them.
-func (s *Server) reconcileAPI() lifecycle.ReconcileAPI {
-	return lifecycle.ReconcileAPI{
-		Store: s.store, Forge: s.forge, Recorder: s.metrics, FanOut: s.fanOut, Namespaces: s.namespaces,
-	}
-}
-
-// deployAPI is the store, the forge, the metrics, the fan-out and the
-// namespace check as lifecycle.DeployPR expects them.
-func (s *Server) deployAPI() lifecycle.DeployAPI {
-	return lifecycle.DeployAPI{
-		Store: s.store, Forge: s.forge, Recorder: s.metrics, FanOut: s.fanOut, Namespaces: s.namespaces,
-	}
-}
-
-// syncAPI is the store, the forge, the metrics and the fan-out as
-// lifecycle.Syncer expects them.
-func (s *Server) syncAPI() lifecycle.SyncAPI {
-	return lifecycle.SyncAPI{Store: s.store, Forge: s.forge, Recorder: s.metrics, FanOut: s.fanOut}
-}
-
 func (s *Server) Handler() http.Handler {
 	return s.router
 }
@@ -242,24 +183,9 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
-// Go runs f in the background, tracked by WaitBackground. Unlike reconciles,
-// f does not wait for other background jobs.
-func (s *Server) Go(f func()) {
-	s.bg.Go(f)
-}
-
-// WaitBackground blocks until every background job has finished. It
-// returns nil once they are done, or ctx.Err() when ctx expires first.
-func (s *Server) WaitBackground(ctx context.Context) error {
-	done := make(chan struct{})
-	go func() {
-		s.bg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+// EndWaits ends every blocked wait, which answers its current state at once,
+// and every later one after its first evaluation. It is registered with
+// http.Server.RegisterOnShutdown, so shutdown does not wait for long polls.
+func (s *Server) EndWaits() {
+	s.shutdownOnce.Do(func() { close(s.shutdown) })
 }

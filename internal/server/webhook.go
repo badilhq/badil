@@ -84,7 +84,7 @@ func (s *Server) handlePullRequest(ctx context.Context, ev forge.Event) {
 	)
 	switch e.Action {
 	case "opened", "reopened", "synchronize", "labeled", "unlabeled", "closed":
-		s.startReconcile(ctx, e)
+		s.app.StartReconcile(ctx, e)
 	}
 }
 
@@ -119,12 +119,13 @@ func (s *Server) handlePush(ctx context.Context, e forge.PushEvent) {
 }
 
 // startPushSync runs the push config sync in the background, tracked for
-// WaitBackground. It does not take s.jobs: the syncer's guard serializes it
-// with the other config syncs, and caps it at syncTimeout from when it holds
-// the guard. Its context is detached from ctx's cancellation.
+// the app's WaitBackground. It does not take the app's job queue: the
+// syncer's guard serializes it with the other config syncs, and caps it at
+// syncTimeout from when it holds the guard. Its context is detached from
+// ctx's cancellation.
 func (s *Server) startPushSync(ctx context.Context) {
 	sctx := context.WithoutCancel(ctx)
-	s.Go(func() {
+	s.app.Go(func() {
 		defer func() {
 			if rec := recover(); rec != nil {
 				slog.ErrorContext(sctx, "config sync panicked",

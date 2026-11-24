@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+
+	"github.com/badilhq/badil/internal/app"
 )
 
 // namespaceChecker is a lifecycle.NamespaceChecker: every namespace is foreign
@@ -42,7 +44,8 @@ func TestDeploy_NamespaceRefusals(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fg := &fakeGitops{catalog: []string{"backend-1"}}
 			fg.open(t)
-			srv := NewServer(fg, nil, fg, "test-token", withFanOut(fg), WithNamespaces(tc.c))
+			a := app.New(app.Config{Store: fg, Forge: fg, FanOut: fakeFanOut(fg), Namespaces: tc.c})
+			srv := NewServer(a, fg, nil, fg, "test-token")
 			rec := postDeploy(t, srv, previewBody(), "test-token")
 
 			if rec.Code != tc.status {
@@ -55,20 +58,5 @@ func TestDeploy_NamespaceRefusals(t *testing.T) {
 				t.Error("a refused deploy must not write nor comment")
 			}
 		})
-	}
-}
-
-// TestWithNamespaces checks that the namespace check reaches the reconciles
-// and the deploys.
-func TestWithNamespaces(t *testing.T) {
-	fg := &fakeGitops{}
-	fg.open(t)
-	c := namespaceChecker{foreign: true}
-	srv := NewServer(fg, nil, fg, "test-token", WithNamespaces(c))
-	if srv.reconcileAPI().Namespaces != c || srv.deployAPI().Namespaces != c {
-		t.Error("the namespace check is not on the reconcile and deploy APIs")
-	}
-	if NewServer(fg, nil, fg, "test-token").reconcileAPI().Namespaces != nil {
-		t.Error("a namespace check without WithNamespaces")
 	}
 }

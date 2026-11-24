@@ -19,6 +19,7 @@ import (
 	gh "github.com/google/go-github/v71/github"
 	"github.com/spf13/cobra"
 
+	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/config"
 	"github.com/badilhq/badil/internal/forge"
 	forgegithub "github.com/badilhq/badil/internal/forge/github"
@@ -136,7 +137,7 @@ func serveCmd() *cobra.Command {
 				m = metrics.New()
 			}
 
-			app, err := newApp(cfg)
+			ghApp, err := newApp(cfg)
 			if err != nil {
 				return err
 			}
@@ -149,8 +150,8 @@ func serveCmd() *cobra.Command {
 			if err = loadStatus(ctx, previewStatus); err != nil {
 				return err
 			}
-			wake := server.NewWake()
-			st, f, err := newStoreAndForge(ctx, app, cfg,
+			wake := app.NewWake()
+			st, f, err := newStoreAndForge(ctx, ghApp, cfg,
 				append(statusHooks(previewStatus, wake), store.WithMetrics(m))...)
 			if err != nil {
 				return err
@@ -158,13 +159,14 @@ func serveCmd() *cobra.Command {
 			defer closeStore(ctx, st)
 			previewStatus.Start(ctx, st)
 
-			srv := server.NewServer(f, f, st, cfg.DeployToken,
-				server.WithMetrics(m), server.WithNamespaces(namespaces),
+			a := app.New(app.Config{Store: st, Forge: f, Metrics: m, Namespaces: namespaces, Wake: wake})
+			srv := server.NewServer(a, f, f, st, cfg.DeployToken,
+				server.WithMetrics(m),
 				server.WithStatus(cfg.StatusToken, previewStatus),
-				server.WithReadToken(cfg.ReadToken), server.WithPreviewTTL(ttl), server.WithWake(wake))
+				server.WithReadToken(cfg.ReadToken), server.WithPreviewTTL(ttl))
 			catchUpCfg := catchUpAPI(st, f, m)
-			catchUpCfg.Skipped = srv.RecordCatchUpSkip
-			catchUp := lifecycle.NewCatchUp(catchUpCfg, srv.QueueReconcile)
+			catchUpCfg.Skipped = a.RecordCatchUpSkip
+			catchUp := lifecycle.NewCatchUp(catchUpCfg, a.QueueReconcile)
 			httpSrv := newHTTPServer(cfg.ListenAddr, srv)
 
 			if cfg.DeployToken == "" {
@@ -173,8 +175,8 @@ func serveCmd() *cobra.Command {
 			countPreviews(ctx, st, m)
 			serveInBackground(ctx, "server", httpSrv)
 			metricsSrv := startMetricsServer(ctx, cfg.MetricsAddr, m)
-			srv.Go(func() { runCatchUp(ctx, catchUp) })
-			startSweepLoop(ctx, srv, sweepAPI(st, f, m), catchUp, m, interval, ttl)
+			a.Go(func() { runCatchUp(ctx, catchUp) })
+			startSweepLoop(ctx, a, sweepAPI(st, f, m), catchUp, m, interval, ttl)
 
 			<-ctx.Done()
 			slog.InfoContext(ctx, "shutting down server")
@@ -182,7 +184,7 @@ func serveCmd() *cobra.Command {
 			defer cancel()
 			shutdownErr := shutdownServers(shutdownCtx, httpSrv, metricsSrv)
 			if shutdownErr == nil {
-				shutdownErr = srv.WaitBackground(shutdownCtx)
+				shutdownErr = a.WaitBackground(shutdownCtx)
 			}
 			previewStatus.Close(shutdownCtx)
 			return shutdownErr
@@ -203,7 +205,7 @@ func loadStatus(ctx context.Context, s *status.Store) error {
 // repo: the status of the previews a landed push deleted is deleted, and
 // every fetch that moves the head collects the status of the previews no
 // longer there. Both wake the waits through wake.
-func statusHooks(s *status.Store, wake *server.Wake) []store.Option {
+func statusHooks(s *status.Store, wake *app.Wake) []store.Option {
 	return []store.Option{
 		store.WithApplied(func(res store.Result) {
 			s.Delete(res.Deleted...)
@@ -297,11 +299,11 @@ func sweepSchedule() (time.Duration, time.Duration, error) {
 	return interval, ttl, nil
 }
 
-// startSweepLoop runs runSweepLoop in the background of srv, so shutdown
+// startSweepLoop runs runSweepLoop in the background of a, so shutdown
 // waits for it. It starts nothing when interval is 0.
 func startSweepLoop(
 	ctx context.Context,
-	srv *server.Server,
+	a *app.App,
 	api lifecycle.SweepAPI,
 	catchUp catchUpRunner,
 	m *metrics.Metrics,
@@ -314,7 +316,7 @@ func startSweepLoop(
 		slog.String("interval", interval.String()),
 		slog.String("ttl", ttl.String()),
 	)
-	srv.Go(func() {
+	a.Go(func() {
 		runSweepLoop(ctx, api, catchUp, m, interval, ttl, time.Now)
 	})
 }
@@ -564,11 +566,11 @@ func runCleanup(
 }
 
 // reconcileNow reconciles through lifecycle.ReconcilePR over api at once,
-// each reconcile capped at server.ReconcileTimeout, and calls done with its
+// each reconcile capped at app.ReconcileTimeout, and calls done with its
 // result.
 func reconcileNow(api lifecycle.ReconcileAPI) lifecycle.ReconcileFunc {
 	return func(ctx context.Context, ev lifecycle.Event, done func(lifecycle.ReconcileResult)) {
-		rctx, cancel := context.WithTimeout(ctx, server.ReconcileTimeout)
+		rctx, cancel := context.WithTimeout(ctx, app.ReconcileTimeout)
 		defer cancel()
 		done(lifecycle.ReconcilePR(rctx, api, ev))
 	}

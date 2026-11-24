@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
@@ -91,10 +92,12 @@ func readFake(badil string, pinned preview.ServiceEntry) *fakeGitops {
 // newReadServer returns a server over fg with the deploy token, the read
 // token and a memory status store, configured by opts, whose waits answer
 // at once unless the test sets waitTimeout.
-func newReadServer(t *testing.T, fg *fakeGitops, opts ...Option) (*Server, *status.Store, *LogCapture) {
+func newReadServer(
+	t *testing.T, fg *fakeGitops, cfg app.Config, opts ...Option,
+) (*Server, *status.Store, *LogCapture) {
 	t.Helper()
 	st := status.NewMemory()
-	s, capture := newTeardownServer(t, fg, append([]Option{
+	s, capture := newTeardownServer(t, fg, cfg, append([]Option{
 		WithStatus(testStatusToken, st), WithReadToken(testReadToken),
 	}, opts...)...)
 	s.waitTimeout = time.Millisecond
@@ -205,7 +208,8 @@ func TestReadAPI_Auth(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fg := readFake(readBadil, pinnedEntry("backend-1", backend42))
 			fg.open(t)
-			s := NewServer(fg, nil, fg, tc.deploy, WithReadToken(tc.read), WithStatus("", status.NewMemory()))
+			a := app.New(app.Config{Store: fg, Forge: fg})
+			s := NewServer(a, fg, nil, fg, tc.deploy, WithReadToken(tc.read), WithStatus("", status.NewMemory()))
 			s.waitTimeout = time.Millisecond
 			for _, path := range getRoutes {
 				if rec := send(s, http.MethodGet, path, "{}", "Bearer "+testReadToken); rec.Code != tc.allGetsStatus {
@@ -227,7 +231,7 @@ func TestReadAPI_Auth(t *testing.T) {
 
 func TestReadAPI_ListAndGet(t *testing.T) {
 	fg := readFake(readBadil, pinnedEntry("backend-1", backend42))
-	s, st, _ := newReadServer(t, fg, WithPreviewTTL(168*time.Hour))
+	s, st, _ := newReadServer(t, fg, app.Config{}, WithPreviewTTL(168*time.Hour))
 	at := time.Date(2026, 11, 19, 21, 5, 0, 0, time.UTC)
 	st.Record("feature-x", "backend-1", status.Entry{Revision: statusSHA, Status: status.Ready, At: at})
 
@@ -294,7 +298,7 @@ func TestReadAPI_ListAndGet(t *testing.T) {
 }
 
 func TestReadAPI_NoExpiryWithoutTTL(t *testing.T) {
-	s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("backend-1", backend42)))
+	s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("backend-1", backend42)), app.Config{})
 	got := decode[PreviewJSON](t, get(s, "/v1/previews/feature-x"), http.StatusOK)
 	if got.UpdatedAt != statusUpdatedAt || got.ExpiresAt != "" {
 		t.Errorf("updatedAt %q expiresAt %q, want %q and none", got.UpdatedAt, got.ExpiresAt, statusUpdatedAt)
@@ -329,8 +333,8 @@ func TestWait_OutcomeStates(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.res.Outcome+" "+tc.res.Reason+" "+tc.sha, func(t *testing.T) {
-			s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("front", front7)))
-			s.RecordOutcome(lifecycle.Target{Owner: "Acme", Repo: "Front", Number: 7}, tc.res)
+			s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("front", front7)), app.Config{})
+			s.app.RecordOutcome(lifecycle.Target{Owner: "Acme", Repo: "Front", Number: 7}, tc.res)
 			path := "/v1/wait?repo=acme/front&pr=7"
 			if tc.sha != "" {
 				path += "&sha=" + tc.sha
@@ -342,7 +346,7 @@ func TestWait_OutcomeStates(t *testing.T) {
 
 func TestWait_OtherLabelLeavesTheAnswer(t *testing.T) {
 	fg := reconcileFake()
-	s, _, _ := newReadServer(t, fg)
+	s, _, _ := newReadServer(t, fg, app.Config{})
 	path := "/v1/wait?repo=acme/backend-1&pr=42"
 	deliver(t, s, labelEvent("opened", ""))
 	assertState(t, waitFor(t, s, path), "skipped", "not labeled")
@@ -356,7 +360,7 @@ func TestWait_OtherLabelLeavesTheAnswer(t *testing.T) {
 
 func TestWait_WebhookUnlabeledPRSkipped(t *testing.T) {
 	fg := reconcileFake()
-	s, _, _ := newReadServer(t, fg)
+	s, _, _ := newReadServer(t, fg, app.Config{})
 	e := prEvent("opened")
 	e.PullRequest.HeadSHA = statusSHA
 	deliver(t, s, e)
@@ -371,7 +375,7 @@ func TestWait_WebhookUnlabeledPRSkipped(t *testing.T) {
 func TestWait_FailedReconcile(t *testing.T) {
 	fg := reconcileFake()
 	fg.prErr = forge.ErrNotFound
-	s, _, _ := newReadServer(t, fg)
+	s, _, _ := newReadServer(t, fg, app.Config{})
 	deliver(t, s, labelEvent("labeled", "preview", "preview"))
 	assertState(t, waitFor(t, s, "/v1/wait?repo=acme/backend-1&pr=42"), "failed", "reconcile failed")
 	assertState(t, waitFor(t, s, "/v1/wait?repo=acme/backend-1&pr=42&sha="+payloadSHA), "failed", "reconcile failed")
@@ -379,11 +383,11 @@ func TestWait_FailedReconcile(t *testing.T) {
 
 func TestWait_RepoNotInCatalog(t *testing.T) {
 	fg := readFake(readBadil, pinnedEntry("front", front7))
-	s, _, _ := newReadServer(t, fg)
+	s, _, _ := newReadServer(t, fg, app.Config{})
 	path := "/v1/wait?repo=acme/elsewhere&pr=3"
 	assertState(t, waitFor(t, s, path), "refused", "repo not in catalog")
 
-	s.RecordOutcome(lifecycle.Target{Owner: "acme", Repo: "elsewhere", Number: 3},
+	s.app.RecordOutcome(lifecycle.Target{Owner: "acme", Repo: "elsewhere", Number: 3},
 		lifecycle.ReconcileResult{Outcome: lifecycle.OutcomeSkipped, Reason: lifecycle.NotLabeledReason})
 	assertState(t, waitFor(t, s, path), "refused", "repo not in catalog")
 }
@@ -400,15 +404,20 @@ func TestWait_CatchUpRecordsTheFilteredPRs(t *testing.T) {
 	fork.HeadFullName = "octocat/front"
 	fg := readFake(readBadil, pinnedEntry("front", front7))
 	fg.openPRs = map[string][]forge.PullRequest{"acme/front": {unlabeled, fork}}
-	s, _, _ := newReadServer(t, fg)
+	s, _, _ := newReadServer(t, fg, app.Config{})
 	reconciled := 0
 	reconcile := func(ctx context.Context, ev lifecycle.Event, done func(lifecycle.ReconcileResult)) {
 		reconciled++
-		s.QueueReconcile(ctx, ev, done)
+		s.app.QueueReconcile(ctx, ev, done)
 	}
-	api := lifecycle.CatchUpAPI{Store: fg, Forge: fg, Recorder: (*metrics.Metrics)(nil), Skipped: s.RecordCatchUpSkip}
+	api := lifecycle.CatchUpAPI{
+		Store:    fg,
+		Forge:    fg,
+		Recorder: (*metrics.Metrics)(nil),
+		Skipped:  s.app.RecordCatchUpSkip,
+	}
 	lifecycle.NewCatchUp(api, reconcile).Run(context.Background())
-	if err := s.WaitBackground(context.Background()); err != nil {
+	if err := s.app.WaitBackground(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -430,10 +439,10 @@ func TestWait_CatchUpSkipAndNewerOutcome(t *testing.T) {
 	run := func(t *testing.T, fg *fakeGitops, s *Server) {
 		t.Helper()
 		api := lifecycle.CatchUpAPI{
-			Store: fg, Forge: fg, Recorder: (*metrics.Metrics)(nil), Skipped: s.RecordCatchUpSkip,
+			Store: fg, Forge: fg, Recorder: (*metrics.Metrics)(nil), Skipped: s.app.RecordCatchUpSkip,
 		}
-		lifecycle.NewCatchUp(api, s.QueueReconcile).Run(context.Background())
-		if err := s.WaitBackground(context.Background()); err != nil {
+		lifecycle.NewCatchUp(api, s.app.QueueReconcile).Run(context.Background())
+		if err := s.app.WaitBackground(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -441,8 +450,8 @@ func TestWait_CatchUpSkipAndNewerOutcome(t *testing.T) {
 	t.Run("an outcome recorded after the listing stays", func(t *testing.T) {
 		fg := readFake(readBadil, pinnedEntry("front", front7))
 		fg.openPRs = map[string][]forge.PullRequest{"acme/front": {unlabeled}}
-		s, _, _ := newReadServer(t, fg)
-		fg.afterList = func() { s.RecordOutcome(target, deployed) }
+		s, _, _ := newReadServer(t, fg, app.Config{})
+		fg.afterList = func() { s.app.RecordOutcome(target, deployed) }
 		run(t, fg, s)
 		assertState(t, waitFor(t, s, path), "progressing", "")
 	})
@@ -450,8 +459,8 @@ func TestWait_CatchUpSkipAndNewerOutcome(t *testing.T) {
 	t.Run("a listing started after the outcome replaces it", func(t *testing.T) {
 		fg := readFake(readBadil, pinnedEntry("front", front7))
 		fg.openPRs = map[string][]forge.PullRequest{"acme/front": {unlabeled}}
-		s, _, _ := newReadServer(t, fg)
-		s.RecordOutcome(target, deployed)
+		s, _, _ := newReadServer(t, fg, app.Config{})
+		s.app.RecordOutcome(target, deployed)
 		run(t, fg, s)
 		assertState(t, waitFor(t, s, path), "skipped", "not labeled")
 	})
@@ -480,23 +489,26 @@ func TestRecordCatchUpSkip_ListingTime(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("front", front7)))
-			s.RecordOutcome(target, lifecycle.ReconcileResult{Outcome: lifecycle.OutcomeDeployed, HeadSHA: statusSHA})
-			recorded, _ := s.outcomes.get(lifecycle.PRKey(target))
-			s.RecordCatchUpSkip(target, skip, tc.listedAt(recorded.At))
+			s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("front", front7)), app.Config{})
+			s.app.RecordOutcome(
+				target,
+				lifecycle.ReconcileResult{Outcome: lifecycle.OutcomeDeployed, HeadSHA: statusSHA},
+			)
+			recorded, _ := s.app.LatestOutcome(target)
+			s.app.RecordCatchUpSkip(target, skip, tc.listedAt(recorded.At))
 			assertState(t, waitFor(t, s, path), tc.state, tc.reason)
 		})
 	}
 
 	t.Run("no stored outcome", func(t *testing.T) {
-		s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("front", front7)))
-		s.RecordCatchUpSkip(target, skip, time.Now())
+		s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("front", front7)), app.Config{})
+		s.app.RecordCatchUpSkip(target, skip, time.Now())
 		assertState(t, waitFor(t, s, path), "skipped", "not labeled")
 	})
 }
 
 func TestWait_PinAndWaitSet(t *testing.T) {
-	s, st, _ := newReadServer(t, readFake(needsBadil, pinnedEntry("front", front7)))
+	s, st, _ := newReadServer(t, readFake(needsBadil, pinnedEntry("front", front7)), app.Config{})
 	path := "/v1/wait?repo=acme/front&pr=7"
 	assertState(t, waitFor(t, s, "/v1/wait?repo=acme/front&pr=8"), "pending", "")
 	assertState(t, waitFor(t, s, path+"&sha=fff1234"), "pending", "")
@@ -544,7 +556,7 @@ func TestWait_PinAndWaitSet(t *testing.T) {
 }
 
 func TestWait_WithoutNeedsTheWaitSetIsThePins(t *testing.T) {
-	s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("backend-1", backend42)))
+	s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("backend-1", backend42)), app.Config{})
 	got := waitFor(t, s, "/v1/previews/feature-x/wait")
 	if len(got.Services) != 1 || got.Services[0].Name != "backend-1" {
 		t.Errorf("wait set = %+v, want backend-1 alone", got.Services)
@@ -552,7 +564,7 @@ func TestWait_WithoutNeedsTheWaitSetIsThePins(t *testing.T) {
 }
 
 func TestWait_SlugWithoutPinIsPending(t *testing.T) {
-	s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("backend-1", backend42)))
+	s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("backend-1", backend42)), app.Config{})
 	got := waitFor(t, s, "/v1/previews/bare/wait")
 	assertState(t, got, "pending", "")
 	if got.Slug != "bare" || len(got.Services) != 0 {
@@ -569,7 +581,7 @@ func TestWait_SlugWithoutPinIsPending(t *testing.T) {
 
 func TestReadAPI_CloneReadFailure(t *testing.T) {
 	fg := readFake(readBadil, pinnedEntry("backend-1", backend42))
-	s, _, capture := newReadServer(t, fg)
+	s, _, capture := newReadServer(t, fg, app.Config{})
 	if err := os.RemoveAll(fg.remote.Dir()); err != nil {
 		t.Fatal(err)
 	}
@@ -607,7 +619,7 @@ func TestReadAPI_CloneReadFailure(t *testing.T) {
 // client has gone neither logs read failed nor answers 503.
 func TestReadAPI_ClientGoneDuringRead(t *testing.T) {
 	fg := readFake(readBadil, pinnedEntry("backend-1", backend42))
-	s, _, capture := newReadServer(t, fg)
+	s, _, capture := newReadServer(t, fg, app.Config{})
 	if err := os.RemoveAll(fg.remote.Dir()); err != nil {
 		t.Fatal(err)
 	}
@@ -631,7 +643,7 @@ func TestReadAPI_ClientGoneDuringRead(t *testing.T) {
 }
 
 func TestWait_InvalidQuery(t *testing.T) {
-	s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("backend-1", backend42)))
+	s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("backend-1", backend42)), app.Config{})
 	for _, q := range []string{"pr=1", "repo=acme/front", "repo=acme/front&pr=0", "repo=acme/front&pr=abc",
 		"repo=acme&pr=1", "repo=acme/front/x&pr=1", "repo=/front&pr=1", "repo=acme/&pr=1", "repo=acme/front&pr=-3"} {
 		if e := decode[ErrorResponse](t, get(s, "/v1/wait?"+q), http.StatusBadRequest); e.Error == "" {
