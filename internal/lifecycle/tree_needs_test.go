@@ -1,9 +1,10 @@
-package store_test
+package lifecycle_test
 
 import (
 	"slices"
 	"testing"
 
+	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
 )
@@ -28,7 +29,7 @@ func TestDeploy_Needs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseCatalog: %v", err)
 	}
-	deployOn := func(files []string, service string) (*store.WriteResult, string) {
+	deployOn := func(files []string, service string) (*lifecycle.WriteResult, string) {
 		t.Helper()
 		s := &writeServer{files: files}
 		in := sampleInputs()

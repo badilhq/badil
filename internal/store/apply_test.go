@@ -39,8 +39,23 @@ func rename(slug, name, subject string) func(lifecycle.Tree) (store.Summary, err
 			return store.Summary{}, err
 		}
 		vals.Services[0].Name = name
-		return store.Summary{Subject: subject}, store.PutPreview(tree, slug, *vals)
+		return store.Summary{Subject: subject}, tree.PutPreview(slug, *vals)
 	}
+}
+
+// stampAPIVersion sets the apiVersion of the preview slug to
+// preview.APIVersion in tree, recorded as a sync.
+func stampAPIVersion(tree lifecycle.Tree, slug string) error {
+	vals, err := tree.GetPreview(slug)
+	if err != nil {
+		return err
+	}
+	vals.APIVersion = preview.APIVersion
+	if err = tree.PutPreview(slug, *vals); err != nil {
+		return err
+	}
+	tree.Record(slug, "sync")
+	return nil
 }
 
 // TestApply_OneCommitOnFetchedHead checks that Apply commits on the remote
@@ -62,13 +77,12 @@ func TestApply_OneCommitOnFetchedHead(t *testing.T) {
 			t.Errorf("GetPreview(b) = %+v, %v; want the fetched b2", vals, getErr)
 		}
 		tree.DeletePreview("zz-last")
-		if putErr := store.PutPreview(tree, "new", preview.Values{
+		if putErr := tree.PutPreview("new", preview.Values{
 			Services: []preview.ServiceEntry{{Name: "new"}},
 		}); putErr != nil {
 			return store.Summary{}, putErr
 		}
-		_, syncErr := tree.Sync("a", testCatalog("a"))
-		return store.Summary{Subject: "chore(preview): sweep: delete 1, unpin 0, sync 1"}, syncErr
+		return store.Summary{Subject: "chore(preview): sweep: delete 1, unpin 0, sync 1"}, stampAPIVersion(tree, "a")
 	})
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -350,21 +364,11 @@ func TestOpen_RejectsEmptyIdentity(t *testing.T) {
 			context.Background(),
 			store.CloneConfig{URL: remote.URL()},
 			id,
-			storetest.GitHubForge.ParsePRURL,
 		)
 		if err == nil {
 			_ = st.Close()
 			t.Errorf("Open with identity %+v = nil error, want one", id)
 		}
-	}
-}
-
-func TestOpen_RejectsNilPRURLParser(t *testing.T) {
-	remote := newRemote(t, applyFiles)
-	st, err := store.Open(context.Background(), store.CloneConfig{URL: remote.URL()}, storetest.Identity, nil)
-	if err == nil {
-		_ = st.Close()
-		t.Fatal("Open with a nil pull request URL parser = nil error, want one")
 	}
 }
 

@@ -120,7 +120,6 @@ func TestOpen_TempDirPerStore(t *testing.T) {
 			context.Background(),
 			store.CloneConfig{URL: remote.URL()},
 			storetest.Identity,
-			storetest.GitHubForge.ParsePRURL,
 		)
 		if err != nil {
 			t.Fatalf("Open: %v", err)
@@ -163,7 +162,6 @@ func TestOpen_CloneDirClonedAgain(t *testing.T) {
 			context.Background(),
 			store.CloneConfig{URL: remote.URL(), Dir: dir},
 			storetest.Identity,
-			storetest.GitHubForge.ParsePRURL,
 		)
 		if err != nil {
 			t.Fatalf("Open: %v", err)
@@ -312,7 +310,7 @@ func TestFreshness_ApplyReadsBackAtOnce(t *testing.T) {
 			return store.Summary{}, getErr
 		}
 		vals.Services[0].Name = "second"
-		return store.Summary{Subject: "rename"}, store.PutPreview(tree, "a", *vals)
+		return store.Summary{Subject: "rename"}, tree.PutPreview("a", *vals)
 	})
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -360,7 +358,7 @@ func TestOpen_RemoteRefusesCredentials(t *testing.T) {
 			_, err := store.Open(
 				context.Background(),
 				store.CloneConfig{URL: srv.URL + "/acme/gitops.git", Credentials: creds},
-				storetest.Identity, storetest.GitHubForge.ParsePRURL,
+				storetest.Identity,
 			)
 			if !errors.Is(err, store.ErrUnauthorized) {
 				t.Errorf("Open = %v, want ErrUnauthorized", err)
@@ -396,7 +394,6 @@ func TestOpen_RepoURLErrors(t *testing.T) {
 				context.Background(),
 				tc.clone,
 				storetest.Identity,
-				storetest.GitHubForge.ParsePRURL,
 				tc.opts...)
 			if err == nil {
 				_ = st.Close()
@@ -480,7 +477,6 @@ func TestCredentials_BasicAuth(t *testing.T) {
 					Credentials: creds,
 				},
 				storetest.Identity,
-				storetest.GitHubForge.ParsePRURL,
 			)
 			if err != nil {
 				t.Fatalf("Open: %v", err)
@@ -525,7 +521,6 @@ func TestCredentials_WrongToken(t *testing.T) {
 			Credentials: creds,
 		},
 		storetest.Identity,
-		storetest.GitHubForge.ParsePRURL,
 	)
 	if err == nil {
 		_ = st.Close()
@@ -549,7 +544,7 @@ func TestOpen_CredentialProviderError(t *testing.T) {
 	_, err := store.Open(
 		context.Background(),
 		store.CloneConfig{URL: srv.URL + "/acme/gitops.git", Credentials: creds},
-		storetest.Identity, storetest.GitHubForge.ParsePRURL,
+		storetest.Identity,
 	)
 	if !errors.Is(err, store.ErrUnauthorized) || !strings.Contains(err.Error(), "token mint failed") {
 		t.Errorf("Open = %v, want ErrUnauthorized with the provider's error", err)
@@ -576,7 +571,7 @@ func TestCredentials_BeforeEachGitCall(t *testing.T) {
 	st, err := store.Open(
 		context.Background(),
 		store.CloneConfig{URL: remote.URL(), Credentials: creds},
-		storetest.Identity, storetest.GitHubForge.ParsePRURL,
+		storetest.Identity,
 	)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -637,7 +632,7 @@ func TestFreshness_CancelledRefreshRetriedByWaiter(t *testing.T) {
 	st, err := store.Open(
 		context.Background(),
 		store.CloneConfig{URL: remote.URL(), Credentials: creds},
-		storetest.Identity, storetest.GitHubForge.ParsePRURL,
+		storetest.Identity,
 	)
 	if err != nil {
 		t.Fatalf("Open: %v", err)

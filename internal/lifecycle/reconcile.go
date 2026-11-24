@@ -312,14 +312,14 @@ func (p *reconcilePlan) change(tree Tree) (Summary, error) {
 		true, nil, nil, nil, false, false, nil, nil
 	p.cleanup = newSteps(p.ev.Target, p.cleanupSlugs, p.cleanupReason)
 	for _, s := range p.cleanup {
-		s.run(tree)
+		s.run(tree, p.parsePR)
 	}
 	removed := len(removedSlugs(p.cleanup)) > 0
 	switch {
 	case !p.deploy, p.listErr != nil:
 	case len(p.services) == 0:
 		p.noService = &teardownStep{tt: p.target(p.t.Slug), reason: NoServiceReason, trigger: triggerWebhook}
-		p.noService.run(tree)
+		p.noService.run(tree, p.parsePR)
 	default:
 		vals, err := tree.GetPreview(p.t.Slug)
 		if err != nil && !errors.Is(err, ErrNotFound) {
@@ -339,7 +339,7 @@ func (p *reconcilePlan) change(tree Tree) (Summary, error) {
 			break
 		}
 		if p.unpin = p.untouchedUnpin(vals); p.unpin != nil {
-			p.unpin.run(tree)
+			p.unpin.run(tree, p.parsePR)
 			removed = removed || p.unpin.removed()
 		}
 		p.deployAll(tree, !removed)
@@ -397,7 +397,7 @@ func (p *reconcilePlan) untouchedUnpin(vals *preview.Values) *teardownStep {
 func (p *reconcilePlan) deployAll(tree Tree, skipUnchanged bool) {
 	for _, service := range p.services {
 		step := &deployStep{service: service}
-		step.result, step.err = tree.Deploy(p.t.Slug, p.catalog, service, p.pr.HeadSHA, preview.DeployInputs{
+		step.result, step.err = deployPreview(tree, p.t.Slug, p.catalog, service, p.pr.HeadSHA, preview.DeployInputs{
 			ServiceName:    service,
 			HeadRef:        p.pr.HeadRef,
 			CommitSha:      p.pr.HeadSHA,

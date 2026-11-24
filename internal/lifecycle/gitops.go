@@ -48,7 +48,7 @@ type Result struct {
 	Deleted []string
 }
 
-// WriteResult is the outcome of Tree.Deploy. Unchanged is true when
+// WriteResult is the outcome of deployPreview. Unchanged is true when
 // skipUnchanged left the file as it was: Values then holds that file.
 // Created is true when the deploy created the file. Excluded is the
 // projection's (preview.Projection.Excluded).
@@ -59,7 +59,7 @@ type WriteResult struct {
 	Created   bool
 }
 
-// TeardownResult is the outcome of Tree.Teardown and Tree.UnpinServices.
+// TeardownResult is the outcome of teardownPreview and unpinPreviewServices.
 // Removed lists the services unpinned from the PR; it is empty when there was
 // nothing to tear down. Values, Excluded (preview.Projection.Excluded) and
 // Catalog, the badil.yaml the file was projected on, are set only when
@@ -72,7 +72,7 @@ type TeardownResult struct {
 	Deleted  bool
 }
 
-// SyncResult is the outcome of Tree.Sync. Changed is true when the file was
+// SyncResult is the outcome of syncPreview. Changed is true when the file was
 // rewritten; Values and Excluded (preview.Projection.Excluded) then describe
 // it. Notify is true when the rewritten file's ordered list of service or
 // dependency names, or any entry's host, differs from the file it replaced.
@@ -101,47 +101,18 @@ type Tree interface {
 	// when it does not exist.
 	GetPreview(slug string) (*preview.Values, error)
 
+	// PutPreview puts vals at previews/<slug>/values.yaml. It records
+	// nothing.
+	PutPreview(slug string, vals preview.Values) error
+
 	// DeletePreview deletes previews/<slug>/values.yaml, recorded as
 	// "delete". The preview must exist.
 	DeletePreview(slug string)
 
-	// Deploy pins serviceName at commitSha in previews/<slug>/values.yaml,
-	// recorded as "pin <service>@<sha7>". An existing file is merged with
-	// preview.UpdatePreviewValues; a missing one is built from the full
-	// catalog (preview.BuildPreviewValues), every other service tracking its
-	// branch. Either is then projected on c. With skipUnchanged, when the
-	// file exists and the projection differs from it only in serviceName's
-	// updated-at (preview.EqualExceptUpdatedAt), nothing is put and the
-	// result is Unchanged.
-	Deploy(
-		slug string,
-		c *catalog.Catalog,
-		serviceName, commitSha string,
-		inputs preview.DeployInputs,
-		skipUnchanged bool,
-	) (*WriteResult, error)
+	// Record adds change to the commit body lines of the preview slug.
+	Record(slug, change string)
 
-	// Teardown unpins every service of previews/<slug>/values.yaml deployed
-	// by the PR owner/repo#prNumber, its pr-url parsed with the store's pull
-	// request URL rule. The file is deleted when no pin remains, recorded as
-	// "delete". Otherwise it is put, projected on the tree's badil.yaml after
-	// the unpin, so that an unpinned entry gets its branch-tracking imageTag
-	// in the same commit, recorded as one "unpin <service>" per service; a
-	// badil.yaml that can't be read or parsed is then an error. A missing
-	// file or a PR that pinned nothing is a no-op: an empty TeardownResult
-	// and a nil error.
-	Teardown(slug, owner, repo string, prNumber int) (*TeardownResult, error)
-
-	// UnpinServices unpins, in previews/<slug>/values.yaml, the entries
-	// deployed by the PR owner/repo#prNumber whose service is in services
-	// (preview.UnpinPRServices); the PR's other entries stay pinned. It is
-	// Teardown except that the file is never deleted: it is put, projected on
-	// badil.yaml, even when no pin remains, so Deleted is always false.
-	UnpinServices(slug, owner, repo string, prNumber int, services []string) (*TeardownResult, error)
-
-	// Sync rewrites previews/<slug>/values.yaml as its projection on c when
-	// that differs from the file (preview.Equal), recorded as "sync". A file
-	// that already matches is left alone. A missing file is a no-op: a
-	// SyncResult with only NotFound set and a nil error.
-	Sync(slug string, c *catalog.Catalog) (*SyncResult, error)
+	// GitopsRepoURL returns the gitops repo URL the tree's previews are
+	// projected with: the gitopsRepoURL of their files.
+	GitopsRepoURL() string
 }

@@ -93,7 +93,7 @@ func DeployPR(
 				return Summary{}, checkErr
 			}
 			var deployErr error
-			write, deployErr = tree.Deploy(slug, catalog, inputs.ServiceName, inputs.CommitSha, inputs, false)
+			write, deployErr = deployPreview(tree, slug, catalog, inputs.ServiceName, inputs.CommitSha, inputs, false)
 			subject := fmt.Sprintf("chore(preview): deploy %s@%s to %s",
 				inputs.ServiceName, preview.ShortSHA(inputs.CommitSha), slug)
 			return Summary{Subject: subject}, deployErr

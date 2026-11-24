@@ -31,11 +31,8 @@ type GitHubStore struct {
 	// webBase is repoURL's scheme, host and fullName, the base of commit links.
 	webBase  string
 	identity CommitIdentity
-	// parsePR is the forge's pull request URL rule, given to the trees of
-	// Apply.
-	parsePR preview.PRURLParser
-	metrics *metrics.Metrics
-	clone   *gitClone
+	metrics  *metrics.Metrics
+	clone    *gitClone
 	// applySlot serialises Apply: it holds one token while an Apply runs.
 	applySlot chan struct{}
 	// sleep waits between Apply's attempts.
@@ -92,22 +89,15 @@ func WithHeadMoved(f func()) Option {
 // a repository path of two segments is an error. Apply commits
 // as identity, whose Name and Email must be set. The clone is timed as the
 // clone operation; a failed clone is an error, ErrUnauthorized when the
-// remote or the credential provider refused it. parsePR, the forge's pull
-// request URL rule (forge.Forge.ParsePRURL), is required: Tree.Teardown and
-// Tree.UnpinServices match pr-urls with it.
-func Open(
-	ctx context.Context, clone CloneConfig, identity CommitIdentity, parsePR preview.PRURLParser, opts ...Option,
-) (*GitHubStore, error) {
+// remote or the credential provider refused it.
+func Open(ctx context.Context, clone CloneConfig, identity CommitIdentity, opts ...Option) (*GitHubStore, error) {
 	if clone.URL == "" {
 		return nil, errors.New("gitops repo URL is required")
 	}
 	if identity.Name == "" || identity.Email == "" {
 		return nil, errors.New("gitops commit identity: name and email are required")
 	}
-	if parsePR == nil {
-		return nil, errors.New("pull request URL parser is required")
-	}
-	c := &GitHubStore{identity: identity, parsePR: parsePR, applySlot: make(chan struct{}, 1), sleep: sleepCtx}
+	c := &GitHubStore{identity: identity, applySlot: make(chan struct{}, 1), sleep: sleepCtx}
 	for _, opt := range opts {
 		opt(c)
 	}
