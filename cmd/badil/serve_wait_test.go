@@ -55,7 +55,7 @@ func serveWaits(t *testing.T) served {
 	if err != nil {
 		t.Fatal(err)
 	}
-	httpSrv := newHTTPServer(ln.Addr().String(), srv)
+	httpSrv := server.NewHTTPServer(ln.Addr().String(), srv)
 	go func() { _ = httpSrv.Serve(ln) }()
 	t.Cleanup(func() { _ = httpSrv.Close() })
 	return served{httpSrv: httpSrv, srv: srv, st: st, remote: remote, base: "http://" + ln.Addr().String()}
@@ -116,11 +116,11 @@ func TestServe_ShutdownEndsWaits(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	start := time.Now()
-	if err := shutdownServers(ctx, sv.httpSrv); err != nil {
-		t.Fatalf("shutdownServers: %v", err)
+	if err := server.ShutdownServers(ctx, sv.httpSrv); err != nil {
+		t.Fatalf("ShutdownServers: %v", err)
 	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
-		t.Errorf("shutdownServers took %s, want under 2s", elapsed)
+		t.Errorf("ShutdownServers took %s, want under 2s", elapsed)
 	}
 	if a := awaitAnswer(t, ch); a.err != nil || a.code != http.StatusOK || a.state != "progressing" {
 		t.Errorf("wait answered %+v, want 200 progressing", a)

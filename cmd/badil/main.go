@@ -2,13 +2,11 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
@@ -30,9 +28,6 @@ import (
 // shutdownTimeout bounds graceful shutdown: draining in-flight requests and
 // then background teardowns share it, inside the default 30s pod grace period.
 const shutdownTimeout = 25 * time.Second
-
-// readHeaderTimeout bounds reading a request's headers on every listener.
-const readHeaderTimeout = 10 * time.Second
 
 func main() {
 	if err := rootCmd().Execute(); err != nil {
@@ -109,7 +104,7 @@ func serveCmd() *cobra.Command {
 				server.WithStatusToken(cfg.StatusToken),
 				server.WithReadToken(cfg.ReadToken), server.WithPreviewTTL(ttl))
 			catchUp := a.CatchUp()
-			httpSrv := newHTTPServer(cfg.ListenAddr, srv)
+			httpSrv := server.NewHTTPServer(cfg.ListenAddr, srv)
 
 			if cfg.DeployToken == "" {
 				slog.InfoContext(ctx, "deploy API disabled", slog.String("reason", "BADIL_DEPLOY_TOKEN is unset"))
@@ -117,8 +112,11 @@ func serveCmd() *cobra.Command {
 			if m != nil {
 				app.CountPreviews(ctx, st, m)
 			}
-			serveInBackground(ctx, "server", httpSrv)
-			metricsSrv := startMetricsServer(ctx, cfg.MetricsAddr, m)
+			server.ServeInBackground(ctx, "server", httpSrv, os.Exit)
+			var metricsSrv *http.Server
+			if m != nil {
+				metricsSrv = server.StartMetricsServer(ctx, cfg.MetricsAddr, m.Handler(), os.Exit)
+			}
 			a.Go(func() { app.RunCatchUp(ctx, catchUp) })
 			a.StartSweepLoop(ctx, app.SweepAPI(st, f, m), catchUp, m, interval, ttl)
 
@@ -126,7 +124,7 @@ func serveCmd() *cobra.Command {
 			slog.InfoContext(ctx, "shutting down server")
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 			defer cancel()
-			shutdownErr := shutdownServers(shutdownCtx, httpSrv, metricsSrv)
+			shutdownErr := server.ShutdownServers(shutdownCtx, httpSrv, metricsSrv)
 			if shutdownErr == nil {
 				shutdownErr = a.WaitBackground(shutdownCtx)
 			}
@@ -154,66 +152,6 @@ func statusHooks(s *status.Store, wake *app.Wake) []store.Option {
 		store.WithApplied(app.AppliedHook(s, wake)),
 		store.WithHeadMoved(app.HeadMovedHook(s, wake)),
 	}
-}
-
-// newHTTPServer returns the HTTP server of srv on addr. When its shutdown
-// starts, srv's waits end at once (server.Server.EndWaits), so that shutdown
-// does not wait for their long polls.
-func newHTTPServer(addr string, srv *server.Server) *http.Server {
-	httpSrv := &http.Server{
-		Addr:              addr,
-		Handler:           srv.Handler(),
-		ReadHeaderTimeout: readHeaderTimeout,
-	}
-	httpSrv.RegisterOnShutdown(srv.EndWaits)
-	return httpSrv
-}
-
-// startMetricsServer serves GET /metrics from m on addr in the background and
-// returns its server. It starts nothing and returns nil when m is nil.
-func startMetricsServer(ctx context.Context, addr string, m *metrics.Metrics) *http.Server {
-	if m == nil {
-		return nil
-	}
-	mux := http.NewServeMux()
-	mux.Handle("GET /metrics", m.Handler())
-	metricsSrv := &http.Server{
-		Addr:              addr,
-		Handler:           mux,
-		ReadHeaderTimeout: readHeaderTimeout,
-	}
-	serveInBackground(ctx, "metrics server", metricsSrv)
-	return metricsSrv
-}
-
-// serveInBackground runs srv.ListenAndServe in the background, logging it as
-// name, and exits the process when it fails for any reason but shutdown.
-func serveInBackground(ctx context.Context, name string, srv *http.Server) {
-	logger := slog.Default()
-	go func() {
-		logger.InfoContext(ctx, "starting "+name, "addr", srv.Addr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.ErrorContext(ctx, name+" error", "err", err)
-			os.Exit(1)
-		}
-	}()
-}
-
-// shutdownServers shuts every non-nil server down concurrently, within ctx,
-// and returns their joined errors.
-func shutdownServers(ctx context.Context, servers ...*http.Server) error {
-	errs := make([]error, len(servers))
-	var wg sync.WaitGroup
-	for i, srv := range servers {
-		if srv == nil {
-			continue
-		}
-		wg.Go(func() {
-			errs[i] = srv.Shutdown(ctx)
-		})
-	}
-	wg.Wait()
-	return errors.Join(errs...)
 }
 
 // newStoreAndForge builds the gitops repo store and the GitHub forge from
