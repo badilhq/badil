@@ -11,7 +11,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/badilhq/badil/internal/lifecycle"
-	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
 )
 
@@ -20,6 +19,21 @@ var (
 	ErrNotFound     = lifecycle.ErrNotFound
 	ErrUnauthorized = errors.New("gitops: unauthorized")
 )
+
+// Recorder records the gitops operations of a GitHubStore. *metrics.Metrics
+// implements it.
+type Recorder interface {
+	GitopsOp(op, result string, d time.Duration)
+	PushConflict(op string)
+}
+
+// nopRecorder is the Recorder of a GitHubStore opened without WithMetrics: it
+// records nothing.
+type nopRecorder struct{}
+
+func (nopRecorder) GitopsOp(string, string, time.Duration) {}
+
+func (nopRecorder) PushConflict(string) {}
 
 // GitHubStore is the gitops repo, read from a git clone and written by
 // pushing commits to it (Apply).
@@ -31,7 +45,7 @@ type GitHubStore struct {
 	// webBase is repoURL's scheme, host and fullName, the base of commit links.
 	webBase  string
 	identity CommitIdentity
-	metrics  *metrics.Metrics
+	metrics  Recorder
 	clone    *gitClone
 	// applySlot serialises Apply: it holds one token while an Apply runs.
 	applySlot chan struct{}
@@ -49,10 +63,13 @@ type GitHubStore struct {
 type Option func(*GitHubStore)
 
 // WithMetrics times Apply, as its operation kind, and the clone's git clone,
-// ls-remote and fetch in m, and counts Apply's push conflicts.
-func WithMetrics(m *metrics.Metrics) Option {
+// ls-remote and fetch in m, and counts Apply's push conflicts. A nil m
+// leaves the default, which records nothing.
+func WithMetrics(m Recorder) Option {
 	return func(c *GitHubStore) {
-		c.metrics = m
+		if m != nil {
+			c.metrics = m
+		}
 	}
 }
 
@@ -97,7 +114,7 @@ func Open(ctx context.Context, clone CloneConfig, identity CommitIdentity, opts 
 	if identity.Name == "" || identity.Email == "" {
 		return nil, errors.New("gitops commit identity: name and email are required")
 	}
-	c := &GitHubStore{identity: identity, applySlot: make(chan struct{}, 1), sleep: sleepCtx}
+	c := &GitHubStore{identity: identity, metrics: nopRecorder{}, applySlot: make(chan struct{}, 1), sleep: sleepCtx}
 	for _, opt := range opts {
 		opt(c)
 	}

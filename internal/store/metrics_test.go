@@ -50,3 +50,20 @@ func TestClientMetrics_TimesApplyByKind(t *testing.T) {
 		t.Errorf("gitops operation counts = %v, want %v", got, want)
 	}
 }
+
+// TestWithMetrics_NilRecordsNothing checks a store given an untyped nil or a
+// nil *metrics.Metrics applies a deploy without recording or panicking.
+func TestWithMetrics_NilRecordsNothing(t *testing.T) {
+	for name, opt := range map[string]store.Option{
+		"untyped nil":          store.WithMetrics(nil),
+		"nil *metrics.Metrics": store.WithMetrics((*metrics.Metrics)(nil)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newGitopsFake(t, map[string]string{"previews/a/values.yaml": previewFile("a")})
+			c := f.open(t, opt)
+			if _, err := apply(c, store.OpDeploy, rename("a", "deployed", "deploy")); err != nil {
+				t.Fatalf("deploy Apply: %v", err)
+			}
+		})
+	}
+}
