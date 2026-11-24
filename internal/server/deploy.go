@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"slices"
 	"time"
 
+	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
@@ -100,7 +100,8 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slug := preview.Slugify(req.HeadRef)
+	dr := app.DeployRequest(req)
+	slug := dr.Slug()
 	logger := slog.With(
 		slog.String("service", req.Service),
 		slog.String("slug", slug),
@@ -108,37 +109,19 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		slog.String("pr_number", req.PRNumber),
 	)
 
-	services, err := s.store.FetchServiceCatalog(ctx)
-	if err != nil {
-		writeUpstreamError(ctx, logger, w, "fetch catalog", err)
+	out, err := s.app.Deploy(ctx, dr)
+	var catalogErr *app.CatalogReadError
+	if errors.As(err, &catalogErr) {
+		writeUpstreamError(ctx, logger, w, "fetch catalog", catalogErr.Err)
 		return
 	}
-	if !slices.Contains(services.Services, req.Service) {
+	if errors.Is(err, app.ErrServiceNotInCatalog) {
 		writeJSONError(ctx, w, http.StatusNotFound,
 			fmt.Sprintf("service %q not in catalog", req.Service))
 		return
 	}
-
-	inputs := preview.DeployInputs{
-		GitopsRepo:     "", // not used downstream; carry-over from earlier shape
-		ServiceName:    req.Service,
-		HeadRef:        req.HeadRef,
-		CommitSha:      req.CommitSha,
-		PRAuthor:       req.PRAuthor,
-		PRURL:          req.PRURL,
-		PRNumber:       req.PRNumber,
-		Timestamp:      time.Now().UTC().Format(time.RFC3339),
-		WorkflowRunURL: req.WorkflowRunURL,
-	}
-
-	// A manual deploy always writes: it refreshes updated-at (the TTL clock)
-	// and always returns a gitops commit URL. It is refused with 409 when the
-	// preview does not exist and preview.maxPreviews previews already do, or
-	// when the preview does not exist and its namespace is not a preview's;
-	// a failed namespace check is a 502.
-	result, fanErr, err := lifecycle.DeployPR(ctx, s.app.DeployAPI(), services, slug, inputs)
 	if errors.Is(err, lifecycle.ErrPreviewLimit) {
-		msg := fmt.Sprintf("preview limit (%d) reached", services.MaxPreviews)
+		msg := fmt.Sprintf("preview limit (%d) reached", out.MaxPreviews)
 		logger.WarnContext(ctx, "deploy failed", slog.String("op", "preview limit"), slog.String("err", msg))
 		writeJSONError(ctx, w, http.StatusConflict, msg)
 		return
@@ -165,13 +148,13 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := DeployResponse{PreviewSlug: slug, GitOpsCommitURL: result.Commit.URL}
-	if fanErr != nil {
-		logger.WarnContext(ctx, "comment fan-out had failures", slog.String("err", fanErr.Error()))
-		resp.Warnings = splitJoinedErr(fanErr)
+	resp := DeployResponse{PreviewSlug: slug, GitOpsCommitURL: out.Deployed.Commit.URL}
+	if out.FanOutErr != nil {
+		logger.WarnContext(ctx, "comment fan-out had failures", slog.String("err", out.FanOutErr.Error()))
+		resp.Warnings = splitJoinedErr(out.FanOutErr)
 	}
 
-	logger.InfoContext(ctx, "deploy succeeded", slog.String("gitops_commit_url", result.Commit.URL))
+	logger.InfoContext(ctx, "deploy succeeded", slog.String("gitops_commit_url", out.Deployed.Commit.URL))
 	writeJSON(ctx, w, http.StatusOK, resp)
 }
 
