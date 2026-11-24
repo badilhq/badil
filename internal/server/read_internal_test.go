@@ -15,7 +15,6 @@ import (
 	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
-	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/status"
 )
@@ -412,12 +411,8 @@ func TestWait_CatchUpRecordsTheFilteredPRs(t *testing.T) {
 		reconciled++
 		s.app.QueueReconcile(ctx, ev, done)
 	}
-	api := lifecycle.CatchUpAPI{
-		Store:    fg,
-		Forge:    fg,
-		Recorder: (*metrics.Metrics)(nil),
-		Skipped:  s.app.RecordCatchUpSkip,
-	}
+	api := app.CatchUpAPI(fg, fg, nil)
+	api.Skipped = s.app.RecordCatchUpSkip
 	lifecycle.NewCatchUp(api, reconcile).Run(context.Background())
 	if err := s.app.WaitBackground(context.Background()); err != nil {
 		t.Fatal(err)
@@ -440,9 +435,8 @@ func TestWait_CatchUpSkipAndNewerOutcome(t *testing.T) {
 	path := "/v1/wait?repo=acme/front&pr=7&sha=" + statusSHA
 	run := func(t *testing.T, fg *fakeGitops, s *Server) {
 		t.Helper()
-		api := lifecycle.CatchUpAPI{
-			Store: fg, Forge: fg, Recorder: (*metrics.Metrics)(nil), Skipped: s.app.RecordCatchUpSkip,
-		}
+		api := app.CatchUpAPI(fg, fg, nil)
+		api.Skipped = s.app.RecordCatchUpSkip
 		lifecycle.NewCatchUp(api, s.app.QueueReconcile).Run(context.Background())
 		if err := s.app.WaitBackground(context.Background()); err != nil {
 			t.Fatal(err)

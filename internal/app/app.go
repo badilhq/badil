@@ -22,10 +22,11 @@ type Store interface {
 	GetPreview(ctx context.Context, slug string) (*preview.Values, string, error)
 }
 
-// Metrics records the outcomes of the lifecycle operations an App runs.
-// *metrics.Metrics implements it.
+// Metrics records the outcomes of the lifecycle operations an App runs and
+// the reconciles its catch-up starts. *metrics.Metrics implements it.
 type Metrics interface {
 	lifecycle.Recorder
+	lifecycle.CatchUpRecorder
 }
 
 // nopMetrics is the Metrics of an App built without one: it records
@@ -43,6 +44,8 @@ func (nopMetrics) SweepDeleted(string) {}
 func (nopMetrics) PreviewSynced() {}
 
 func (nopMetrics) PreviewCreated() {}
+
+func (nopMetrics) CatchUpReconcile() {}
 
 // Config configures an App built by New.
 type Config struct {

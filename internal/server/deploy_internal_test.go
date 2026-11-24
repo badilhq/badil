@@ -442,7 +442,10 @@ func TestDeploy_PreviewLimitReadErrors(t *testing.T) {
 // nil *metrics.Metrics deploys a new preview, which lifecycle records through
 // the server's recorder, without recording or panicking.
 func TestWithMetrics_NilRecordsNothing(t *testing.T) {
-	for name, m := range map[string]Recorder{
+	for name, m := range map[string]interface {
+		Recorder
+		app.Metrics
+	}{
 		"untyped nil":          nil,
 		"nil *metrics.Metrics": (*metrics.Metrics)(nil),
 	} {

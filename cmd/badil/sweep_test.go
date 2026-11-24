@@ -352,7 +352,7 @@ func TestRunCleanup_ExitsWithTheSweepsError(t *testing.T) {
 func checkRunCleanup(t *testing.T, tc runCleanupCase) {
 	logs := captureText(t)
 	f := &loopFake{listErr: tc.listErr, openErr: tc.openErr, openPRs: tc.openPRs}
-	reconcile := reconcileNow(lifecycle.ReconcileAPI{Store: f, Forge: f, Recorder: f, FanOut: f.api().FanOut})
+	reconcile := app.ReconcileNow(lifecycle.ReconcileAPI{Store: f, Forge: f, Recorder: f, FanOut: f.api().FanOut})
 	c := lifecycle.NewCatchUp(lifecycle.CatchUpAPI{Store: f, Forge: f, Recorder: f}, reconcile)
 	sweepCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()

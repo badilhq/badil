@@ -21,7 +21,6 @@ import (
 
 	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/config"
-	"github.com/badilhq/badil/internal/forge"
 	forgegithub "github.com/badilhq/badil/internal/forge/github"
 	"github.com/badilhq/badil/internal/github"
 	"github.com/badilhq/badil/internal/lifecycle"
@@ -48,36 +47,6 @@ const minCleanupInterval = time.Minute
 
 // previewsCountTimeout bounds the startup listing of the previews.
 const previewsCountTimeout = 10 * time.Second
-
-// sweepAPI is st, f and the fan-out with the metrics recorder lifecycle.Sweep
-// expects. A nil *metrics.Metrics records nothing.
-func sweepAPI(st *store.GitHubStore, f forge.Forge, m *metrics.Metrics) lifecycle.SweepAPI {
-	return lifecycle.SweepAPI{Store: st, Forge: f, Recorder: m, FanOut: lifecycle.FanOutPRComments}
-}
-
-// catchUpAPI is st, f and the metrics recorder lifecycle.CatchUp expects. A
-// nil *metrics.Metrics records nothing.
-func catchUpAPI(st lifecycle.CatchUpStore, f forge.Forge, m *metrics.Metrics) lifecycle.CatchUpAPI {
-	return lifecycle.CatchUpAPI{Store: st, Forge: f, Recorder: m}
-}
-
-// cleanupStore is the gitops store badil cleanup's catch-up reads and writes:
-// *store.GitHubStore.
-type cleanupStore interface {
-	lifecycle.CatchUpStore
-	lifecycle.ReconcileStore
-}
-
-// cleanupCatchUp is badil cleanup's catch-up over st and f, recording no
-// metrics: it reconciles at once (reconcileNow), checking the namespace of a
-// new preview with ns as serve does.
-func cleanupCatchUp(st cleanupStore, f forge.Forge, ns lifecycle.NamespaceChecker) *lifecycle.CatchUp {
-	var m *metrics.Metrics
-	reconcile := lifecycle.ReconcileAPI{
-		Store: st, Forge: f, Recorder: m, FanOut: lifecycle.FanOutPRComments, Namespaces: ns,
-	}
-	return lifecycle.NewCatchUp(catchUpAPI(st, f, m), reconcileNow(reconcile))
-}
 
 // catchUpRunner runs one catch-up: *lifecycle.CatchUp.
 type catchUpRunner interface {
@@ -166,9 +135,7 @@ func serveCmd() *cobra.Command {
 				server.WithMetrics(m),
 				server.WithStatus(cfg.StatusToken, previewStatus),
 				server.WithReadToken(cfg.ReadToken), server.WithPreviewTTL(ttl))
-			catchUpCfg := catchUpAPI(st, f, m)
-			catchUpCfg.Skipped = a.RecordCatchUpSkip
-			catchUp := lifecycle.NewCatchUp(catchUpCfg, a.QueueReconcile)
+			catchUp := a.CatchUp()
 			httpSrv := newHTTPServer(cfg.ListenAddr, srv)
 
 			if cfg.DeployToken == "" {
@@ -178,7 +145,7 @@ func serveCmd() *cobra.Command {
 			serveInBackground(ctx, "server", httpSrv)
 			metricsSrv := startMetricsServer(ctx, cfg.MetricsAddr, m)
 			a.Go(func() { runCatchUp(ctx, catchUp) })
-			startSweepLoop(ctx, a, sweepAPI(st, f, m), catchUp, m, interval, ttl)
+			startSweepLoop(ctx, a, app.SweepAPI(st, f, m), catchUp, m, interval, ttl)
 
 			<-ctx.Done()
 			slog.InfoContext(ctx, "shutting down server")
@@ -538,19 +505,19 @@ func cleanupCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			app, err := newApp(cfg)
+			ghApp, err := newApp(cfg)
 			if err != nil {
 				return err
 			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), cleanupTimeout)
 			defer cancel()
-			st, f, err := newStoreAndForge(ctx, app, cfg)
+			st, f, err := newStoreAndForge(ctx, ghApp, cfg)
 			if err != nil {
 				return err
 			}
 			defer closeStore(ctx, st)
-			catchUp := cleanupCatchUp(st, f, namespace.InCluster(ctx))
-			return runCleanup(cmd.Context(), ctx, sweepAPI(st, f, nil), catchUp, time.Now().UTC(), ttl)
+			catchUp := app.CleanupCatchUp(st, f, namespace.InCluster(ctx))
+			return runCleanup(cmd.Context(), ctx, app.SweepAPI(st, f, nil), catchUp, time.Now().UTC(), ttl)
 		},
 	}
 }
@@ -565,17 +532,6 @@ func runCleanup(
 	err := lifecycle.Sweep(sweepCtx, api, now, ttl)
 	runCatchUp(ctx, c)
 	return err
-}
-
-// reconcileNow reconciles through lifecycle.ReconcilePR over api at once,
-// each reconcile capped at app.ReconcileTimeout, and calls done with its
-// result.
-func reconcileNow(api lifecycle.ReconcileAPI) lifecycle.ReconcileFunc {
-	return func(ctx context.Context, ev lifecycle.Event, done func(lifecycle.ReconcileResult)) {
-		rctx, cancel := context.WithTimeout(ctx, app.ReconcileTimeout)
-		defer cancel()
-		done(lifecycle.ReconcilePR(rctx, api, ev))
-	}
 }
 
 // parseCleanupInterval parses CLEANUP_INTERVAL. Empty means no in-server
