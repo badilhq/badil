@@ -1,4 +1,4 @@
-package store_test
+package lifecycle_test
 
 import (
 	"maps"
@@ -54,10 +54,10 @@ func (g *teardownGitHub) commit(t *testing.T) storetest.Commit {
 
 // run applies unpin on the preview feature-x as one teardown operation.
 func (g *teardownGitHub) run(
-	t *testing.T, unpin func(lifecycle.Tree) (*store.TeardownResult, error),
-) (*store.TeardownResult, error) {
+	t *testing.T, unpin func(lifecycle.Tree) (*lifecycle.TeardownResult, error),
+) (*lifecycle.TeardownResult, error) {
 	t.Helper()
-	var res *store.TeardownResult
+	var res *lifecycle.TeardownResult
 	var err error
 	g.out, err = apply(g.open(t), store.OpTeardown, func(tree lifecycle.Tree) (store.Summary, error) {
 		var unpinErr error
@@ -70,10 +70,10 @@ func (g *teardownGitHub) run(
 	return res, nil
 }
 
-func runTeardown(t *testing.T, g *teardownGitHub) (*store.TeardownResult, error) {
+func runTeardown(t *testing.T, g *teardownGitHub) (*lifecycle.TeardownResult, error) {
 	t.Helper()
-	return g.run(t, func(tree lifecycle.Tree) (*store.TeardownResult, error) {
-		return tree.Teardown("feature-x", "acme", "backend-1", 42)
+	return g.run(t, func(tree lifecycle.Tree) (*lifecycle.TeardownResult, error) {
+		return lifecycle.TeardownPreview(tree, storetest.GitHubForge.ParsePRURL, "feature-x", "acme", "backend-1", 42)
 	})
 }
 
@@ -295,8 +295,8 @@ dependencies:
 // services needed.
 func TestTeardown_DropsPartsOnlyThePRNeeded(t *testing.T) {
 	g := &teardownGitHub{gets: []string{frontAndPayments}, badil: needsBadil}
-	result, err := g.run(t, func(tree lifecycle.Tree) (*store.TeardownResult, error) {
-		return tree.Teardown("feature-x", "acme", "payments", 42)
+	result, err := g.run(t, func(tree lifecycle.Tree) (*lifecycle.TeardownResult, error) {
+		return lifecycle.TeardownPreview(tree, storetest.GitHubForge.ParsePRURL, "feature-x", "acme", "payments", 42)
 	})
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -434,10 +434,18 @@ func TestTeardown_DeleteConflictBecomesUpdate(t *testing.T) {
 	}
 }
 
-func runUnpin(t *testing.T, g *teardownGitHub, services ...string) (*store.TeardownResult, error) {
+func runUnpin(t *testing.T, g *teardownGitHub, services ...string) (*lifecycle.TeardownResult, error) {
 	t.Helper()
-	return g.run(t, func(tree lifecycle.Tree) (*store.TeardownResult, error) {
-		return tree.UnpinServices("feature-x", "acme", "backend-1", 42, services)
+	return g.run(t, func(tree lifecycle.Tree) (*lifecycle.TeardownResult, error) {
+		return lifecycle.UnpinPreviewServices(
+			tree,
+			storetest.GitHubForge.ParsePRURL,
+			"feature-x",
+			"acme",
+			"backend-1",
+			42,
+			services,
+		)
 	})
 }
 

@@ -405,7 +405,7 @@ func newStoreAndForge(
 		URL:         cfg.GitOpsRepoURL,
 		Dir:         cfg.GitOpsCloneDir,
 		Credentials: gitopsCredentials(cfg, itr),
-	}, identity, f.ParsePRURL, opts...)
+	}, identity, opts...)
 	if err != nil {
 		return nil, nil, err
 	}

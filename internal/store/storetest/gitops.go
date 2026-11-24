@@ -59,7 +59,7 @@ func Project(slug string, vals preview.Values, catalog *store.ServiceCatalog) pr
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.DiscardHandler))
 	defer slog.SetDefault(prev)
-	return preview.ApplyHosts(preview.ApplyCatalog(vals, cat).Values, slug, catalog.URLs)
+	return preview.Project(vals, slug, cat, catalog.URLs).Values
 }
 
 // Gitops returns a remote holding badil as badil.yaml (none when ""), the
@@ -99,7 +99,6 @@ func Gitops(
 		context.Background(),
 		store.CloneConfig{URL: remote.URL()},
 		Identity,
-		GitHubForge.ParsePRURL,
 		append([]store.Option{store.WithRepoURL(GitopsURL)}, opts...)...)
 	if err != nil {
 		t.Fatalf("open store: %v", err)

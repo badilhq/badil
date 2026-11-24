@@ -78,7 +78,7 @@ type teardownStep struct {
 	// commentPR edits the PR's comment, which states reason.
 	commentPR bool
 	// services, when set, are the only services unpinned: the file is never
-	// deleted (Tree.UnpinServices).
+	// deleted (unpinPreviewServices).
 	services []string
 	// ran is set once an attempt ran the step; result or err is its outcome.
 	ran    bool
@@ -86,15 +86,18 @@ type teardownStep struct {
 	err    error
 }
 
-// run tears the PR down from its preview in tree, recording the outcome. A
-// failure is recorded, not returned: it stages nothing.
-func (s *teardownStep) run(tree Tree) {
+// run tears the PR down from its preview in tree, its pr-urls parsed with
+// parsePR, recording the outcome. A failure is recorded, not returned: it
+// stages nothing.
+func (s *teardownStep) run(tree Tree, parsePR preview.PRURLParser) {
 	s.ran = true
 	if s.services != nil {
-		s.result, s.err = tree.UnpinServices(s.tt.Slug, s.tt.Owner, s.tt.Repo, s.tt.Number, s.services)
+		s.result, s.err = unpinPreviewServices(
+			tree, parsePR, s.tt.Slug, s.tt.Owner, s.tt.Repo, s.tt.Number, s.services,
+		)
 		return
 	}
-	s.result, s.err = tree.Teardown(s.tt.Slug, s.tt.Owner, s.tt.Repo, s.tt.Number)
+	s.result, s.err = teardownPreview(tree, parsePR, s.tt.Slug, s.tt.Owner, s.tt.Repo, s.tt.Number)
 }
 
 // removed reports whether the step removed the PR from its preview.
@@ -143,7 +146,7 @@ func teardownPRs(ctx context.Context, api TeardownAPI, tt Target, slugs []string
 		Change: func(tree Tree) (Summary, error) {
 			steps = newSteps(tt, slugs, reason)
 			for _, s := range steps {
-				s.run(tree)
+				s.run(tree, api.Forge.ParsePRURL)
 			}
 			return Summary{Subject: unpinSubject(tt, removedSlugs(steps))}, nil
 		},

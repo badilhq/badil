@@ -197,7 +197,7 @@ func (c *GitHubStore) change(op Op) (plumbing.Hash, *Tree, Summary, error) {
 	if err != nil {
 		return parent, nil, Summary{}, err
 	}
-	tree := newTree(root, c.gitopsRepoURL(), c.parsePR)
+	tree := newTree(root, c.gitopsRepoURL())
 	summary, err := op.Change(tree)
 	return parent, tree, summary, err
 }

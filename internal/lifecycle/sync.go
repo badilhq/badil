@@ -48,7 +48,7 @@ type SyncReport struct {
 	Failed    []string
 }
 
-// Syncer runs the sweep's sync step (Tree.Sync) over every preview, or
+// Syncer runs the sweep's sync step (syncPreview) over every preview, or
 // one, outside the sweep, as one sync operation. One guarded run happens at a time in the process: a
 // push run (Push) or an API run (Sync), each waiting for the guard in turn.
 // Waiters acquire the guard in no particular order. Each run is capped at
@@ -227,7 +227,7 @@ func (s *Syncer) sync(
 			}
 			var changed []string
 			for _, slug := range names {
-				r, syncErr := tree.Sync(slug, catalog)
+				r, syncErr := syncPreview(tree, slug, catalog)
 				syncs = append(syncs, previewSync{slug: slug, result: r, err: syncErr})
 				if syncErr == nil && r.Changed {
 					changed = append(changed, slug)

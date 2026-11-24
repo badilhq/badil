@@ -11,6 +11,54 @@ import (
 	"github.com/badilhq/badil/internal/store"
 )
 
+// teardownFile is the values file of the preview feature-x.
+const teardownFile = "previews/feature-x/values.yaml"
+
+// onlyPR42 is a preview pinned by acme/backend-1#42 alone.
+const onlyPR42 = `apiVersion: badil.dev/v1beta1
+gitopsRepoURL: https://github.com/acme/gitops.git
+services:
+  - name: backend-1
+    repoURL: https://github.com/acme/backend-1.git
+    branch: main
+    commitSha: aaa
+    metadata:
+      pr-url: https://github.com/acme/backend-1/pull/42
+  - name: front
+    repoURL: https://github.com/acme/front.git
+    branch: main
+dependencies: []
+`
+
+// pr42AndPR7 is a preview pinned by acme/backend-1#42 and acme/backend-2#7.
+const pr42AndPR7 = `apiVersion: badil.dev/v1beta1
+gitopsRepoURL: https://github.com/acme/gitops.git
+services:
+  - name: backend-1
+    repoURL: https://github.com/acme/backend-1.git
+    branch: release
+    commitSha: aaaaaaaaaa
+    imageTag: sha-aaaaaaa
+    chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
+    host: backend-1-feature-x.127.0.0.1.nip.io
+    metadata:
+      pr-url: https://github.com/acme/backend-1/pull/42
+  - name: backend-2
+    repoURL: https://github.com/acme/backend-2.git
+    branch: main
+    commitSha: bbbbbbbbbb
+    imageTag: sha-bbbbbbb
+    chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
+    metadata:
+      pr-url: https://github.com/acme/backend-2/pull/7
+  - name: front
+    repoURL: https://github.com/acme/front.git
+    branch: main
+    imageTag: sha-${ARGOCD_APP_REVISION_SHORT}
+    chart: {path: k8s/, imageTagParam: app.image.tag, hostParam: app.ingress.host}
+dependencies: []
+`
+
 // TestListPreviews checks that the previews are listed in lexical order, which
 // differs from git's tree order for "feature" and "feature-x": git sorts a
 // directory as "feature/", after "feature-x/".

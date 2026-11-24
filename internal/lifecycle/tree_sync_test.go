@@ -1,4 +1,4 @@
-package store_test
+package lifecycle_test
 
 import (
 	"slices"
@@ -151,10 +151,10 @@ func TestSync(t *testing.T) {
 				tt.catalog(catalog)
 			}
 
-			var result *store.SyncResult
+			var result *lifecycle.SyncResult
 			out, err := apply(c, store.OpSync, func(tree lifecycle.Tree) (store.Summary, error) {
 				var syncErr error
-				result, syncErr = tree.Sync("slug", catalog)
+				result, syncErr = lifecycle.SyncPreview(tree, "slug", catalog)
 				return store.Summary{Subject: "sync"}, syncErr
 			})
 			if err != nil {
@@ -178,7 +178,7 @@ func TestSync(t *testing.T) {
 func assertSyncWrite(
 	t *testing.T,
 	s *writeServer,
-	result *store.SyncResult,
+	result *lifecycle.SyncResult,
 	out store.Result,
 	files []string,
 	edit func(*preview.Values),

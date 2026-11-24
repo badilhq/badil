@@ -54,7 +54,7 @@ func (a SweepAPI) teardownAPI() TeardownAPI {
 //     branch slug, is torn down with a comment. Other open PRs are left
 //     alone.
 //  4. after rule 3, the preview is rewritten to match the catalog
-//     (Tree.Sync). A rewrite is recorded and logged; when it changed
+//     (syncPreview). A rewrite is recorded and logged; when it changed
 //     the service list or a host, the open PRs' comments are refreshed.
 //
 // The rules are decided on the tree each attempt of the operation reads.
@@ -229,14 +229,14 @@ func (p *sweepPlan) sweepPreview(tree Tree, slug string, catalog *catalog.Catalo
 			continue
 		}
 		if s := ruleThree(t, pr, label); s != nil {
-			s.run(tree)
+			s.run(tree, p.parsePR)
 			p.steps = append(p.steps, s)
 		}
 	}
 	if catalog == nil {
 		return nil
 	}
-	res, err := tree.Sync(slug, catalog)
+	res, err := syncPreview(tree, slug, catalog)
 	if err != nil {
 		return err
 	}
