@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
@@ -67,7 +68,7 @@ type reconcileFake struct {
 	calls   []string
 }
 
-func (f *reconcileFake) FetchServiceCatalog(ctx context.Context) (*store.ServiceCatalog, error) {
+func (f *reconcileFake) FetchServiceCatalog(ctx context.Context) (*catalog.Catalog, error) {
 	if f.catalogErr != nil {
 		return nil, f.catalogErr
 	}
@@ -78,7 +79,7 @@ func (f *reconcileFake) GetPreview(ctx context.Context, slug string) (*preview.V
 	return f.g.st.GetPreview(ctx, slug)
 }
 
-func (f *reconcileFake) Apply(ctx context.Context, op store.Op) (store.Result, error) {
+func (f *reconcileFake) Apply(ctx context.Context, op lifecycle.Op) (lifecycle.Result, error) {
 	f.calls = append(f.calls, "apply")
 	return f.g.st.Apply(ctx, op)
 }

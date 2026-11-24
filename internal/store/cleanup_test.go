@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/badilhq/badil/internal/lifecycle"
-	"github.com/badilhq/badil/internal/store"
 )
 
 // teardownFile is the values file of the preview feature-x.
@@ -121,16 +120,16 @@ func TestTree_DeletePreview(t *testing.T) {
 	})
 	c := f.open(t)
 	var listed []string
-	_, err := apply(c, store.OpSweep, func(tree lifecycle.Tree) (store.Summary, error) {
+	_, err := apply(c, lifecycle.OpSweep, func(tree lifecycle.Tree) (lifecycle.Summary, error) {
 		for _, slug := range []string{"feature-x", "other", "single"} {
 			tree.DeletePreview(slug)
 		}
-		if _, getErr := tree.GetPreview("feature-x"); !errors.Is(getErr, store.ErrNotFound) {
+		if _, getErr := tree.GetPreview("feature-x"); !errors.Is(getErr, lifecycle.ErrNotFound) {
 			t.Errorf("GetPreview after the delete = %v, want ErrNotFound", getErr)
 		}
 		var listErr error
 		listed, listErr = tree.ListPreviews()
-		return store.Summary{Subject: "delete"}, listErr
+		return lifecycle.Summary{Subject: "delete"}, listErr
 	})
 	if err != nil {
 		t.Fatalf("Apply: %v", err)

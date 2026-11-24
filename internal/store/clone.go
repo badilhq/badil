@@ -390,7 +390,7 @@ func (c *gitClone) tree() (*object.Tree, error) {
 }
 
 // readFile returns the content and blob SHA of path in the fetched commit, or
-// ErrNotFound when it has no such file.
+// lifecycle.ErrNotFound when it has no such file.
 func (c *gitClone) readFile(ctx context.Context, path string) ([]byte, string, error) {
 	if err := c.ensureFresh(ctx); err != nil {
 		return nil, "", err
@@ -409,11 +409,11 @@ func (c *gitClone) readFile(ctx context.Context, path string) ([]byte, string, e
 }
 
 // readTreeFile returns the content and blob hash of path in root, or
-// ErrNotFound when it has no such file.
+// lifecycle.ErrNotFound when it has no such file.
 func readTreeFile(root *object.Tree, path string) ([]byte, plumbing.Hash, error) {
 	f, err := root.File(path)
 	if errors.Is(err, object.ErrFileNotFound) {
-		return nil, plumbing.ZeroHash, fmt.Errorf("%w: %s", ErrNotFound, path)
+		return nil, plumbing.ZeroHash, fmt.Errorf("%w: %s", lifecycle.ErrNotFound, path)
 	}
 	if err != nil {
 		return nil, plumbing.ZeroHash, fmt.Errorf("read %s: %w", path, err)

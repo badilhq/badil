@@ -16,7 +16,6 @@ import (
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/status"
-	"github.com/badilhq/badil/internal/store"
 )
 
 const testStatusToken = "test-status-token"
@@ -398,11 +397,11 @@ func TestStatusEvent_PreviewDeletedWhileRecording(t *testing.T) {
 			name: "deleted by apply",
 			delete: func(t *testing.T, fg *fakeGitops, st *status.Store) {
 				t.Helper()
-				res, err := fg.st.Apply(t.Context(), store.Op{
-					Kind: store.OpTeardown,
-					Change: func(tree lifecycle.Tree) (store.Summary, error) {
+				res, err := fg.st.Apply(t.Context(), lifecycle.Op{
+					Kind: lifecycle.OpTeardown,
+					Change: func(tree lifecycle.Tree) (lifecycle.Summary, error) {
 						tree.DeletePreview("feature-x")
-						return store.Summary{Subject: "teardown feature-x"}, nil
+						return lifecycle.Summary{Subject: "teardown feature-x"}, nil
 					},
 				})
 				if err != nil {

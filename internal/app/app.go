@@ -17,7 +17,7 @@ type Store interface {
 	// ListPreviewFiles lists the slugs of the previews whose values.yaml is
 	// in the gitops repo, sorted.
 	ListPreviewFiles(ctx context.Context) ([]string, error)
-	// GetPreview reads previews/<slug>/values.yaml, store.ErrNotFound when
+	// GetPreview reads previews/<slug>/values.yaml, lifecycle.ErrNotFound when
 	// it does not exist.
 	GetPreview(ctx context.Context, slug string) (*preview.Values, string, error)
 	FullName() string

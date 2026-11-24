@@ -15,27 +15,9 @@ import (
 	"github.com/badilhq/badil/internal/preview"
 )
 
-// The statuses a renderer reports.
-const (
-	// Ready is preview.StatusReady.
-	Ready = preview.StatusReady
-	// Progressing is preview.StatusProgressing.
-	Progressing = preview.StatusProgressing
-	// Degraded is preview.StatusDegraded.
-	Degraded = preview.StatusDegraded
-	// SyncFailed is preview.StatusSyncFailed.
-	SyncFailed = preview.StatusSyncFailed
-)
-
-// Valid is preview.ValidStatus.
-func Valid(s string) bool { return preview.ValidStatus(s) }
-
 // flushInterval is the shortest time between two writes of a preview's
 // ConfigMap.
 const flushInterval = 5 * time.Second
-
-// Entry is preview.ServiceStatus.
-type Entry = preview.ServiceStatus
 
 // Lister lists the previews whose file is in the gitops repo:
 // *store.GitHubStore.
@@ -47,13 +29,13 @@ type Lister interface {
 // internal/status/kube keeps it in ConfigMaps.
 type Persistence interface {
 	// List returns, by preview, the persisted status of each service.
-	List(ctx context.Context) (map[string]map[string]Entry, error)
+	List(ctx context.Context) (map[string]map[string]preview.ServiceStatus, error)
 	// Names returns the previews that have persisted status.
 	Names(ctx context.Context) ([]string, error)
 	// Write persists the status snapshot returns for the preview slug,
 	// calling snapshot at each attempt and writing nothing once it reports
 	// the preview gone.
-	Write(ctx context.Context, slug string, snapshot func() (map[string]Entry, bool)) error
+	Write(ctx context.Context, slug string, snapshot func() (map[string]preview.ServiceStatus, bool)) error
 	// Delete removes the persisted status of slug, already absent being no
 	// error.
 	Delete(ctx context.Context, slug string) error
@@ -61,7 +43,7 @@ type Persistence interface {
 
 // previewStatus is the status of a preview's services.
 type previewStatus struct {
-	services map[string]Entry
+	services map[string]preview.ServiceStatus
 	// ready holds service+"@"+revision for each ready recorded in this
 	// process.
 	ready map[string]bool
@@ -121,12 +103,12 @@ func NewPersisted(p Persistence) *Store {
 // older than the stored entry. It reports whether e was recorded and, when
 // it was, whether it is the first ready recorded in this process for that
 // service at e's revision.
-func (s *Store) Record(slug, service string, e Entry) (bool, bool) {
+func (s *Store) Record(slug, service string, e preview.ServiceStatus) (bool, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p := s.previews[slug]
 	if p == nil {
-		p = &previewStatus{services: map[string]Entry{}, ready: map[string]bool{}}
+		p = &previewStatus{services: map[string]preview.ServiceStatus{}, ready: map[string]bool{}}
 		s.previews[slug] = p
 	}
 	if old, ok := p.services[service]; ok && e.At.Before(old.At) {
@@ -137,7 +119,7 @@ func (s *Store) Record(slug, service string, e Entry) (bool, bool) {
 	p.seq = s.seq
 	s.dirty[slug] = true
 	delete(s.gone, slug)
-	if e.Status != Ready {
+	if e.Status != preview.StatusReady {
 		return true, false
 	}
 	key := service + "@" + e.Revision
@@ -148,11 +130,11 @@ func (s *Store) Record(slug, service string, e Entry) (bool, bool) {
 
 // Preview returns the status of the services of the preview slug, by
 // service; none when nothing is known.
-func (s *Store) Preview(slug string) map[string]Entry {
+func (s *Store) Preview(slug string) map[string]preview.ServiceStatus {
 	if out, ok := s.snapshot(slug); ok {
 		return out
 	}
-	return map[string]Entry{}
+	return map[string]preview.ServiceStatus{}
 }
 
 // Delete forgets the status of the previews slugs and queues the deletion of
@@ -346,7 +328,11 @@ func (s *Store) flush(ctx context.Context) {
 	clear(s.dirty)
 	s.mu.Unlock()
 	for _, slug := range slugs {
-		if err := s.persist.Write(ctx, slug, func() (map[string]Entry, bool) { return s.snapshot(slug) }); err != nil {
+		if err := s.persist.Write(
+			ctx,
+			slug,
+			func() (map[string]preview.ServiceStatus, bool) { return s.snapshot(slug) },
+		); err != nil {
 			slog.Default().WarnContext(ctx, "writing status configmap failed",
 				slog.String("preview", slug), slog.String("err", err.Error()))
 			s.mu.Lock()
@@ -360,7 +346,7 @@ func (s *Store) flush(ctx context.Context) {
 
 // snapshot returns a copy of the status of the preview slug, and false when
 // it is no longer in memory.
-func (s *Store) snapshot(slug string) (map[string]Entry, bool) {
+func (s *Store) snapshot(slug string) (map[string]preview.ServiceStatus, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p := s.previews[slug]

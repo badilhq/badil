@@ -8,6 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/badilhq/badil/internal/catalog"
 	forgegithub "github.com/badilhq/badil/internal/forge/github"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
@@ -53,7 +54,7 @@ var Identity = store.CommitIdentity{ //nolint:gochecknoglobals // test fixture
 
 // Project returns vals projected on catalog, as a sync of the acme/gitops
 // store writes it. The projection's logs are discarded.
-func Project(slug string, vals preview.Values, catalog *store.ServiceCatalog) preview.Values {
+func Project(slug string, vals preview.Values, catalog *catalog.Catalog) preview.Values {
 	cat := catalog.Catalog
 	cat.GitopsRepoURL = GitopsURL
 	prev := slog.Default()
@@ -77,15 +78,15 @@ func Gitops(
 ) (*Remote, *store.GitHubStore) {
 	t.Helper()
 	files := map[string]string{}
-	var catalog *store.ServiceCatalog
+	var cat *catalog.Catalog
 	if badil != "" {
 		files["badil.yaml"] = badil
-		catalog, _ = store.ParseCatalog([]byte(badil))
+		cat, _ = catalog.Parse([]byte(badil))
 	}
 	for slug, vals := range previews {
 		v := *vals
-		if catalog != nil && !stale[slug] {
-			v = Project(slug, v, catalog)
+		if cat != nil && !stale[slug] {
+			v = Project(slug, v, cat)
 		}
 		out, err := yaml.Marshal(v)
 		if err != nil {

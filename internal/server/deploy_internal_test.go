@@ -391,8 +391,8 @@ func TestDeploy_PushUnauthorized(t *testing.T) {
 }
 
 // previewWriteResult is the write of backend-1 in a three-service preview.
-func previewWriteResult() *store.WriteResult {
-	return &store.WriteResult{
+func previewWriteResult() *lifecycle.WriteResult {
+	return &lifecycle.WriteResult{
 		Values: preview.Values{Services: []preview.ServiceEntry{
 			{Name: "backend-1", Branch: "main", CommitSha: "abc1234567890"},
 			{Name: "backend-2", Branch: "main"},

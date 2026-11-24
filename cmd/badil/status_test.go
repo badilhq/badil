@@ -86,10 +86,13 @@ func TestStatusHooks(t *testing.T) {
 	previewStatus.Start(ctx, st)
 	t.Cleanup(func() { previewStatus.Close(ctx) })
 
-	if _, err = st.Apply(ctx, store.Op{Kind: store.OpSweep, Change: func(tree lifecycle.Tree) (store.Summary, error) {
-		tree.DeletePreview("applied")
-		return store.Summary{Subject: "chore(preview): sweep"}, nil
-	}}); err != nil {
+	if _, err = st.Apply(
+		ctx,
+		lifecycle.Op{Kind: lifecycle.OpSweep, Change: func(tree lifecycle.Tree) (lifecycle.Summary, error) {
+			tree.DeletePreview("applied")
+			return lifecycle.Summary{Subject: "chore(preview): sweep"}, nil
+		}},
+	); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	if len(previewStatus.Preview("applied")) != 0 {

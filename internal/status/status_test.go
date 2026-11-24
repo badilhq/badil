@@ -21,6 +21,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
+	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/status"
 	"github.com/badilhq/badil/internal/status/kube"
 )
@@ -55,12 +56,12 @@ func (l *lister) set(slugs ...string) {
 }
 
 // entry is a status entry at t0 plus d.
-func entry(revision, s string, d time.Duration) status.Entry {
-	return status.Entry{Revision: revision, Status: s, At: t0.Add(d)}
+func entry(revision, s string, d time.Duration) preview.ServiceStatus {
+	return preview.ServiceStatus{Revision: revision, Status: s, At: t0.Add(d)}
 }
 
 // statusConfigMap is the status ConfigMap of slug holding services.
-func statusConfigMap(t *testing.T, slug string, services map[string]status.Entry) *corev1.ConfigMap {
+func statusConfigMap(t *testing.T, slug string, services map[string]preview.ServiceStatus) *corev1.ConfigMap {
 	t.Helper()
 	data := map[string]string{}
 	for name, e := range services {
@@ -95,7 +96,7 @@ func startStore(t *testing.T, client *fake.Clientset, interval time.Duration, l 
 
 // configMapData returns the decoded data of slug's ConfigMap, and false when
 // it does not exist.
-func configMapData(t *testing.T, client *fake.Clientset, slug string) (map[string]status.Entry, bool) {
+func configMapData(t *testing.T, client *fake.Clientset, slug string) (map[string]preview.ServiceStatus, bool) {
 	t.Helper()
 	cm, err := client.CoreV1().ConfigMaps(namespace).Get(
 		context.Background(), kube.ConfigMapName(slug), metav1.GetOptions{})
@@ -108,9 +109,9 @@ func configMapData(t *testing.T, client *fake.Clientset, slug string) (map[strin
 	if cm.Labels["app.kubernetes.io/managed-by"] != "badil" || cm.Labels["badil.dev/preview"] != slug {
 		t.Errorf("configmap %s labels = %v", cm.Name, cm.Labels)
 	}
-	out := map[string]status.Entry{}
+	out := map[string]preview.ServiceStatus{}
 	for name, raw := range cm.Data {
-		var e status.Entry
+		var e preview.ServiceStatus
 		if err = json.Unmarshal([]byte(raw), &e); err != nil {
 			t.Fatalf("decode %s/%s: %v", cm.Name, name, err)
 		}
@@ -131,8 +132,8 @@ func eventually(t *testing.T, timeout time.Duration, what string, cond func() bo
 	}
 }
 
-func equalEntries(a, b map[string]status.Entry) bool {
-	return maps.EqualFunc(a, b, func(v, w status.Entry) bool {
+func equalEntries(a, b map[string]preview.ServiceStatus) bool {
+	return maps.EqualFunc(a, b, func(v, w preview.ServiceStatus) bool {
 		return v.Revision == w.Revision && v.Status == w.Status && v.At.Equal(w.At)
 	})
 }
@@ -140,17 +141,17 @@ func equalEntries(a, b map[string]status.Entry) bool {
 func TestRecord_StaleAndFirstReady(t *testing.T) {
 	s := status.NewMemory()
 	steps := []struct {
-		e              status.Entry
+		e              preview.ServiceStatus
 		recorded, more bool
 	}{
-		{entry("aaa", status.Progressing, 0), true, false},
-		{entry("aaa", status.Ready, time.Minute), true, true},
+		{entry("aaa", preview.StatusProgressing, 0), true, false},
+		{entry("aaa", preview.StatusReady, time.Minute), true, true},
 		// The same time again is not older: recorded.
-		{entry("aaa", status.Ready, time.Minute), true, false},
-		{entry("aaa", status.Degraded, 30*time.Second), false, false},
-		{entry("aaa", status.Degraded, 2*time.Minute), true, false},
-		{entry("aaa", status.Ready, 3*time.Minute), true, false},
-		{entry("bbb", status.Ready, 4*time.Minute), true, true},
+		{entry("aaa", preview.StatusReady, time.Minute), true, false},
+		{entry("aaa", preview.StatusDegraded, 30*time.Second), false, false},
+		{entry("aaa", preview.StatusDegraded, 2*time.Minute), true, false},
+		{entry("aaa", preview.StatusReady, 3*time.Minute), true, false},
+		{entry("bbb", preview.StatusReady, 4*time.Minute), true, true},
 	}
 	for i, step := range steps {
 		recorded, first := s.Record("feature-x", "backend-1", step.e)
@@ -159,8 +160,8 @@ func TestRecord_StaleAndFirstReady(t *testing.T) {
 		}
 	}
 	got := s.Preview("feature-x")
-	if want := map[string]status.Entry{
-		"backend-1": entry("bbb", status.Ready, 4*time.Minute),
+	if want := map[string]preview.ServiceStatus{
+		"backend-1": entry("bbb", preview.StatusReady, 4*time.Minute),
 	}; !equalEntries(
 		got,
 		want,
@@ -182,11 +183,11 @@ func TestPersist_WrittenWithinFlushInterval(t *testing.T) {
 	}
 	client := fake.NewClientset()
 	s := startStore(t, client, status.FlushInterval, &lister{slugs: []string{"feature-x"}})
-	s.Record("feature-x", "backend-1", entry("aaa", status.Progressing, 0))
-	s.Record("feature-x", "postgres", entry("16.4.2", status.Ready, time.Second))
-	want := map[string]status.Entry{
-		"backend-1": entry("aaa", status.Progressing, 0),
-		"postgres":  entry("16.4.2", status.Ready, time.Second),
+	s.Record("feature-x", "backend-1", entry("aaa", preview.StatusProgressing, 0))
+	s.Record("feature-x", "postgres", entry("16.4.2", preview.StatusReady, time.Second))
+	want := map[string]preview.ServiceStatus{
+		"backend-1": entry("aaa", preview.StatusProgressing, 0),
+		"postgres":  entry("16.4.2", preview.StatusReady, time.Second),
 	}
 	eventually(t, status.FlushInterval+500*time.Millisecond, "configmap written", func() bool {
 		got, ok := configMapData(t, client, "feature-x")
@@ -225,12 +226,16 @@ func TestPersist_UpdateConflictReplacesFromMemory(t *testing.T) {
 	s := startStore(t, client, 20*time.Millisecond, &lister{slugs: []string{"feature-x"}})
 	// Another writer made the ConfigMap after the store started.
 	if _, err := client.CoreV1().ConfigMaps(namespace).Create(context.Background(),
-		statusConfigMap(t, "feature-x", map[string]status.Entry{"stale-service": entry("old", status.Degraded, 0)}),
+		statusConfigMap(
+			t,
+			"feature-x",
+			map[string]preview.ServiceStatus{"stale-service": entry("old", preview.StatusDegraded, 0)},
+		),
 		metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	s.Record("feature-x", "backend-1", entry("aaa", status.Ready, 0))
-	want := map[string]status.Entry{"backend-1": entry("aaa", status.Ready, 0)}
+	s.Record("feature-x", "backend-1", entry("aaa", preview.StatusReady, 0))
+	want := map[string]preview.ServiceStatus{"backend-1": entry("aaa", preview.StatusReady, 0)}
 	eventually(t, 2*time.Second, "configmap replaced", func() bool {
 		got, _ := configMapData(t, client, "feature-x")
 		return equalEntries(got, want)
@@ -259,7 +264,7 @@ func TestPersist_FailedWriteRetried(t *testing.T) {
 	})
 	logs := captureLogs(t)
 	s := startStore(t, client, 20*time.Millisecond, &lister{slugs: []string{"feature-x"}})
-	s.Record("feature-x", "backend-1", entry("aaa", status.Ready, 0))
+	s.Record("feature-x", "backend-1", entry("aaa", preview.StatusReady, 0))
 	eventually(t, 2*time.Second, "configmap written after failures", func() bool {
 		_, ok := configMapData(t, client, "feature-x")
 		return ok
@@ -272,15 +277,23 @@ func TestPersist_FailedWriteRetried(t *testing.T) {
 // TestLoad_RebuildsFromLabelledConfigMaps checks that Load reads back the
 // ConfigMaps badil manages that carry the preview label, and nothing else.
 func TestLoad_RebuildsFromLabelledConfigMaps(t *testing.T) {
-	other := statusConfigMap(t, "other", map[string]status.Entry{"x": entry("r", status.Ready, 0)})
+	other := statusConfigMap(t, "other", map[string]preview.ServiceStatus{"x": entry("r", preview.StatusReady, 0)})
 	other.Labels = map[string]string{"badil.dev/preview": "other"}
-	noPreview := statusConfigMap(t, "no-preview", map[string]status.Entry{"x": entry("r", status.Ready, 0)})
+	noPreview := statusConfigMap(
+		t,
+		"no-preview",
+		map[string]preview.ServiceStatus{"x": entry("r", preview.StatusReady, 0)},
+	)
 	delete(noPreview.Labels, "badil.dev/preview")
-	elsewhere := statusConfigMap(t, "elsewhere", map[string]status.Entry{"x": entry("r", status.Ready, 0)})
+	elsewhere := statusConfigMap(
+		t,
+		"elsewhere",
+		map[string]preview.ServiceStatus{"x": entry("r", preview.StatusReady, 0)},
+	)
 	elsewhere.Namespace = "default"
-	want := map[string]status.Entry{
-		"backend-1": entry("aaa", status.Ready, 0),
-		"postgres":  entry("16.4.2", status.Degraded, time.Second),
+	want := map[string]preview.ServiceStatus{
+		"backend-1": entry("aaa", preview.StatusReady, 0),
+		"postgres":  entry("16.4.2", preview.StatusDegraded, time.Second),
 	}
 	client := fake.NewClientset(statusConfigMap(t, "feature-x", want), other, noPreview, elsewhere)
 
@@ -301,7 +314,7 @@ func TestLoad_RebuildsFromLabelledConfigMaps(t *testing.T) {
 	if recorded, first := s.Record(
 		"feature-x",
 		"backend-1",
-		entry("aaa", status.Ready, time.Minute),
+		entry("aaa", preview.StatusReady, time.Minute),
 	); !recorded ||
 		!first {
 		t.Errorf("Record after Load = %v, %v; want recorded, first ready", recorded, first)
@@ -322,8 +335,12 @@ func TestLoad_ListFailureIsAnError(t *testing.T) {
 // preview at once and deletes its ConfigMap in the background.
 func TestDelete_RemovesMemoryAndConfigMap(t *testing.T) {
 	client := fake.NewClientset(
-		statusConfigMap(t, "feature-x", map[string]status.Entry{"backend-1": entry("aaa", status.Ready, 0)}),
-		statusConfigMap(t, "kept", map[string]status.Entry{"backend-1": entry("bbb", status.Ready, 0)}),
+		statusConfigMap(
+			t,
+			"feature-x",
+			map[string]preview.ServiceStatus{"backend-1": entry("aaa", preview.StatusReady, 0)},
+		),
+		statusConfigMap(t, "kept", map[string]preview.ServiceStatus{"backend-1": entry("bbb", preview.StatusReady, 0)}),
 	)
 	// A long interval: the delete does not wait for a flush.
 	s := startStore(t, client, time.Hour, &lister{slugs: []string{"feature-x", "kept"}})
@@ -345,9 +362,17 @@ func TestDelete_RemovesMemoryAndConfigMap(t *testing.T) {
 // recorded while the listing ran.
 func TestCollectGarbage(t *testing.T) {
 	client := fake.NewClientset(
-		statusConfigMap(t, "gone-at-start", map[string]status.Entry{"backend-1": entry("aaa", status.Ready, 0)}),
-		statusConfigMap(t, "kept", map[string]status.Entry{"backend-1": entry("bbb", status.Ready, 0)}),
-		statusConfigMap(t, "deleted-later", map[string]status.Entry{"backend-1": entry("ccc", status.Ready, 0)}),
+		statusConfigMap(
+			t,
+			"gone-at-start",
+			map[string]preview.ServiceStatus{"backend-1": entry("aaa", preview.StatusReady, 0)},
+		),
+		statusConfigMap(t, "kept", map[string]preview.ServiceStatus{"backend-1": entry("bbb", preview.StatusReady, 0)}),
+		statusConfigMap(
+			t,
+			"deleted-later",
+			map[string]preview.ServiceStatus{"backend-1": entry("ccc", preview.StatusReady, 0)},
+		),
 	)
 	l := &lister{slugs: []string{"kept", "deleted-later"}}
 	s := startStore(t, client, time.Hour, l)
@@ -360,7 +385,7 @@ func TestCollectGarbage(t *testing.T) {
 	listed := make(chan struct{})
 	l.mu.Lock()
 	l.during = func() {
-		s.Record("new-preview", "backend-1", entry("ddd", status.Ready, 0))
+		s.Record("new-preview", "backend-1", entry("ddd", preview.StatusReady, 0))
 		close(listed)
 	}
 	l.mu.Unlock()
@@ -386,10 +411,13 @@ func TestClose_FlushesDirtyPreviews(t *testing.T) {
 	s := kube.New(client, namespace)
 	status.SetInterval(s, time.Hour)
 	s.Start(context.Background(), &lister{slugs: []string{"feature-x"}})
-	s.Record("feature-x", "backend-1", entry("aaa", status.Ready, 0))
+	s.Record("feature-x", "backend-1", entry("aaa", preview.StatusReady, 0))
 	s.Close(context.Background())
 	got, ok := configMapData(t, client, "feature-x")
-	if want := map[string]status.Entry{"backend-1": entry("aaa", status.Ready, 0)}; !ok || !equalEntries(got, want) {
+	if want := map[string]preview.ServiceStatus{
+		"backend-1": entry("aaa", preview.StatusReady, 0),
+	}; !ok ||
+		!equalEntries(got, want) {
 		t.Errorf("configmap after Close = %+v (exists %v), want %+v", got, ok, want)
 	}
 }
@@ -416,9 +444,9 @@ func TestInCluster_MemoryOnlyOutsideACluster(t *testing.T) {
 	l := &lister{slugs: []string{"feature-x", "gone"}}
 	s.Start(context.Background(), l)
 	defer s.Close(context.Background())
-	s.Record("feature-x", "backend-1", entry("aaa", status.Ready, 0))
-	s.Record("gone", "backend-1", entry("aaa", status.Ready, 0))
-	s.Record("deleted", "backend-1", entry("aaa", status.Ready, 0))
+	s.Record("feature-x", "backend-1", entry("aaa", preview.StatusReady, 0))
+	s.Record("gone", "backend-1", entry("aaa", preview.StatusReady, 0))
+	s.Record("deleted", "backend-1", entry("aaa", preview.StatusReady, 0))
 	s.Delete("deleted")
 	if len(s.Preview("deleted")) != 0 {
 		t.Error("Delete kept the preview")

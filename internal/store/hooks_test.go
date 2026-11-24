@@ -16,35 +16,35 @@ import (
 // appliedRecorder records the results a store's WithApplied callback gets.
 type appliedRecorder struct {
 	mu      sync.Mutex
-	results []store.Result
+	results []lifecycle.Result
 }
 
-func (r *appliedRecorder) record(res store.Result) {
+func (r *appliedRecorder) record(res lifecycle.Result) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.results = append(r.results, res)
 }
 
-func (r *appliedRecorder) got() []store.Result {
+func (r *appliedRecorder) got() []lifecycle.Result {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return slices.Clone(r.results)
 }
 
 // TestApply_AppliedReportsDeletedPreviews checks that a pushed commit
-// deleting two previews' values.yaml reports both, sorted, in Result.Deleted
-// and through WithApplied; a deleted file other than values.yaml and a
-// delete of a missing preview are not reported.
+// deleting two previews' values.yaml reports both, sorted, in
+// lifecycle.Result.Deleted and through WithApplied; a deleted file other than
+// values.yaml and a delete of a missing preview are not reported.
 func TestApply_AppliedReportsDeletedPreviews(t *testing.T) {
 	rec := &appliedRecorder{}
 	f := newGitopsFake(t, applyFiles)
 	c := f.open(t, store.WithApplied(rec.record))
 
-	out, err := apply(c, store.OpSweep, func(tree lifecycle.Tree) (store.Summary, error) {
+	out, err := apply(c, lifecycle.OpSweep, func(tree lifecycle.Tree) (lifecycle.Summary, error) {
 		tree.DeletePreview("zz-last")
 		tree.DeletePreview("a")
 		tree.DeletePreview("missing")
-		return store.Summary{Subject: "chore(preview): sweep"}, nil
+		return lifecycle.Summary{Subject: "chore(preview): sweep"}, nil
 	})
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -67,14 +67,14 @@ func TestApply_AppliedNotCalledWithoutPush(t *testing.T) {
 	f := newGitopsFake(t, applyFiles)
 	c := f.open(t, store.WithApplied(rec.record))
 
-	if _, err := apply(c, store.OpSync, func(lifecycle.Tree) (store.Summary, error) {
-		return store.Summary{Subject: "nothing"}, nil
+	if _, err := apply(c, lifecycle.OpSync, func(lifecycle.Tree) (lifecycle.Summary, error) {
+		return lifecycle.Summary{Subject: "nothing"}, nil
 	}); err != nil {
 		t.Fatalf("no-op Apply: %v", err)
 	}
-	if _, err := apply(c, store.OpSync, func(tree lifecycle.Tree) (store.Summary, error) {
+	if _, err := apply(c, lifecycle.OpSync, func(tree lifecycle.Tree) (lifecycle.Summary, error) {
 		tree.DeletePreview("a")
-		return store.Summary{}, errors.New("change failed")
+		return lifecycle.Summary{}, errors.New("change failed")
 	}); err == nil {
 		t.Fatal("failed Apply: want an error")
 	}
@@ -82,7 +82,7 @@ func TestApply_AppliedNotCalledWithoutPush(t *testing.T) {
 		t.Fatalf("WithApplied called %d times after a no-op and a failed Apply, want 0", len(got))
 	}
 
-	out, err := apply(c, store.OpSync, rename("a", "renamed", "rename a"))
+	out, err := apply(c, lifecycle.OpSync, rename("a", "renamed", "rename a"))
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -123,13 +123,13 @@ func TestFetch_HeadMoved(t *testing.T) {
 
 	// Apply fetches on its own: the head it pushes is not a fetch.
 	f.remote.Set("previews/d/values.yaml", previewFile("d"))
-	if _, err := apply(c, store.OpSync, rename("a", "renamed", "rename a")); err != nil {
+	if _, err := apply(c, lifecycle.OpSync, rename("a", "renamed", "rename a")); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	if n := moved.Load(); n != 2 {
 		t.Fatalf("after an Apply fetching a moved head: %d calls, want 2", n)
 	}
-	if _, err := apply(c, store.OpSync, rename("a", "again", "rename a again")); err != nil {
+	if _, err := apply(c, lifecycle.OpSync, rename("a", "again", "rename a again")); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	if n := moved.Load(); n != 2 {

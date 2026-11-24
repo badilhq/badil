@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-git/go-git/v5/plumbing/object"
 
+	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
 )
@@ -76,11 +77,12 @@ func (t *Tree) Record(slug, change string) {
 	t.changes[slug] = append(t.changes[slug], change)
 }
 
-// read returns the content of path, ErrNotFound when it does not exist.
+// read returns the content of path, lifecycle.ErrNotFound when it does not
+// exist.
 func (t *Tree) read(path string) ([]byte, error) {
 	if content, ok := t.files[path]; ok {
 		if content == nil {
-			return nil, fmt.Errorf("%w: %s", ErrNotFound, path)
+			return nil, fmt.Errorf("%w: %s", lifecycle.ErrNotFound, path)
 		}
 		return content, nil
 	}
@@ -89,12 +91,12 @@ func (t *Tree) read(path string) ([]byte, error) {
 }
 
 // Catalog returns the service catalog of the tree's badil.yaml.
-func (t *Tree) Catalog() (*ServiceCatalog, error) {
+func (t *Tree) Catalog() (*catalog.Catalog, error) {
 	raw, err := t.read(configFile)
 	if err != nil {
 		return nil, err
 	}
-	return ParseCatalog(raw)
+	return catalog.Parse(raw)
 }
 
 // ListPreviews returns the sorted names of the directories under previews/,
@@ -159,8 +161,8 @@ func previewSlug(path string) (string, bool) {
 	return slug, ok && slug != ""
 }
 
-// GetPreview returns the parsed previews/<slug>/values.yaml, ErrNotFound when
-// it does not exist.
+// GetPreview returns the parsed previews/<slug>/values.yaml,
+// lifecycle.ErrNotFound when it does not exist.
 func (t *Tree) GetPreview(slug string) (*preview.Values, error) {
 	raw, err := t.read(previewPath(slug))
 	if err != nil {
@@ -191,12 +193,3 @@ func (t *Tree) DeletePreview(slug string) {
 func (t *Tree) GitopsRepoURL() string {
 	return t.repoURL
 }
-
-// WriteResult is lifecycle.WriteResult.
-type WriteResult = lifecycle.WriteResult
-
-// TeardownResult is lifecycle.TeardownResult.
-type TeardownResult = lifecycle.TeardownResult
-
-// SyncResult is lifecycle.SyncResult.
-type SyncResult = lifecycle.SyncResult

@@ -138,9 +138,9 @@ func TestServe_AppliedWakesWaits(t *testing.T) {
 
 	if _, err := sv.st.Apply(
 		context.Background(),
-		store.Op{Kind: store.OpSweep, Change: func(tree lifecycle.Tree) (store.Summary, error) {
+		lifecycle.Op{Kind: lifecycle.OpSweep, Change: func(tree lifecycle.Tree) (lifecycle.Summary, error) {
 			tree.DeletePreview("feature-x")
-			return store.Summary{Subject: "chore(preview): sweep"}, nil
+			return lifecycle.Summary{Subject: "chore(preview): sweep"}, nil
 		}},
 	); err != nil {
 		t.Fatalf("Apply: %v", err)

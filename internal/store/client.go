@@ -10,13 +10,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
-)
-
-// Sentinel errors. Callers should test with errors.Is.
-var (
-	ErrNotFound = lifecycle.ErrNotFound
 )
 
 // Recorder records the gitops operations of a GitHubStore. *metrics.Metrics
@@ -52,7 +48,7 @@ type GitHubStore struct {
 	sleep func(ctx context.Context, d time.Duration) error
 	// applied is called with the result of every Apply whose push landed,
 	// nil when unset.
-	applied func(Result)
+	applied func(lifecycle.Result)
 	// headMoved is called after every fetch that moved the remote-tracking
 	// ref, nil when unset.
 	headMoved func()
@@ -84,7 +80,7 @@ func WithRepoURL(u string) Option {
 // WithApplied calls f with the result of every Apply whose push landed,
 // whichever caller ran it; not after a no-op or a failed Apply. f runs on
 // Apply's goroutine before Apply returns: it must not block.
-func WithApplied(f func(Result)) Option {
+func WithApplied(f func(lifecycle.Result)) Option {
 	return func(c *GitHubStore) {
 		c.applied = f
 	}
@@ -132,14 +128,14 @@ func Open(ctx context.Context, clone CloneConfig, identity CommitIdentity, opts 
 	return c, nil
 }
 
-// repoNames returns the full name of the repo at raw (RepoFullName) and its
-// web base, raw's scheme and host followed by the full name.
+// repoNames returns the full name of the repo at raw (catalog.RepoFullName)
+// and its web base, raw's scheme and host followed by the full name.
 func repoNames(raw string) (string, string, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return "", "", errors.New("gitops repo URL: not a URL")
 	}
-	fullName, ok := RepoFullName(u.Path)
+	fullName, ok := catalog.RepoFullName(u.Path)
 	if !ok {
 		return "", "", fmt.Errorf("gitops repo URL: repository path %q needs at least two segments", u.Path)
 	}
@@ -172,22 +168,22 @@ func (c *GitHubStore) observe(op string, start time.Time, err error) {
 // validated service catalog (the keys of its services mapping, with each
 // service's repo and branch) and `preview` block. A malformed file is an
 // error.
-func (c *GitHubStore) FetchServiceCatalog(ctx context.Context) (*ServiceCatalog, error) {
-	catalog, _, err := c.FetchServiceCatalogSHA(ctx)
-	return catalog, err
+func (c *GitHubStore) FetchServiceCatalog(ctx context.Context) (*catalog.Catalog, error) {
+	cat, _, err := c.FetchServiceCatalogSHA(ctx)
+	return cat, err
 }
 
 // FetchServiceCatalogSHA is FetchServiceCatalog, plus the blob SHA of the
 // badil.yaml it read on the default branch. When the file was read but its
 // content can't be parsed, the SHA is returned with the error; it is "" when
 // the file could not be read.
-func (c *GitHubStore) FetchServiceCatalogSHA(ctx context.Context) (*ServiceCatalog, string, error) {
+func (c *GitHubStore) FetchServiceCatalogSHA(ctx context.Context) (*catalog.Catalog, string, error) {
 	raw, sha, err := c.clone.readFile(ctx, configFile)
 	if err != nil {
 		return nil, "", err
 	}
-	catalog, err := ParseCatalog(raw)
-	return catalog, sha, err
+	cat, err := catalog.Parse(raw)
+	return cat, sha, err
 }
 
 // FullName returns the gitops repo's repository path, owner/repo on GitHub.
@@ -219,8 +215,8 @@ func previewPath(slug string) string {
 }
 
 // GetPreview reads previews/<slug>/values.yaml from the gitops clone and
-// returns the parsed values plus the file's blob SHA. Returns ErrNotFound
-// when the file does not exist.
+// returns the parsed values plus the file's blob SHA. Returns
+// lifecycle.ErrNotFound when the file does not exist.
 func (c *GitHubStore) GetPreview(ctx context.Context, slug string) (*preview.Values, string, error) {
 	raw, sha, err := c.clone.readFile(ctx, previewPath(slug))
 	if err != nil {

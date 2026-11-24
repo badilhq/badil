@@ -18,6 +18,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
 
+	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/status"
 )
 
@@ -90,16 +91,16 @@ func (c *configMaps) managed(ctx context.Context) ([]corev1.ConfigMap, error) {
 // List returns, by preview, the status read from the ConfigMaps badil
 // manages that carry the preview label. A value that does not parse is
 // logged and skipped.
-func (c *configMaps) List(ctx context.Context) (map[string]map[string]status.Entry, error) {
+func (c *configMaps) List(ctx context.Context) (map[string]map[string]preview.ServiceStatus, error) {
 	items, err := c.managed(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := map[string]map[string]status.Entry{}
+	out := map[string]map[string]preview.ServiceStatus{}
 	for _, cm := range items {
-		services := map[string]status.Entry{}
+		services := map[string]preview.ServiceStatus{}
 		for service, raw := range cm.Data {
-			var e status.Entry
+			var e preview.ServiceStatus
 			if err = json.Unmarshal([]byte(raw), &e); err != nil {
 				slog.Default().WarnContext(ctx, "skipping unreadable status",
 					slog.String("configmap", cm.Name), slog.String("service", service), slog.String("err", err.Error()))
@@ -131,7 +132,11 @@ func (c *configMaps) Names(ctx context.Context) ([]string, error) {
 // reports the preview gone. A conflict reads the ConfigMap again and
 // replaces its data, up to maxWriteAttempts attempts: badil is its only
 // writer.
-func (c *configMaps) Write(ctx context.Context, slug string, snapshot func() (map[string]status.Entry, bool)) error {
+func (c *configMaps) Write(
+	ctx context.Context,
+	slug string,
+	snapshot func() (map[string]preview.ServiceStatus, bool),
+) error {
 	api := c.client.CoreV1().ConfigMaps(c.namespace)
 	retriable := func(err error) bool { return apierrors.IsConflict(err) || apierrors.IsAlreadyExists(err) }
 	return retry.OnError(wait.Backoff{Steps: maxWriteAttempts}, retriable, func() error {
@@ -193,7 +198,7 @@ func mergeLabels(labels map[string]string, slug string) map[string]string {
 }
 
 // encode returns services as ConfigMap data: one JSON entry per service.
-func encode(services map[string]status.Entry) (map[string]string, error) {
+func encode(services map[string]preview.ServiceStatus) (map[string]string, error) {
 	data := make(map[string]string, len(services))
 	for name, e := range services {
 		raw, err := json.Marshal(e)

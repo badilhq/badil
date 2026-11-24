@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
-	"github.com/badilhq/badil/internal/store"
 	"github.com/badilhq/badil/internal/store/storetest"
 )
 
@@ -84,7 +84,7 @@ func (f *syncFake) applied() int {
 	return f.applies
 }
 
-func (f *syncFake) FetchServiceCatalogSHA(ctx context.Context) (*store.ServiceCatalog, string, error) {
+func (f *syncFake) FetchServiceCatalogSHA(ctx context.Context) (*catalog.Catalog, string, error) {
 	f.mu.Lock()
 	f.catalogReads++
 	sha, catalogErr := f.sha, f.catalogErr
@@ -96,7 +96,7 @@ func (f *syncFake) FetchServiceCatalogSHA(ctx context.Context) (*store.ServiceCa
 	return catalog, sha, err
 }
 
-func (f *syncFake) Apply(ctx context.Context, op store.Op) (store.Result, error) {
+func (f *syncFake) Apply(ctx context.Context, op lifecycle.Op) (lifecycle.Result, error) {
 	if f.gate != nil {
 		f.entered <- struct{}{}
 		<-f.gate
@@ -106,7 +106,7 @@ func (f *syncFake) Apply(ctx context.Context, op store.Op) (store.Result, error)
 	applyErr := f.applyErr
 	f.mu.Unlock()
 	if applyErr != nil {
-		return store.Result{}, applyErr
+		return lifecycle.Result{}, applyErr
 	}
 	return f.g.st.Apply(ctx, op)
 }

@@ -32,14 +32,14 @@ var applyFiles = map[string]string{ //nolint:gochecknoglobals // test fixture
 
 // rename returns a Change that renames the only service of the preview slug
 // to name, recorded as a sync, with subject.
-func rename(slug, name, subject string) func(lifecycle.Tree) (store.Summary, error) {
-	return func(tree lifecycle.Tree) (store.Summary, error) {
+func rename(slug, name, subject string) func(lifecycle.Tree) (lifecycle.Summary, error) {
+	return func(tree lifecycle.Tree) (lifecycle.Summary, error) {
 		vals, err := tree.GetPreview(slug)
 		if err != nil {
-			return store.Summary{}, err
+			return lifecycle.Summary{}, err
 		}
 		vals.Services[0].Name = name
-		return store.Summary{Subject: subject}, tree.PutPreview(slug, *vals)
+		return lifecycle.Summary{Subject: subject}, tree.PutPreview(slug, *vals)
 	}
 }
 
@@ -70,7 +70,7 @@ func TestApply_OneCommitOnFetchedHead(t *testing.T) {
 	parent := f.remote.Head()
 
 	runs := 0
-	out, err := apply(c, store.OpSweep, func(tree lifecycle.Tree) (store.Summary, error) {
+	out, err := apply(c, lifecycle.OpSweep, func(tree lifecycle.Tree) (lifecycle.Summary, error) {
 		runs++
 		vals, getErr := tree.GetPreview("b")
 		if getErr != nil || vals.Services[0].Name != "b2" {
@@ -80,9 +80,14 @@ func TestApply_OneCommitOnFetchedHead(t *testing.T) {
 		if putErr := tree.PutPreview("new", preview.Values{
 			Services: []preview.ServiceEntry{{Name: "new"}},
 		}); putErr != nil {
-			return store.Summary{}, putErr
+			return lifecycle.Summary{}, putErr
 		}
-		return store.Summary{Subject: "chore(preview): sweep: delete 1, unpin 0, sync 1"}, stampAPIVersion(tree, "a")
+		return lifecycle.Summary{
+			Subject: "chore(preview): sweep: delete 1, unpin 0, sync 1",
+		}, stampAPIVersion(
+			tree,
+			"a",
+		)
 	})
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -136,10 +141,10 @@ func TestApply_ConflictRerunsOnNewTree(t *testing.T) {
 	c := f.open(t, store.WithMetrics(m))
 
 	var seen []string
-	out, err := apply(c, store.OpDeploy, func(tree lifecycle.Tree) (store.Summary, error) {
+	out, err := apply(c, lifecycle.OpDeploy, func(tree lifecycle.Tree) (lifecycle.Summary, error) {
 		vals, getErr := tree.GetPreview("b")
 		if getErr != nil {
-			return store.Summary{}, getErr
+			return lifecycle.Summary{}, getErr
 		}
 		seen = append(seen, vals.Services[0].Name)
 		return rename("a", "renamed", "rename a")(tree)
@@ -156,7 +161,7 @@ func TestApply_ConflictRerunsOnNewTree(t *testing.T) {
 		!slices.Equal(commits[0].Parents, []string{commits[1].Hash}) {
 		t.Errorf("pushes = %d, head %s; want 2, the head on the concurrent commit kept", f.pushCount(), commits[0].Hash)
 	}
-	assertConflicts(t, m, map[string]float64{store.OpDeploy: 1})
+	assertConflicts(t, m, map[string]float64{lifecycle.OpDeploy: 1})
 }
 
 // assertConflicts fails t unless m counts want push conflicts by op.
@@ -199,7 +204,7 @@ func TestApply_PushFailureNotRetried(t *testing.T) {
 	})
 
 	runs := 0
-	_, err := apply(c, store.OpSync, func(tree lifecycle.Tree) (store.Summary, error) {
+	_, err := apply(c, lifecycle.OpSync, func(tree lifecycle.Tree) (lifecycle.Summary, error) {
 		runs++
 		return rename("a", "x", "rename a")(tree)
 	})
@@ -211,7 +216,7 @@ func TestApply_PushFailureNotRetried(t *testing.T) {
 			runs, pushes, f.remote.Head() != head)
 	}
 	assertConflicts(t, m, map[string]float64{})
-	if got := opCount(t, m, store.OpSync, "error"); got != 1 {
+	if got := opCount(t, m, lifecycle.OpSync, "error"); got != 1 {
 		t.Errorf("failed sync operations = %d, want 1", got)
 	}
 }
@@ -230,7 +235,7 @@ func TestApply_ConflictsExhausted(t *testing.T) {
 	})
 
 	runs := 0
-	_, err := apply(c, store.OpTeardown, func(tree lifecycle.Tree) (store.Summary, error) {
+	_, err := apply(c, lifecycle.OpTeardown, func(tree lifecycle.Tree) (lifecycle.Summary, error) {
 		runs++
 		return rename("a", "x", "rename a")(tree)
 	})
@@ -240,7 +245,7 @@ func TestApply_ConflictsExhausted(t *testing.T) {
 	if runs != store.MaxAttempts || f.pushCount() != store.MaxAttempts {
 		t.Errorf("runs, pushes = %d, %d; want %d each", runs, f.pushCount(), store.MaxAttempts)
 	}
-	assertConflicts(t, m, map[string]float64{store.OpTeardown: store.MaxAttempts})
+	assertConflicts(t, m, map[string]float64{lifecycle.OpTeardown: store.MaxAttempts})
 	assertWaits(t, waits)
 }
 
@@ -279,10 +284,10 @@ func TestBackoff(t *testing.T) {
 func TestApply_NoOp(t *testing.T) {
 	cases := []struct {
 		name   string
-		change func(lifecycle.Tree) (store.Summary, error)
+		change func(lifecycle.Tree) (lifecycle.Summary, error)
 	}{
-		{name: "nothing staged", change: func(lifecycle.Tree) (store.Summary, error) {
-			return store.Summary{Subject: "nothing"}, nil
+		{name: "nothing staged", change: func(lifecycle.Tree) (lifecycle.Summary, error) {
+			return lifecycle.Summary{Subject: "nothing"}, nil
 		}},
 		{name: "same content", change: rename("a", "a", "same")},
 	}
@@ -291,12 +296,12 @@ func TestApply_NoOp(t *testing.T) {
 			f := newGitopsFake(t, map[string]string{"previews/a/values.yaml": "services:\n  - name: a\n"})
 			c := f.open(t)
 			// The file as the store writes it.
-			if _, err := apply(c, store.OpDeploy, rename("a", "a", "normalise")); err != nil {
+			if _, err := apply(c, lifecycle.OpDeploy, rename("a", "a", "normalise")); err != nil {
 				t.Fatalf("Apply: %v", err)
 			}
 			head := f.remote.Head()
 			f.pushes = 0
-			out, err := apply(c, store.OpDeploy, tc.change)
+			out, err := apply(c, lifecycle.OpDeploy, tc.change)
 			if err != nil {
 				t.Fatalf("Apply: %v", err)
 			}
@@ -313,9 +318,9 @@ func TestApply_ChangeErrorCommitsNothing(t *testing.T) {
 	c := f.open(t)
 	head := f.remote.Head()
 	boom := errors.New("boom")
-	_, err := apply(c, store.OpDeploy, func(tree lifecycle.Tree) (store.Summary, error) {
+	_, err := apply(c, lifecycle.OpDeploy, func(tree lifecycle.Tree) (lifecycle.Summary, error) {
 		_, _ = rename("a", "x", "rename")(tree)
-		return store.Summary{}, boom
+		return lifecycle.Summary{}, boom
 	})
 	if !errors.Is(err, boom) || f.pushCount() != 0 || f.remote.Head() != head {
 		t.Errorf("Apply = %v, pushes = %d; want boom with nothing pushed", err, f.pushCount())
@@ -339,7 +344,7 @@ func TestApply_PushUnauthorized(t *testing.T) {
 	c := openStore(t, srv.URL+"/acme/gitops.git", store.WithMetrics(m))
 
 	runs := 0
-	_, err := apply(c, store.OpDeploy, func(tree lifecycle.Tree) (store.Summary, error) {
+	_, err := apply(c, lifecycle.OpDeploy, func(tree lifecycle.Tree) (lifecycle.Summary, error) {
 		runs++
 		return rename("a", "x", "rename a")(tree)
 	})
@@ -382,7 +387,7 @@ func TestApply_Serialised(t *testing.T) {
 	errs := make(chan error, len(slugs))
 	for _, slug := range slugs {
 		go func() {
-			_, err := apply(c, store.OpSync, rename(slug, "renamed-"+slug, "rename "+slug))
+			_, err := apply(c, lifecycle.OpSync, rename(slug, "renamed-"+slug, "rename "+slug))
 			errs <- err
 		}()
 	}
@@ -401,7 +406,7 @@ func TestApply_Serialised(t *testing.T) {
 		t.Errorf("commits = %d, want %d", n, len(slugs)+1)
 	}
 	assertConflicts(t, m, map[string]float64{})
-	if got := opCount(t, m, store.OpSync, "ok"); got != uint64(len(slugs)) {
+	if got := opCount(t, m, lifecycle.OpSync, "ok"); got != uint64(len(slugs)) {
 		t.Errorf("sync operations = %d, want %d", got, len(slugs))
 	}
 }
@@ -417,7 +422,7 @@ func TestApply_WaitBoundedByContext(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
 	first := make(chan error, 1)
 	go func() {
-		_, err := apply(c, store.OpSweep, func(tree lifecycle.Tree) (store.Summary, error) {
+		_, err := apply(c, lifecycle.OpSweep, func(tree lifecycle.Tree) (lifecycle.Summary, error) {
 			close(started)
 			<-release
 			return rename("a", "renamed-a", "rename a")(tree)
@@ -429,14 +434,17 @@ func TestApply_WaitBoundedByContext(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	ran := false
-	_, err := c.Apply(ctx, store.Op{Kind: store.OpDeploy, Change: func(lifecycle.Tree) (store.Summary, error) {
-		ran = true
-		return store.Summary{}, nil
-	}})
+	_, err := c.Apply(
+		ctx,
+		lifecycle.Op{Kind: lifecycle.OpDeploy, Change: func(lifecycle.Tree) (lifecycle.Summary, error) {
+			ran = true
+			return lifecycle.Summary{}, nil
+		}},
+	)
 	if !errors.Is(err, context.DeadlineExceeded) || ran {
 		t.Fatalf("waiting Apply = %v, ran %v; want context.DeadlineExceeded without running", err, ran)
 	}
-	if got := opCount(t, m, store.OpDeploy, "error"); got != 1 {
+	if got := opCount(t, m, lifecycle.OpDeploy, "error"); got != 1 {
 		t.Errorf("failed deploy operations = %d, want 1", got)
 	}
 
@@ -444,7 +452,7 @@ func TestApply_WaitBoundedByContext(t *testing.T) {
 	if err = <-first; err != nil {
 		t.Fatalf("first Apply: %v", err)
 	}
-	if _, err = apply(c, store.OpSync, rename("b", "renamed-b", "rename b")); err != nil {
+	if _, err = apply(c, lifecycle.OpSync, rename("b", "renamed-b", "rename b")); err != nil {
 		t.Fatalf("Apply after the first: %v", err)
 	}
 }

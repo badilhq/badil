@@ -4,9 +4,9 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
-	"github.com/badilhq/badil/internal/store"
 )
 
 // staleBranchFile is pinnedFile with backend-2 tracking the branch old.
@@ -22,7 +22,7 @@ func TestSync(t *testing.T) {
 		name         string
 		files        []string
 		conflicts    int
-		catalog      func(*store.ServiceCatalog)
+		catalog      func(*catalog.Catalog)
 		wantChanged  bool
 		wantNotify   bool
 		wantNotFound bool
@@ -33,7 +33,7 @@ func TestSync(t *testing.T) {
 		{name: "matches", files: []string{pinnedFile()}},
 		{
 			name: "added service", files: []string{pinnedFile()},
-			catalog: func(c *store.ServiceCatalog) {
+			catalog: func(c *catalog.Catalog) {
 				c.Services = []string{"backend-1", "front", "backend-2"}
 				c.Catalog.Repos["front"] = "https://github.com/acme/front.git"
 			},
@@ -50,7 +50,7 @@ func TestSync(t *testing.T) {
 		},
 		{
 			name: "chart settings change", files: []string{pinnedFile()},
-			catalog: func(c *store.ServiceCatalog) {
+			catalog: func(c *catalog.Catalog) {
 				c.Charts = map[string]preview.ChartSettings{
 					"backend-2": {Path: "deploy/helm", ValueFiles: []string{"values-preview.yaml"}},
 				}
@@ -75,7 +75,7 @@ func TestSync(t *testing.T) {
 		},
 		{
 			name: "removed dependency", files: []string{withDependenciesFile()},
-			catalog: func(c *store.ServiceCatalog) {
+			catalog: func(c *catalog.Catalog) {
 				withDependencies(c)
 				c.Dependencies = c.Dependencies[1:]
 			},
@@ -84,7 +84,7 @@ func TestSync(t *testing.T) {
 		},
 		{
 			name: "dependency no longer exposed", files: []string{withDependenciesFile()},
-			catalog: func(c *store.ServiceCatalog) {
+			catalog: func(c *catalog.Catalog) {
 				withDependencies(c)
 				delete(c.URLs.Expose, "mailpit")
 			},
@@ -152,10 +152,10 @@ func TestSync(t *testing.T) {
 			}
 
 			var result *lifecycle.SyncResult
-			out, err := apply(c, store.OpSync, func(tree lifecycle.Tree) (store.Summary, error) {
+			out, err := apply(c, lifecycle.OpSync, func(tree lifecycle.Tree) (lifecycle.Summary, error) {
 				var syncErr error
 				result, syncErr = lifecycle.SyncPreview(tree, "slug", catalog)
-				return store.Summary{Subject: "sync"}, syncErr
+				return lifecycle.Summary{Subject: "sync"}, syncErr
 			})
 			if err != nil {
 				t.Fatalf("Apply: %v", err)
@@ -179,7 +179,7 @@ func assertSyncWrite(
 	t *testing.T,
 	s *writeServer,
 	result *lifecycle.SyncResult,
-	out store.Result,
+	out lifecycle.Result,
 	files []string,
 	edit func(*preview.Values),
 ) {

@@ -304,13 +304,13 @@ func TestFreshness_ApplyReadsBackAtOnce(t *testing.T) {
 	clock := &fakeClock{t: time.Now()}
 	store.SetNow(st, clock.now)
 
-	_, err := apply(st, store.OpDeploy, func(tree lifecycle.Tree) (store.Summary, error) {
+	_, err := apply(st, lifecycle.OpDeploy, func(tree lifecycle.Tree) (lifecycle.Summary, error) {
 		vals, getErr := tree.GetPreview("a")
 		if getErr != nil {
-			return store.Summary{}, getErr
+			return lifecycle.Summary{}, getErr
 		}
 		vals.Services[0].Name = "second"
-		return store.Summary{Subject: "rename"}, tree.PutPreview("a", *vals)
+		return lifecycle.Summary{Subject: "rename"}, tree.PutPreview("a", *vals)
 	})
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -491,11 +491,11 @@ func TestCredentials_BasicAuth(t *testing.T) {
 			if got := serviceName(t, st); got != "second" {
 				t.Fatalf("service = %q, want the fetched second", got)
 			}
-			_, err = st.Apply(context.Background(), store.Op{
-				Kind: store.OpDeploy,
-				Change: func(tree lifecycle.Tree) (store.Summary, error) {
+			_, err = st.Apply(context.Background(), lifecycle.Op{
+				Kind: lifecycle.OpDeploy,
+				Change: func(tree lifecycle.Tree) (lifecycle.Summary, error) {
 					tree.DeletePreview("a")
-					return store.Summary{Subject: "chore(preview): delete a"}, nil
+					return lifecycle.Summary{Subject: "chore(preview): delete a"}, nil
 				},
 			})
 			if !errors.Is(err, lifecycle.ErrUnauthorized) {

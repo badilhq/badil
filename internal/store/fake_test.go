@@ -114,7 +114,7 @@ func readStore(t *testing.T, files map[string]string, opts ...store.Option) (*st
 
 // apply runs change on c as one operation of kind.
 func apply(
-	c *store.GitHubStore, kind string, change func(lifecycle.Tree) (store.Summary, error),
-) (store.Result, error) {
-	return c.Apply(context.Background(), store.Op{Kind: kind, Change: change})
+	c *store.GitHubStore, kind string, change func(lifecycle.Tree) (lifecycle.Summary, error),
+) (lifecycle.Result, error) {
+	return c.Apply(context.Background(), lifecycle.Op{Kind: kind, Change: change})
 }

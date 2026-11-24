@@ -26,7 +26,7 @@ type teardownGitHub struct {
 	badil      string
 	onConflict func(*storetest.Remote)
 	fake       *gitopsFake
-	out        store.Result
+	out        lifecycle.Result
 }
 
 // open returns a store over g.
@@ -59,10 +59,10 @@ func (g *teardownGitHub) run(
 	t.Helper()
 	var res *lifecycle.TeardownResult
 	var err error
-	g.out, err = apply(g.open(t), store.OpTeardown, func(tree lifecycle.Tree) (store.Summary, error) {
+	g.out, err = apply(g.open(t), lifecycle.OpTeardown, func(tree lifecycle.Tree) (lifecycle.Summary, error) {
 		var unpinErr error
 		res, unpinErr = unpin(tree)
-		return store.Summary{Subject: "teardown"}, unpinErr
+		return lifecycle.Summary{Subject: "teardown"}, unpinErr
 	})
 	if err != nil {
 		return nil, err

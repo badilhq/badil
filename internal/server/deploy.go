@@ -12,7 +12,6 @@ import (
 	"github.com/badilhq/badil/internal/api"
 	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/lifecycle"
-	"github.com/badilhq/badil/internal/store"
 )
 
 // deployTimeout caps the upstream work for a single deploy. The catalog read,
@@ -138,7 +137,7 @@ func splitJoinedErr(err error) []string {
 func writeUpstreamError(ctx context.Context, logger *slog.Logger, w http.ResponseWriter, op string, err error) {
 	status := http.StatusInternalServerError
 	switch {
-	case errors.Is(err, store.ErrNotFound):
+	case errors.Is(err, lifecycle.ErrNotFound):
 		status = http.StatusNotFound
 	case errors.Is(err, lifecycle.ErrUnauthorized):
 		status = http.StatusBadGateway

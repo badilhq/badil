@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
-	"github.com/badilhq/badil/internal/store"
 	"github.com/badilhq/badil/internal/store/storetest"
 )
 
@@ -83,7 +83,7 @@ func (f *fakeAPI) GetPreview(ctx context.Context, slug string) (*preview.Values,
 	return f.g.st.GetPreview(ctx, slug)
 }
 
-func (f *fakeAPI) Apply(ctx context.Context, op store.Op) (store.Result, error) {
+func (f *fakeAPI) Apply(ctx context.Context, op lifecycle.Op) (lifecycle.Result, error) {
 	return f.g.st.Apply(ctx, op)
 }
 
@@ -412,13 +412,13 @@ func TestSweep_RulesOnRetriedTree(t *testing.T) {
 }
 
 // sweepCatalog parses sweepBadil.
-func sweepCatalog(t *testing.T) *store.ServiceCatalog {
+func sweepCatalog(t *testing.T) *catalog.Catalog {
 	t.Helper()
-	catalog, err := store.ParseCatalog([]byte(sweepBadil))
+	cat, err := catalog.Parse([]byte(sweepBadil))
 	if err != nil {
 		t.Fatalf("ParseCatalog: %v", err)
 	}
-	return catalog
+	return cat
 }
 
 // TestSweep_PRPinnedAfterThePreRead loses the first push to a deploy of a
