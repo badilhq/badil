@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/preview"
-	"github.com/badilhq/badil/internal/store"
 )
 
 // catchUpAction is the webhook action of the events catch-up reconciles.
@@ -19,7 +19,7 @@ const catchUpAction = "synchronize"
 
 // CatchUpStore is the subset of store.GitHubStore used by CatchUp.
 type CatchUpStore interface {
-	FetchServiceCatalog(ctx context.Context) (*store.ServiceCatalog, error)
+	FetchServiceCatalog(ctx context.Context) (*catalog.Catalog, error)
 	GetPreview(ctx context.Context, slug string) (*preview.Values, string, error)
 }
 
@@ -77,7 +77,7 @@ type catchUpStats struct {
 }
 
 // Run lists the open pull requests of every repo of the catalog's services
-// (store.ServiceCatalog.Repos, by the forge's repo URL rule) and reconciles each one that needs it,
+// (catalog.Catalog.Repos, by the forge's repo URL rule) and reconciles each one that needs it,
 // decided in this order:
 //
 //  1. a PR without a preview label (the plain label, or a named one with a
@@ -187,7 +187,7 @@ func (c *CatchUp) skipped(pr forge.PullRequest, reason string, listedAt time.Tim
 func (c *CatchUp) pinnedAtHead(ctx context.Context, slug string, pr forge.PullRequest) bool {
 	vals, _, err := c.api.Store.GetPreview(ctx, slug)
 	if err != nil {
-		if !errors.Is(err, store.ErrNotFound) {
+		if !errors.Is(err, ErrNotFound) {
 			slog.WarnContext(ctx, "catch-up preview read failed",
 				slog.String("slug", slug),
 				slog.String("repo", pr.FullName),

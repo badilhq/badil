@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-git/go-git/v5/plumbing"
 
+	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
 	"github.com/badilhq/badil/internal/store/storetest"
@@ -141,7 +142,7 @@ func readStore(t *testing.T, files map[string]string, opts ...store.Option) (*st
 
 // apply runs change on c as one operation of kind.
 func apply(
-	c *store.GitHubStore, kind string, change func(*store.Tree) (store.Summary, error),
+	c *store.GitHubStore, kind string, change func(lifecycle.Tree) (store.Summary, error),
 ) (store.Result, error) {
 	return c.Apply(context.Background(), store.Op{Kind: kind, Change: change})
 }
@@ -157,7 +158,7 @@ func deploy(
 	skipUnchanged bool,
 ) (*store.WriteResult, store.Result, error) {
 	var res *store.WriteResult
-	out, err := apply(c, store.OpDeploy, func(tree *store.Tree) (store.Summary, error) {
+	out, err := apply(c, store.OpDeploy, func(tree lifecycle.Tree) (store.Summary, error) {
 		var deployErr error
 		res, deployErr = tree.Deploy(slug, catalog, service, sha, in, skipUnchanged)
 		return store.Summary{Subject: "deploy " + service + " to " + slug}, deployErr

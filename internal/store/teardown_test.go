@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
 	"github.com/badilhq/badil/internal/store/storetest"
@@ -53,12 +54,12 @@ func (g *teardownGitHub) commit(t *testing.T) storetest.Commit {
 
 // run applies unpin on the preview feature-x as one teardown operation.
 func (g *teardownGitHub) run(
-	t *testing.T, unpin func(*store.Tree) (*store.TeardownResult, error),
+	t *testing.T, unpin func(lifecycle.Tree) (*store.TeardownResult, error),
 ) (*store.TeardownResult, error) {
 	t.Helper()
 	var res *store.TeardownResult
 	var err error
-	g.out, err = apply(g.open(t), store.OpTeardown, func(tree *store.Tree) (store.Summary, error) {
+	g.out, err = apply(g.open(t), store.OpTeardown, func(tree lifecycle.Tree) (store.Summary, error) {
 		var unpinErr error
 		res, unpinErr = unpin(tree)
 		return store.Summary{Subject: "teardown"}, unpinErr
@@ -71,7 +72,7 @@ func (g *teardownGitHub) run(
 
 func runTeardown(t *testing.T, g *teardownGitHub) (*store.TeardownResult, error) {
 	t.Helper()
-	return g.run(t, func(tree *store.Tree) (*store.TeardownResult, error) {
+	return g.run(t, func(tree lifecycle.Tree) (*store.TeardownResult, error) {
 		return tree.Teardown("feature-x", "acme", "backend-1", 42)
 	})
 }
@@ -294,7 +295,7 @@ dependencies:
 // services needed.
 func TestTeardown_DropsPartsOnlyThePRNeeded(t *testing.T) {
 	g := &teardownGitHub{gets: []string{frontAndPayments}, badil: needsBadil}
-	result, err := g.run(t, func(tree *store.Tree) (*store.TeardownResult, error) {
+	result, err := g.run(t, func(tree lifecycle.Tree) (*store.TeardownResult, error) {
 		return tree.Teardown("feature-x", "acme", "payments", 42)
 	})
 	if err != nil {
@@ -435,7 +436,7 @@ func TestTeardown_DeleteConflictBecomesUpdate(t *testing.T) {
 
 func runUnpin(t *testing.T, g *teardownGitHub, services ...string) (*store.TeardownResult, error) {
 	t.Helper()
-	return g.run(t, func(tree *store.Tree) (*store.TeardownResult, error) {
+	return g.run(t, func(tree lifecycle.Tree) (*store.TeardownResult, error) {
 		return tree.UnpinServices("feature-x", "acme", "backend-1", 42, services)
 	})
 }

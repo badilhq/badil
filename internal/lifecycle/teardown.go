@@ -9,7 +9,6 @@ import (
 
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/preview"
-	"github.com/badilhq/badil/internal/store"
 )
 
 // PRClosedReason is the teardown reason for a closed (or merged) PR.
@@ -48,7 +47,7 @@ type Recorder interface {
 
 // Applier writes the gitops repo: store.GitHubStore.Apply.
 type Applier interface {
-	Apply(ctx context.Context, op store.Op) (store.Result, error)
+	Apply(ctx context.Context, op Op) (Result, error)
 }
 
 // TeardownAPI is what a teardown uses: the store, the forge, the Recorder
@@ -79,17 +78,17 @@ type teardownStep struct {
 	// commentPR edits the PR's comment, which states reason.
 	commentPR bool
 	// services, when set, are the only services unpinned: the file is never
-	// deleted (store.Tree.UnpinServices).
+	// deleted (Tree.UnpinServices).
 	services []string
 	// ran is set once an attempt ran the step; result or err is its outcome.
 	ran    bool
-	result *store.TeardownResult
+	result *TeardownResult
 	err    error
 }
 
 // run tears the PR down from its preview in tree, recording the outcome. A
 // failure is recorded, not returned: it stages nothing.
-func (s *teardownStep) run(tree *store.Tree) {
+func (s *teardownStep) run(tree Tree) {
 	s.ran = true
 	if s.services != nil {
 		s.result, s.err = tree.UnpinServices(s.tt.Slug, s.tt.Owner, s.tt.Repo, s.tt.Number, s.services)
@@ -139,14 +138,14 @@ func unpinSubject(tt Target, slugs []string) string {
 // (afterTeardown).
 func teardownPRs(ctx context.Context, api TeardownAPI, tt Target, slugs []string, reason string) {
 	var steps []*teardownStep
-	res, err := api.Store.Apply(ctx, store.Op{
-		Kind: store.OpTeardown,
-		Change: func(tree *store.Tree) (store.Summary, error) {
+	res, err := api.Store.Apply(ctx, Op{
+		Kind: OpTeardown,
+		Change: func(tree Tree) (Summary, error) {
 			steps = newSteps(tt, slugs, reason)
 			for _, s := range steps {
 				s.run(tree)
 			}
-			return store.Summary{Subject: unpinSubject(tt, removedSlugs(steps))}, nil
+			return Summary{Subject: unpinSubject(tt, removedSlugs(steps))}, nil
 		},
 	})
 	if steps == nil {
@@ -166,7 +165,7 @@ func teardownPRs(ctx context.Context, api TeardownAPI, tt Target, slugs []string
 // removed nothing is a no-op. The comments link to the commit of res. It
 // reports whether the PR was removed from the preview.
 func afterTeardown(
-	ctx context.Context, api TeardownAPI, s *teardownStep, res store.Result, applyErr error, fanOut bool,
+	ctx context.Context, api TeardownAPI, s *teardownStep, res Result, applyErr error, fanOut bool,
 ) bool {
 	err := s.err
 	if applyErr != nil && (!s.ran || s.removed()) {

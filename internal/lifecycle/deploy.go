@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/namespace"
 	"github.com/badilhq/badil/internal/preview"
-	"github.com/badilhq/badil/internal/store"
 )
 
 // ErrPreviewLimit is the error of a deploy refused because creating its
@@ -56,7 +56,7 @@ type DeployAPI struct {
 // DeployResult is the outcome of DeployPR: the operation's commit, the
 // remote head when the deploy changed nothing.
 type DeployResult struct {
-	Commit store.Result
+	Commit Result
 }
 
 // DeployPR pins inputs.ServiceName at inputs.CommitSha in the preview slug,
@@ -76,27 +76,27 @@ type DeployResult struct {
 func DeployPR(
 	ctx context.Context,
 	api DeployAPI,
-	catalog *store.ServiceCatalog,
+	catalog *catalog.Catalog,
 	slug string,
 	inputs preview.DeployInputs,
 ) (*DeployResult, error, error) {
-	var write *store.WriteResult
+	var write *WriteResult
 	limited, inUse := false, false
 	foreign := foreignFunc(ctx, api.Namespaces)
-	res, err := api.Store.Apply(ctx, store.Op{
-		Kind: store.OpDeploy,
-		Change: func(tree *store.Tree) (store.Summary, error) {
+	res, err := api.Store.Apply(ctx, Op{
+		Kind: OpDeploy,
+		Change: func(tree Tree) (Summary, error) {
 			write, limited, inUse = nil, false, false
 			var checkErr error
 			limited, inUse, checkErr = refusal(tree, catalog.MaxPreviews, slug, api.Namespaces != nil, foreign)
 			if checkErr != nil || limited || inUse {
-				return store.Summary{}, checkErr
+				return Summary{}, checkErr
 			}
 			var deployErr error
 			write, deployErr = tree.Deploy(slug, catalog, inputs.ServiceName, inputs.CommitSha, inputs, false)
 			subject := fmt.Sprintf("chore(preview): deploy %s@%s to %s",
 				inputs.ServiceName, preview.ShortSHA(inputs.CommitSha), slug)
-			return store.Summary{Subject: subject}, deployErr
+			return Summary{Subject: subject}, deployErr
 		},
 	})
 	if err != nil {
@@ -126,7 +126,7 @@ func DeployPR(
 // preview once, and nothing when maxPreviews is 0 (no cap) and check is
 // false. A read error is a *CapCheckError; a failed check is foreign's error.
 func refusal(
-	tree *store.Tree, maxPreviews int, slug string, check bool, foreign func(string) (bool, error),
+	tree Tree, maxPreviews int, slug string, check bool, foreign func(string) (bool, error),
 ) (bool, bool, error) {
 	if maxPreviews <= 0 && !check {
 		return false, false, nil
@@ -135,7 +135,7 @@ func refusal(
 	if err == nil {
 		return false, false, nil
 	}
-	if !errors.Is(err, store.ErrNotFound) {
+	if !errors.Is(err, ErrNotFound) {
 		return false, false, &CapCheckError{Op: "read preview", Err: err}
 	}
 	limited, err := limitReached(tree, maxPreviews)

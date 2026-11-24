@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
+	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/server"
 	"github.com/badilhq/badil/internal/status"
 	"github.com/badilhq/badil/internal/store"
@@ -86,7 +87,7 @@ func TestStatusHooks(t *testing.T) {
 	previewStatus.Start(ctx, st)
 	t.Cleanup(func() { previewStatus.Close(ctx) })
 
-	if _, err = st.Apply(ctx, store.Op{Kind: store.OpSweep, Change: func(tree *store.Tree) (store.Summary, error) {
+	if _, err = st.Apply(ctx, store.Op{Kind: store.OpSweep, Change: func(tree lifecycle.Tree) (store.Summary, error) {
 		tree.DeletePreview("applied")
 		return store.Summary{Subject: "chore(preview): sweep"}, nil
 	}}); err != nil {

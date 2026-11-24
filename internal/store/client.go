@@ -10,13 +10,14 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
 )
 
 // Sentinel errors. Callers should test with errors.Is.
 var (
-	ErrNotFound     = errors.New("gitops: not found")
+	ErrNotFound     = lifecycle.ErrNotFound
 	ErrUnauthorized = errors.New("gitops: unauthorized")
 )
 

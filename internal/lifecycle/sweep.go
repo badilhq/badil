@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/preview"
-	"github.com/badilhq/badil/internal/store"
 )
 
 // Sweep rules that delete a preview, the rule label of Recorder.SweepDeleted.
@@ -54,7 +54,7 @@ func (a SweepAPI) teardownAPI() TeardownAPI {
 //     branch slug, is torn down with a comment. Other open PRs are left
 //     alone.
 //  4. after rule 3, the preview is rewritten to match the catalog
-//     (store.Tree.Sync). A rewrite is recorded and logged; when it changed
+//     (Tree.Sync). A rewrite is recorded and logged; when it changed
 //     the service list or a host, the open PRs' comments are refreshed.
 //
 // The rules are decided on the tree each attempt of the operation reads.
@@ -87,7 +87,7 @@ func Sweep(ctx context.Context, api SweepAPI, now time.Time, ttl time.Duration) 
 		return nil
 	}
 	p := &sweepPlan{now: now, ttl: ttl, states: prStates(ctx, api, slugs), parsePR: api.Forge.ParsePRURL}
-	res, err := api.Store.Apply(ctx, store.Op{Kind: store.OpSweep, Change: p.change})
+	res, err := api.Store.Apply(ctx, Op{Kind: OpSweep, Change: p.change})
 	if err != nil {
 		for _, s := range p.steps {
 			afterTeardown(ctx, api.teardownAPI(), s, res, err, true)
@@ -171,8 +171,8 @@ type sweepDelete struct {
 // sweepSync is a preview step 4 rewrote.
 type sweepSync struct {
 	slug    string
-	result  *store.SyncResult
-	catalog *store.ServiceCatalog
+	result  *SyncResult
+	catalog *catalog.Catalog
 }
 
 // sweepFailure is a preview that could not be read or synced.
@@ -182,13 +182,13 @@ type sweepFailure struct {
 }
 
 // change runs the sweep on tree, as Sweep describes.
-func (p *sweepPlan) change(tree *store.Tree) (store.Summary, error) {
+func (p *sweepPlan) change(tree Tree) (Summary, error) {
 	p.deleted, p.steps, p.synced, p.failed = nil, nil, nil, nil
 	catalog, catalogErr := tree.Catalog()
 	p.catalogErr = catalogErr
 	slugs, err := tree.ListPreviews()
 	if err != nil {
-		return store.Summary{}, err
+		return Summary{}, err
 	}
 	for _, slug := range slugs {
 		if err = p.sweepPreview(tree, slug, catalog); err != nil {
@@ -201,9 +201,9 @@ func (p *sweepPlan) change(tree *store.Tree) (store.Summary, error) {
 // sweepPreview applies the first matching rule 1-3 to the preview slug of
 // tree, then syncs it when it was kept (step 4). A preview with no values
 // file is skipped. A nil catalog skips rule 3's open-PR cases and step 4.
-func (p *sweepPlan) sweepPreview(tree *store.Tree, slug string, catalog *store.ServiceCatalog) error {
+func (p *sweepPlan) sweepPreview(tree Tree, slug string, catalog *catalog.Catalog) error {
 	vals, err := tree.GetPreview(slug)
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, ErrNotFound) {
 		return nil
 	}
 	if err != nil {
@@ -273,7 +273,7 @@ func ruleThree(t Target, pr *forge.PullRequest, label string) *teardownStep {
 // summary returns the commit subject of the last attempt: the previews it
 // deleted (by a rule or once their last PR was torn down), the previews it
 // unpinned and kept, and the previews it synced.
-func (p *sweepPlan) summary() store.Summary {
+func (p *sweepPlan) summary() Summary {
 	deleted := map[string]bool{}
 	for _, d := range p.deleted {
 		deleted[d.slug] = true
@@ -291,7 +291,7 @@ func (p *sweepPlan) summary() store.Summary {
 	for slug := range deleted {
 		delete(unpinned, slug)
 	}
-	return store.Summary{Subject: fmt.Sprintf("chore(preview): sweep: delete %d, unpin %d, sync %d",
+	return Summary{Subject: fmt.Sprintf("chore(preview): sweep: delete %d, unpin %d, sync %d",
 		len(deleted), len(unpinned), len(p.synced))}
 }
 
@@ -301,7 +301,7 @@ func (p *sweepPlan) summary() store.Summary {
 // PRs' comments of a preview whose sync changed its service list or a host,
 // or that a teardown unpinned, once per preview. It logs each failed preview
 // and returns their count.
-func (p *sweepPlan) finish(ctx context.Context, api SweepAPI, res store.Result) int {
+func (p *sweepPlan) finish(ctx context.Context, api SweepAPI, res Result) int {
 	if p.catalogErr != nil {
 		slog.WarnContext(ctx, "cleanup catalog unavailable", slog.String("err", p.catalogErr.Error()))
 	}
@@ -342,7 +342,7 @@ func (p *sweepPlan) finish(ctx context.Context, api SweepAPI, res store.Result) 
 
 // afterDelete records and logs a preview deleted by rule 1 or 2, pushed as
 // res, and tells the open PRs of an expired one.
-func (p *sweepPlan) afterDelete(ctx context.Context, api SweepAPI, d sweepDelete, res store.Result) {
+func (p *sweepPlan) afterDelete(ctx context.Context, api SweepAPI, d sweepDelete, res Result) {
 	api.Recorder.SweepDeleted(d.rule)
 	if d.rule == ruleNoPin {
 		slog.InfoContext(ctx, "preview deleted",
@@ -377,9 +377,9 @@ func afterSync(
 	f forge.Forge,
 	fanOut FanOutFunc,
 	slug string,
-	result *store.SyncResult,
-	catalog *store.ServiceCatalog,
-	res store.Result,
+	result *SyncResult,
+	catalog *catalog.Catalog,
+	res Result,
 	notify bool,
 ) {
 	rec.PreviewSynced()

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/store"
 )
 
@@ -39,7 +40,7 @@ func TestApply_AppliedReportsDeletedPreviews(t *testing.T) {
 	f := newGitopsFake(t, applyFiles)
 	c := f.open(t, store.WithApplied(rec.record))
 
-	out, err := apply(c, store.OpSweep, func(tree *store.Tree) (store.Summary, error) {
+	out, err := apply(c, store.OpSweep, func(tree lifecycle.Tree) (store.Summary, error) {
 		tree.DeletePreview("zz-last")
 		tree.DeletePreview("a")
 		tree.DeletePreview("missing")
@@ -66,12 +67,12 @@ func TestApply_AppliedNotCalledWithoutPush(t *testing.T) {
 	f := newGitopsFake(t, applyFiles)
 	c := f.open(t, store.WithApplied(rec.record))
 
-	if _, err := apply(c, store.OpSync, func(*store.Tree) (store.Summary, error) {
+	if _, err := apply(c, store.OpSync, func(lifecycle.Tree) (store.Summary, error) {
 		return store.Summary{Subject: "nothing"}, nil
 	}); err != nil {
 		t.Fatalf("no-op Apply: %v", err)
 	}
-	if _, err := apply(c, store.OpSync, func(tree *store.Tree) (store.Summary, error) {
+	if _, err := apply(c, store.OpSync, func(tree lifecycle.Tree) (store.Summary, error) {
 		tree.DeletePreview("a")
 		return store.Summary{}, errors.New("change failed")
 	}); err == nil {

@@ -10,8 +10,11 @@ import (
 
 	"github.com/go-git/go-git/v5/plumbing/object"
 
+	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
 )
+
+var _ lifecycle.Tree = (*Tree)(nil)
 
 // Tree is what an operation of Apply reads and changes: the gitops repo at
 // the fetched remote head, plus the preview files the operation put or
@@ -206,16 +209,8 @@ func (t *Tree) applyCatalog(vals preview.Values, slug string, catalog *ServiceCa
 	return projected
 }
 
-// WriteResult is the outcome of Tree.Deploy. Unchanged is true when
-// skipUnchanged left the file as it was: Values then holds that file.
-// Created is true when the deploy created the file. Excluded is the
-// projection's (preview.Projection.Excluded).
-type WriteResult struct {
-	Values    preview.Values
-	Excluded  []string
-	Unchanged bool
-	Created   bool
-}
+// WriteResult is lifecycle.WriteResult.
+type WriteResult = lifecycle.WriteResult
 
 // Deploy pins serviceName at commitSha in previews/<slug>/values.yaml,
 // recorded as "pin <service>@<sha7>". An existing file is merged with
@@ -255,18 +250,8 @@ func (t *Tree) Deploy(
 	return &WriteResult{Values: proj.Values, Excluded: proj.Excluded, Created: !exists}, nil
 }
 
-// TeardownResult is the outcome of Tree.Teardown and Tree.UnpinServices.
-// Removed lists the services unpinned from the PR; it is empty when there was
-// nothing to tear down. Values, Excluded (preview.Projection.Excluded) and
-// Catalog, the badil.yaml the file was projected on, are set only when
-// Deleted is false.
-type TeardownResult struct {
-	Values   preview.Values
-	Excluded []string
-	Catalog  *ServiceCatalog
-	Removed  []string
-	Deleted  bool
-}
+// TeardownResult is lifecycle.TeardownResult.
+type TeardownResult = lifecycle.TeardownResult
 
 // Teardown unpins every service of previews/<slug>/values.yaml deployed by
 // the PR owner/repo#prNumber, its pr-url parsed with the store's pull request
@@ -333,18 +318,8 @@ func (t *Tree) unpin(
 	}, nil
 }
 
-// SyncResult is the outcome of Tree.Sync. Changed is true when the file was
-// rewritten; Values and Excluded (preview.Projection.Excluded) then describe
-// it. Notify is true when the rewritten file's ordered list of service or
-// dependency names, or any entry's host, differs from the file it replaced.
-// NotFound is true when the file does not exist.
-type SyncResult struct {
-	Values   preview.Values
-	Excluded []string
-	Changed  bool
-	Notify   bool
-	NotFound bool
-}
+// SyncResult is lifecycle.SyncResult.
+type SyncResult = lifecycle.SyncResult
 
 // Sync rewrites previews/<slug>/values.yaml as its projection on catalog
 // (applyCatalog) when that differs from the file (preview.Equal), recorded as

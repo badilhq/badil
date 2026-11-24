@@ -12,10 +12,10 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 
+	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/namespace"
 	"github.com/badilhq/badil/internal/preview"
-	"github.com/badilhq/badil/internal/store"
 )
 
 // actionUnlabeled is the webhook action of a removed label.
@@ -71,7 +71,7 @@ const (
 // ReconcileStore is the subset of store.GitHubStore used by ReconcilePR.
 type ReconcileStore interface {
 	Applier
-	FetchServiceCatalog(ctx context.Context) (*store.ServiceCatalog, error)
+	FetchServiceCatalog(ctx context.Context) (*catalog.Catalog, error)
 }
 
 // ReconcileAPI is what ReconcilePR uses: the store, the forge, the Recorder,
@@ -171,17 +171,17 @@ type ReconcileResult struct {
 // read, its head SHA is stored in headSHA.
 func reconcile(ctx context.Context, api ReconcileAPI, ev Event, headSHA *string) (string, string) {
 	closed := ev.Action == "closed"
-	catalog, err := api.Store.FetchServiceCatalog(ctx)
+	cat, err := api.Store.FetchServiceCatalog(ctx)
 	if err != nil {
 		if closed {
-			payloadTeardown(ctx, api.teardownAPI(), ev, store.DefaultLabel, err)
+			payloadTeardown(ctx, api.teardownAPI(), ev, catalog.DefaultLabel, err)
 			return OutcomeTornDown, ""
 		}
 		return reconcileFailed(ctx, ev, err)
 	}
-	services := catalog.ServicesForRepo(api.Forge.ParseRepoURL, ev.Owner, ev.Repo)
+	services := cat.ServicesForRepo(api.Forge.ParseRepoURL, ev.Owner, ev.Repo)
 	if !closed {
-		if reason := payloadSkipReason(ev, catalog.Label); reason != "" {
+		if reason := payloadSkipReason(ev, cat.Label); reason != "" {
 			return reconcileSkipped(ctx, ev, reason)
 		}
 		if len(services) == 0 {
@@ -191,14 +191,14 @@ func reconcile(ctx context.Context, api ReconcileAPI, ev Event, headSHA *string)
 	pr, err := api.Forge.GetPullRequest(ctx, ev.Owner, ev.Repo, ev.Number)
 	if err != nil {
 		if closed {
-			payloadTeardown(ctx, api.teardownAPI(), ev, catalog.Label, err)
+			payloadTeardown(ctx, api.teardownAPI(), ev, cat.Label, err)
 			return OutcomeTornDown, ""
 		}
 		return reconcileFailed(ctx, ev, err)
 	}
 	*headSHA = pr.HeadSHA
 
-	t := preview.ResolveTarget(pr.Labels, pr.HeadRef, catalog.Label)
+	t := preview.ResolveTarget(pr.Labels, pr.HeadRef, cat.Label)
 	logIgnored(ctx, ev, t)
 	deploy := pr.Open && t.Slug != ""
 	if (deploy || !closed) && pr.Fork() {
@@ -208,9 +208,9 @@ func reconcile(ctx context.Context, api ReconcileAPI, ev Event, headSHA *string)
 		return reconcileSkipped(ctx, ev, RepoNotInCatalogReason)
 	}
 	p := &reconcilePlan{
-		parsePR: api.Forge.ParsePRURL, ev: ev, pr: pr, t: t, catalog: catalog, deploy: deploy, repoServices: services,
+		parsePR: api.Forge.ParsePRURL, ev: ev, pr: pr, t: t, catalog: cat, deploy: deploy, repoServices: services,
 		foreign:      foreignFunc(ctx, api.Namespaces),
-		cleanupSlugs: cleanupSlugs(t, pr, ev, catalog.Label), cleanupReason: cleanupReason(t, pr, ev, catalog.Label),
+		cleanupSlugs: cleanupSlugs(t, pr, ev, cat.Label), cleanupReason: cleanupReason(t, pr, ev, cat.Label),
 		timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 	return p.apply(ctx, api)
@@ -227,7 +227,7 @@ type reconcilePlan struct {
 	ev            Event
 	pr            *forge.PullRequest
 	t             preview.Resolution
-	catalog       *store.ServiceCatalog
+	catalog       *catalog.Catalog
 	deploy        bool
 	repoServices  []string
 	services      []string
@@ -264,7 +264,7 @@ type heldPin struct {
 // or its error.
 type deployStep struct {
 	service string
-	result  *store.WriteResult
+	result  *WriteResult
 	err     error
 }
 
@@ -278,11 +278,11 @@ func (p *reconcilePlan) apply(ctx context.Context, api ReconcileAPI) (string, st
 			return reconcileFailed(ctx, p.ev, p.listErr)
 		}
 	}
-	kind := store.OpTeardown
+	kind := OpTeardown
 	if p.deploy {
-		kind = store.OpDeploy
+		kind = OpDeploy
 	}
-	res, applyErr := api.Store.Apply(ctx, store.Op{Kind: kind, Change: p.change})
+	res, applyErr := api.Store.Apply(ctx, Op{Kind: kind, Change: p.change})
 	return p.finish(ctx, api, res, applyErr)
 }
 
@@ -307,7 +307,7 @@ func (p *reconcilePlan) target(slug string) Target {
 // can't be read or the previews listed, only the teardowns from cleanupSlugs
 // are kept, and the error is recorded in listErr or readErr, as is a failed
 // namespace check.
-func (p *reconcilePlan) change(tree *store.Tree) (store.Summary, error) {
+func (p *reconcilePlan) change(tree Tree) (Summary, error) {
 	p.ran, p.readErr, p.noService, p.held, p.limited, p.inUse, p.unpin, p.deploys =
 		true, nil, nil, nil, false, false, nil, nil
 	p.cleanup = newSteps(p.ev.Target, p.cleanupSlugs, p.cleanupReason)
@@ -322,7 +322,7 @@ func (p *reconcilePlan) change(tree *store.Tree) (store.Summary, error) {
 		p.noService.run(tree)
 	default:
 		vals, err := tree.GetPreview(p.t.Slug)
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
+		if err != nil && !errors.Is(err, ErrNotFound) {
 			p.readErr = err
 			break
 		}
@@ -365,7 +365,7 @@ func foreignFunc(ctx context.Context, c namespace.Checker) func(slug string) (bo
 
 // limitReached reports whether maxPreviews previews exist in tree, with no
 // cap when maxPreviews is 0.
-func limitReached(tree *store.Tree, maxPreviews int) (bool, error) {
+func limitReached(tree Tree, maxPreviews int) (bool, error) {
 	if maxPreviews <= 0 {
 		return false, nil
 	}
@@ -394,7 +394,7 @@ func (p *reconcilePlan) untouchedUnpin(vals *preview.Values) *teardownStep {
 // deployAll deploys each touched service, in order, at the PR's head SHA in
 // the target preview. With skipUnchanged, a service whose deploy would change
 // nothing but its updated-at is left alone.
-func (p *reconcilePlan) deployAll(tree *store.Tree, skipUnchanged bool) {
+func (p *reconcilePlan) deployAll(tree Tree, skipUnchanged bool) {
 	for _, service := range p.services {
 		step := &deployStep{service: service}
 		step.result, step.err = tree.Deploy(p.t.Slug, p.catalog, service, p.pr.HeadSHA, preview.DeployInputs{
@@ -425,7 +425,7 @@ func (p *reconcilePlan) written() []*deployStep {
 // summary returns the commit subject of the last attempt: a deploy to the
 // target when a service was written there, naming the other previews the PR
 // left; otherwise the previews the PR left.
-func (p *reconcilePlan) summary() store.Summary {
+func (p *reconcilePlan) summary() Summary {
 	tt := p.ev.Target
 	others := removedSlugs(p.cleanup)
 	if len(p.written()) > 0 {
@@ -433,7 +433,7 @@ func (p *reconcilePlan) summary() store.Summary {
 		if len(others) > 0 {
 			subject += ", unpin from " + strings.Join(others, ", ")
 		}
-		return store.Summary{Subject: subject}
+		return Summary{Subject: subject}
 	}
 	steps := slices.Clone(p.cleanup)
 	for _, s := range []*teardownStep{p.noService, p.unpin} {
@@ -441,7 +441,7 @@ func (p *reconcilePlan) summary() store.Summary {
 			steps = append(steps, s)
 		}
 	}
-	return store.Summary{Subject: unpinSubject(tt, removedSlugs(steps))}
+	return Summary{Subject: unpinSubject(tt, removedSlugs(steps))}
 }
 
 // finish handles the reconcile's operation, which ended with res or
@@ -456,7 +456,7 @@ func (p *reconcilePlan) summary() store.Summary {
 // once on its open PRs; an open PR whose named labels conflict is told to
 // keep one, and skipped.
 func (p *reconcilePlan) finish(
-	ctx context.Context, api ReconcileAPI, res store.Result, applyErr error,
+	ctx context.Context, api ReconcileAPI, res Result, applyErr error,
 ) (string, string) {
 	tapi := api.teardownAPI()
 	if !p.ran {
@@ -598,7 +598,7 @@ func movedReason(slug string) string {
 func touchedServices(
 	ctx context.Context,
 	api ReconcileAPI,
-	catalog *store.ServiceCatalog,
+	catalog *catalog.Catalog,
 	ev Event,
 	pr *forge.PullRequest,
 	services []string,
@@ -738,7 +738,7 @@ func hasPreviewLabel(labels []string, label string) bool {
 // least one service was written, OutcomeFailed when none was and at least
 // one failed, and otherwise, every service being unchanged, the skip of
 // reconcileSkipped with reason alreadyDeployedReason.
-func (p *reconcilePlan) afterDeploy(ctx context.Context, api ReconcileAPI, res store.Result) (string, string) {
+func (p *reconcilePlan) afterDeploy(ctx context.Context, api ReconcileAPI, res Result) (string, string) {
 	written := p.written()
 	if p.unpin != nil {
 		afterTeardown(ctx, api.teardownAPI(), p.unpin, res, nil, len(written) == 0)

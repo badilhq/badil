@@ -6,6 +6,7 @@ import (
 	"maps"
 	"testing"
 
+	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
 )
@@ -166,7 +167,7 @@ func TestSync_ShadowedDependency(t *testing.T) {
 // operation.
 func syncSlug(c *store.GitHubStore, catalog *store.ServiceCatalog) (*store.SyncResult, error) {
 	var res *store.SyncResult
-	_, err := apply(c, store.OpSync, func(tree *store.Tree) (store.Summary, error) {
+	_, err := apply(c, store.OpSync, func(tree lifecycle.Tree) (store.Summary, error) {
 		var syncErr error
 		res, syncErr = tree.Sync("slug", catalog)
 		return store.Summary{Subject: "sync"}, syncErr
