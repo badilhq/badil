@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
 	"github.com/badilhq/badil/internal/store/storetest"
@@ -429,6 +430,25 @@ func TestDeploy_PreviewLimitReadErrors(t *testing.T) {
 			}
 			if tc.fg.capturedSlug != "" || tc.fg.fanOutBodyCalled {
 				t.Error("a failed check must not write nor comment")
+			}
+		})
+	}
+}
+
+// TestWithMetrics_NilRecordsNothing checks a server given an untyped nil or a
+// nil *metrics.Metrics deploys a new preview, which lifecycle records through
+// the server's recorder, without recording or panicking.
+func TestWithMetrics_NilRecordsNothing(t *testing.T) {
+	for name, opt := range map[string]Option{
+		"untyped nil":          WithMetrics(nil),
+		"nil *metrics.Metrics": WithMetrics((*metrics.Metrics)(nil)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			fg := &fakeGitops{catalog: []string{"backend-1"}}
+			fg.open(t)
+			srv := NewServer(fg, fg, "test-token", withFanOut(fg), opt)
+			if rec := postDeploy(t, srv, validBody(), "test-token"); rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 			}
 		})
 	}
