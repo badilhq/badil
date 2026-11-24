@@ -56,3 +56,16 @@ func TestDeploy_Needs(t *testing.T) {
 		t.Errorf("front and payments preview = %v, want %v", got, want)
 	}
 }
+
+// needsBadil is a badil.yaml whose services declare needs.
+const needsBadil = `services:
+  front: {repo: https://github.com/acme/front.git, needs: [backend]}
+  backend: {repo: https://github.com/acme/backend.git, needs: [postgres, redis]}
+  payments: {repo: https://github.com/acme/payments.git, needs: [backend, kafka, postgres]}
+  search: {repo: https://github.com/acme/search.git, needs: [elasticsearch]}
+dependencies:
+  postgres: {chart: oci://r/postgresql, version: 1.0.0}
+  redis: {chart: oci://r/redis, version: 1.0.0}
+  kafka: {chart: oci://r/kafka, version: 1.0.0}
+  elasticsearch: {chart: oci://r/elasticsearch, version: 1.0.0}
+`

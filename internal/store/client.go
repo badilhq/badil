@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"slices"
-	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -127,17 +125,6 @@ func Open(
 	return c, nil
 }
 
-// RepoFullName returns the full name of a repo from its URL path: the path
-// without its leading "/", a trailing "/" and then a trailing ".git". The
-// second result is false when that leaves fewer than two segments or an empty
-// one.
-func RepoFullName(path string) (string, bool) {
-	fullName := strings.TrimPrefix(path, "/")
-	fullName = strings.TrimSuffix(strings.TrimSuffix(fullName, "/"), ".git")
-	segments := strings.Split(fullName, "/")
-	return fullName, len(segments) >= 2 && !slices.Contains(segments, "")
-}
-
 // repoNames returns the full name of the repo at raw (RepoFullName) and its
 // web base, raw's scheme and host followed by the full name.
 func repoNames(raw string) (string, string, error) {
@@ -203,6 +190,9 @@ func (c *GitHubStore) FullName() string {
 
 // previewsDir is the gitops repo directory holding one subdirectory per preview.
 const previewsDir = "previews"
+
+// configFile is the path of badil's configuration in the gitops repo.
+const configFile = "badil.yaml"
 
 // ListPreviews returns the sorted names of the directories under previews/,
 // all of them. A missing previews/ directory yields an empty slice.

@@ -7,8 +7,8 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/github"
-	"github.com/badilhq/badil/internal/store"
 )
 
 // DefaultGitHubURL is GITHUB_URL when it is unset.
@@ -144,7 +144,7 @@ func LoadGitHubURLs() (string, string, error) {
 }
 
 // validateRepoURL checks raw is a base URL github.ParseBaseURL accepts, with
-// a path store.RepoFullName accepts. Its error reads after the setting's name.
+// a path catalog.RepoFullName accepts. Its error reads after the setting's name.
 func validateRepoURL(raw string) error {
 	u, err := github.ParseBaseURL(raw)
 	if errors.Is(err, github.ErrUserInfo) {
@@ -153,7 +153,7 @@ func validateRepoURL(raw string) error {
 	if err != nil {
 		return err
 	}
-	if _, ok := store.RepoFullName(u.Path); !ok {
+	if _, ok := catalog.RepoFullName(u.Path); !ok {
 		return fmt.Errorf("must have a repository path of at least two segments, got %q", u.Path)
 	}
 	return nil
