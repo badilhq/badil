@@ -22,7 +22,7 @@ spec:
     - name: preview-renderer
       expression: 'request.userInfo.username == "system:serviceaccount:{{ $rendererNamespace }}:{{ $rendererServiceAccount }}"'
   validations:
-    - expression: "oldObject.metadata.?labels[?'app.kubernetes.io/part-of'].orValue('') == 'preview-environments'"
+    - expression: "oldObject.metadata.?labels[?'badil.dev/preview'].hasValue()"
       message: namespace is not a badil preview
 ---
 apiVersion: admissionregistration.k8s.io/v1

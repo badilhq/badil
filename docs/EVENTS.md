@@ -142,9 +142,9 @@ The check reads the gitops clone, so it costs no extra GitHub call.
 
 ## Namespace in use
 
-A preview's slug is its namespace. Argo CD adopts a namespace that already exists, and the teardown then deletes it with everything in it. So badil creates a preview only when its namespace does not exist, or is already a preview namespace of that slug: labelled `app.kubernetes.io/part-of: preview-environments` and `app.kubernetes.io/instance: <slug>`, as `preview-apps` labels it (see [Renderer obligations](CONTRACT.md#renderer-obligations)). A leftover or terminating preview namespace is therefore allowed. A deploy into an existing preview is never checked.
+A preview's slug is its namespace. Argo CD adopts a namespace that already exists, and the teardown then deletes it with everything in it. So badil creates a preview only when its namespace does not exist, or is already a preview namespace of that slug: labelled `badil.dev/preview: <slug>`, as `preview-apps` labels it (see [Renderer obligations](CONTRACT.md#renderer-obligations)). A leftover or terminating preview namespace is therefore allowed. A deploy into an existing preview is never checked.
 
-In the label flow, the check runs right after the preview cap check, when the target's `values.yaml` does not exist. badil gets the namespace named after the slug, through the chart's ClusterRole (`get` on namespaces). When it exists without those labels, the reconcile writes nothing and replaces the PR's comment with:
+In the label flow, the check runs right after the preview cap check, when the target's `values.yaml` does not exist. badil gets the namespace named after the slug, through the chart's ClusterRole (`get` on namespaces). When it exists without that label, the reconcile writes nothing and replaces the PR's comment with:
 
 ```
 ## ⚠️ Preview: `<slug>`

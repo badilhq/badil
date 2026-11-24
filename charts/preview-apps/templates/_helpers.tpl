@@ -1,12 +1,13 @@
 {{- /*
 The labels of every resource of a preview: name is the resource's app name,
-instance the preview (the release name).
+instance the preview (the release name). badil.dev/preview marks the object as
+part of the badil preview whose slug is its value.
 */}}
 {{- define "preview-apps.labels" -}}
 app.kubernetes.io/name: {{ .name }}
 app.kubernetes.io/instance: {{ .instance }}
-app.kubernetes.io/part-of: preview-environments
 app.kubernetes.io/managed-by: argocd
+badil.dev/preview: {{ .instance }}
 {{- end }}
 
 {{- /*

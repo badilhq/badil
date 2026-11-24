@@ -109,7 +109,7 @@ See [Pinned and branch-tracking services](ARCHITECTURE.md#pinned-and-branch-trac
 
 ### `namespace`
 
-`namespace.labels` and `namespace.annotations` are added to every preview Namespace, after the chart's own. The chart sets the labels `app.kubernetes.io/name`, `app.kubernetes.io/instance`, `app.kubernetes.io/part-of` and `app.kubernetes.io/managed-by`, and the annotation `argocd.argoproj.io/sync-wave`.
+`namespace.labels` and `namespace.annotations` are added to every preview Namespace, after the chart's own. The chart sets the labels `app.kubernetes.io/name`, `app.kubernetes.io/instance`, `app.kubernetes.io/managed-by` and `badil.dev/preview`, and the annotation `argocd.argoproj.io/sync-wave`.
 
 Keys and values are strings, and an empty value is allowed. A null, a number or a boolean is rejected, as is a key the chart sets. An empty block writes nothing.
 
@@ -237,7 +237,7 @@ Upgrade badil (0.10.0 or later) first, then `preview-env` (0.3.0 or later). `pre
 
 ## Preview limits
 
-badil and the `preview-apps` chart create no quota or policy objects. Per-preview limits belong to the cluster's policy layer. It selects preview namespaces by the label `app.kubernetes.io/part-of: preview-environments`, or by labels set in `namespace` of `badil.yaml`.
+badil and the `preview-apps` chart create no quota or policy objects. Per-preview limits belong to the cluster's policy layer. It selects preview namespaces by the label `badil.dev/preview`, or by labels set in `namespace` of `badil.yaml`.
 
 [`examples/kyverno/preview-guardrails.yaml`](../examples/kyverno/preview-guardrails.yaml) is one Kyverno `GeneratingPolicy` (Kyverno v1.19.0 or later).
 
@@ -247,7 +247,7 @@ A quota on compute resources (`requests.cpu`, `requests.memory`, `limits.memory`
 
 ## Namespace guard
 
-`namespaceGuard` is the badil chart's opt-in admission policy that keeps the renderer that deploys previews off namespaces badil did not create. With `namespaceGuard.enabled`, it renders a ValidatingAdmissionPolicy and a ValidatingAdmissionPolicyBinding, both cluster-scoped and named `<release>-namespace-guard`. The policy refuses any `UPDATE` or `DELETE` of a Namespace by the renderer's ServiceAccount unless the namespace already carries `app.kubernetes.io/part-of: preview-environments`, with the message `namespace is not a badil preview`. It covers every namespace that identity updates or deletes, so the renderer must manage no namespace other than previews. It needs Kubernetes 1.30 or later. Setup: [Namespace guard](INSTALL.md#namespace-guard-optional).
+`namespaceGuard` is the badil chart's opt-in admission policy that keeps the renderer that deploys previews off namespaces badil did not create. With `namespaceGuard.enabled`, it renders a ValidatingAdmissionPolicy and a ValidatingAdmissionPolicyBinding, both cluster-scoped and named `<release>-namespace-guard`. The policy refuses any `UPDATE` or `DELETE` of a Namespace by the renderer's ServiceAccount unless the namespace already carries the label `badil.dev/preview`, with the message `namespace is not a badil preview`. It covers every namespace that identity updates or deletes, so the renderer must manage no namespace other than previews. It needs Kubernetes 1.30 or later. Setup: [Namespace guard](INSTALL.md#namespace-guard-optional).
 
 | Value | Default | Description |
 |---|---|---|

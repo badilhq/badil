@@ -17,19 +17,15 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-// Labels of a preview namespace, set by the preview-apps chart.
-const (
-	partOfLabel   = "app.kubernetes.io/part-of"
-	partOf        = "preview-environments"
-	instanceLabel = "app.kubernetes.io/instance"
-)
+// previewLabel is the label the preview-apps chart sets on a preview
+// namespace, with the preview's slug as value.
+const previewLabel = "badil.dev/preview"
 
 // Checker reads the namespace of a new preview.
 type Checker interface {
 	// Foreign reports whether the namespace name exists and is not a preview
-	// namespace for the slug name: one labelled
-	// app.kubernetes.io/part-of=preview-environments and
-	// app.kubernetes.io/instance=<name>. A failed read is returned.
+	// namespace for the slug name: one labelled badil.dev/preview=<name>. A
+	// failed read is returned.
 	Foreign(ctx context.Context, name string) (bool, error)
 }
 
@@ -53,7 +49,7 @@ func (c *client) Foreign(ctx context.Context, name string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("get namespace %s: %w", name, err)
 	}
-	return ns.Labels[partOfLabel] != partOf || ns.Labels[instanceLabel] != name, nil
+	return ns.Labels[previewLabel] != name, nil
 }
 
 // disabled is the Checker outside a cluster: no namespace is foreign.

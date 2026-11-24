@@ -7,8 +7,8 @@ metadata:
   labels:
     app.kubernetes.io/name: all-branch
     app.kubernetes.io/instance: all-branch
-    app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
+    badil.dev/preview: all-branch
   annotations:
     argocd.argoproj.io/sync-wave: "-2"
 
@@ -22,8 +22,8 @@ metadata:
   labels:
     app.kubernetes.io/name: all-branch
     app.kubernetes.io/instance: all-branch
-    app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
+    badil.dev/preview: all-branch
   annotations:
     argocd.argoproj.io/sync-wave: "-3"
   finalizers:
@@ -50,8 +50,8 @@ metadata:
   labels:
     app.kubernetes.io/name: api
     app.kubernetes.io/instance: all-branch
-    app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
+    badil.dev/preview: all-branch
   annotations:
     argocd.argoproj.io/sync-wave: "0"
     preview.badil.dev/vcs.ref.revision: ""
@@ -90,8 +90,8 @@ metadata:
   labels:
     app.kubernetes.io/name: front
     app.kubernetes.io/instance: all-branch
-    app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
+    badil.dev/preview: all-branch
   annotations:
     argocd.argoproj.io/sync-wave: "0"
     preview.badil.dev/vcs.ref.revision: ""

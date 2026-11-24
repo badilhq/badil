@@ -94,10 +94,9 @@ cleanup:
 
 # Admission policy that refuses any update or delete of a namespace by the
 # ServiceAccount of the renderer that deploys previews unless the namespace
-# already carries the preview label app.kubernetes.io/part-of:
-# preview-environments. It applies whoever wrote the preview file. The renderer
-# must manage no namespace other than previews: its updates and deletes of any
-# other namespace are refused too.
+# already carries the preview label badil.dev/preview. It applies whoever wrote
+# the preview file. The renderer must manage no namespace other than previews:
+# its updates and deletes of any other namespace are refused too.
 # Renders a cluster-scoped ValidatingAdmissionPolicy and its binding; needs
 # Kubernetes 1.30+.
 namespaceGuard:

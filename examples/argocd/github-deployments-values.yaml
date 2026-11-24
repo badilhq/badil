@@ -182,7 +182,7 @@ notifications:
         - on-status-ready
         - on-status-degraded
         - on-status-sync-failed
-      selector: app.kubernetes.io/part-of=preview-environments,app.kubernetes.io/managed-by=argocd
+      selector: badil.dev/preview,app.kubernetes.io/managed-by=argocd
     - recipients:
         - github
       triggers:
@@ -191,4 +191,4 @@ notifications:
         - on-preview-degraded
         - on-preview-sync-error
         - on-preview-unpinned
-      selector: app.kubernetes.io/part-of=preview-environments,app.kubernetes.io/managed-by=argocd
+      selector: badil.dev/preview,app.kubernetes.io/managed-by=argocd

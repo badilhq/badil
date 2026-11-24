@@ -26,10 +26,7 @@ func pricing(labels map[string]string) *corev1.Namespace {
 
 func TestForeign(t *testing.T) {
 	previewOf := func(slug string) map[string]string {
-		return map[string]string{
-			"app.kubernetes.io/part-of":  "preview-environments",
-			"app.kubernetes.io/instance": slug,
-		}
+		return map[string]string{"badil.dev/preview": slug}
 	}
 	cases := []struct {
 		name     string
@@ -48,12 +45,7 @@ func TestForeign(t *testing.T) {
 			existing: []runtime.Object{pricing(map[string]string{"app.kubernetes.io/part-of": "preview-environments"})},
 			want:     true,
 		},
-		{
-			name:     "instance only",
-			existing: []runtime.Object{pricing(map[string]string{"app.kubernetes.io/instance": "pricing"})},
-			want:     true,
-		},
-		{name: "instance of another slug", existing: []runtime.Object{pricing(previewOf("search"))}, want: true},
+		{name: "preview of another slug", existing: []runtime.Object{pricing(previewOf("search"))}, want: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

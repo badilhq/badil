@@ -6,7 +6,7 @@
 - a LimitRange with default requests and limits for every container;
 - a NetworkPolicy that admits ingress only from pods of the same preview and from the ingress controller's namespace.
 
-It selects preview namespaces by the label `app.kubernetes.io/part-of: preview-environments`, which the `preview-apps` chart sets. Kyverno creates the objects, not Argo CD, so the `previews` AppProject needs no change. Teardown deletes them with the preview namespace.
+It selects preview namespaces by the label `badil.dev/preview`, which the `preview-apps` chart sets. Kyverno creates the objects, not Argo CD, so the `previews` AppProject needs no change. Teardown deletes them with the preview namespace.
 
 ## Prerequisites
 

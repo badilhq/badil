@@ -113,7 +113,7 @@ func TestGenerate_KeyConstraints(t *testing.T) {
 			at(t, ns, "properties", "labels", "properties"),
 			map[string]any{
 				"app.kubernetes.io/name": false, "app.kubernetes.io/instance": false,
-				"app.kubernetes.io/part-of": false, "app.kubernetes.io/managed-by": false,
+				"app.kubernetes.io/managed-by": false, "badil.dev/preview": false,
 			},
 		},
 		{"labels no propertyNames", at(t, ns, "properties", "labels", "propertyNames"), nil},

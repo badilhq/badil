@@ -186,8 +186,8 @@ jobs:
           got=$(meta < /dev/null)
           want='label app.kubernetes.io/name=preview-x
           label app.kubernetes.io/instance=preview-x
-          label app.kubernetes.io/part-of=preview-environments
           label app.kubernetes.io/managed-by=argocd
+          label badil.dev/preview=preview-x
           annotation argocd.argoproj.io/sync-wave=-2'
           if [ "$got" != "$want" ]; then
             echo '::error::expected only the chart labels and sync-wave annotation on the Namespace without namespace'
@@ -205,8 +205,8 @@ jobs:
           )
           want='label app.kubernetes.io/name=preview-x
           label app.kubernetes.io/instance=preview-x
-          label app.kubernetes.io/part-of=preview-environments
           label app.kubernetes.io/managed-by=argocd
+          label badil.dev/preview=preview-x
           label pod-security.kubernetes.io/enforce=baseline
           label team=payments
           annotation argocd.argoproj.io/sync-wave=-2
@@ -306,7 +306,7 @@ jobs:
               'ValidatingAdmissionPolicy t-namespace-guard' \
               'Fail [{"apiGroups":[""],"apiVersions":["v1"],"resources":["namespaces"],"operations":["UPDATE","DELETE"]}]' \
               "preview-renderer: request.userInfo.username == \"system:serviceaccount:$1:$2\"" \
-              "oldObject.metadata.?labels[?'app.kubernetes.io/part-of'].orValue('') == 'preview-environments' -> namespace is not a badil preview" \
+              "oldObject.metadata.?labels[?'badil.dev/preview'].hasValue() -> namespace is not a badil preview" \
               'ValidatingAdmissionPolicyBinding t-namespace-guard' \
               't-namespace-guard ["Deny"]'
           }

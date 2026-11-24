@@ -120,8 +120,8 @@ func ReservedNamespaceLabels() []string {
 	return []string{
 		"app.kubernetes.io/name",
 		"app.kubernetes.io/instance",
-		"app.kubernetes.io/part-of",
 		"app.kubernetes.io/managed-by",
+		"badil.dev/preview",
 	}
 }
 

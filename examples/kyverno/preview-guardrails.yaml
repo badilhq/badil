@@ -1,8 +1,8 @@
 # Per-preview limits with Kyverno: a ResourceQuota, a LimitRange and an
 # ingress NetworkPolicy, all named preview-guardrails, generated in every
-# preview namespace (label app.kubernetes.io/part-of: preview-environments,
-# set by the preview-apps chart). Existing previews get them when the policy is
-# applied; teardown deletes them with the preview namespace.
+# preview namespace (label badil.dev/preview, set by the preview-apps chart).
+# Existing previews get them when the policy is applied; teardown deletes them
+# with the preview namespace.
 #
 # - Requires Kyverno v1.19.0 or later.
 # - The values are examples to adapt: the quota numbers, the defaults, and the
@@ -35,7 +35,7 @@ spec:
         resources: ["namespaces"]
   matchConditions:
     - name: preview-namespace
-      expression: object.metadata.?labels["app.kubernetes.io/part-of"].orValue("") == "preview-environments"
+      expression: object.metadata.?labels[?"badil.dev/preview"].hasValue()
   variables:
     - name: nsName
       expression: object.metadata.name

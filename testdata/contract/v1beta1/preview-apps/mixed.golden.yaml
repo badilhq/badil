@@ -7,8 +7,8 @@ metadata:
   labels:
     app.kubernetes.io/name: mixed
     app.kubernetes.io/instance: mixed
-    app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
+    badil.dev/preview: mixed
     "team": "platform"
   annotations:
     argocd.argoproj.io/sync-wave: "-2"
@@ -23,8 +23,8 @@ metadata:
   labels:
     app.kubernetes.io/name: mixed
     app.kubernetes.io/instance: mixed
-    app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
+    badil.dev/preview: mixed
   annotations:
     argocd.argoproj.io/sync-wave: "-3"
   finalizers:
@@ -51,8 +51,8 @@ metadata:
   labels:
     app.kubernetes.io/name: api
     app.kubernetes.io/instance: mixed
-    app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
+    badil.dev/preview: mixed
   annotations:
     argocd.argoproj.io/sync-wave: "0"
     preview.badil.dev/vcs.ref.revision: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
@@ -102,8 +102,8 @@ metadata:
   labels:
     app.kubernetes.io/name: front
     app.kubernetes.io/instance: mixed
-    app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
+    badil.dev/preview: mixed
   annotations:
     argocd.argoproj.io/sync-wave: "0"
     preview.badil.dev/vcs.ref.revision: ""
@@ -144,8 +144,8 @@ metadata:
   labels:
     app.kubernetes.io/name: worker
     app.kubernetes.io/instance: mixed
-    app.kubernetes.io/part-of: preview-environments
     app.kubernetes.io/managed-by: argocd
+    badil.dev/preview: mixed
   annotations:
     argocd.argoproj.io/sync-wave: "0"
     preview.badil.dev/vcs.ref.revision: ""
