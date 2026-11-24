@@ -281,16 +281,25 @@ func parseDocument(doc *badilFile) (*ServiceCatalog, error) {
 	if err = checkExposedDependencies(c); err != nil {
 		return nil, err
 	}
-	if doc.Preview != nil && doc.Preview.Label != nil {
-		c.Label = string(*doc.Preview.Label)
-	}
-	if doc.Preview != nil && doc.Preview.MaxPreviews != nil {
-		c.MaxPreviews = int(*doc.Preview.MaxPreviews)
-	}
-	if doc.Preview != nil && doc.Preview.ArgoCDURL != nil {
-		c.ArgoCDURL = string(*doc.Preview.ArgoCDURL)
-	}
+	applyPreviewBlock(c, doc.Preview)
 	return c, nil
+}
+
+// applyPreviewBlock sets the label, the preview limit and the Argo CD URL of
+// c that the preview block p sets, nothing when p is nil.
+func applyPreviewBlock(c *ServiceCatalog, p *previewBlock) {
+	if p == nil {
+		return
+	}
+	if p.Label != nil {
+		c.Label = string(*p.Label)
+	}
+	if p.MaxPreviews != nil {
+		c.MaxPreviews = int(*p.MaxPreviews)
+	}
+	if p.ArgoCDURL != nil {
+		c.ArgoCDURL = string(*p.ArgoCDURL)
+	}
 }
 
 // parseServiceEntries validates the services mapping, in file order, and sets

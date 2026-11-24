@@ -128,10 +128,11 @@ func Open(
 }
 
 // RepoFullName returns the full name of a repo from its URL path: the path
-// without its leading "/", a trailing "/" and then a trailing ".git". ok is
-// false when that leaves fewer than two segments or an empty one.
-func RepoFullName(path string) (fullName string, ok bool) {
-	fullName = strings.TrimPrefix(path, "/")
+// without its leading "/", a trailing "/" and then a trailing ".git". The
+// second result is false when that leaves fewer than two segments or an empty
+// one.
+func RepoFullName(path string) (string, bool) {
+	fullName := strings.TrimPrefix(path, "/")
 	fullName = strings.TrimSuffix(strings.TrimSuffix(fullName, "/"), ".git")
 	segments := strings.Split(fullName, "/")
 	return fullName, len(segments) >= 2 && !slices.Contains(segments, "")

@@ -95,16 +95,19 @@ func TestReconcile_NamedLabelSharesPreviewAcrossRepos(t *testing.T) {
 	}
 }
 
+// moveCase is a case of TestReconcile_Moves.
+type moveCase struct {
+	name      string
+	ev        lifecycle.Event
+	labels    []string
+	removed   string // the slug whose teardown comments
+	reason    string
+	teardowns []string
+	subject   string
+}
+
 func TestReconcile_Moves(t *testing.T) {
-	cases := []struct {
-		name      string
-		ev        lifecycle.Event
-		labels    []string
-		removed   string // the slug whose teardown comments
-		reason    string
-		teardowns []string
-		subject   string
-	}{
+	cases := []moveCase{
 		{
 			name:      "plain to named",
 			ev:        event("labeled", "front", "preview:b", "preview", "preview:b"),
@@ -134,34 +137,37 @@ func TestReconcile_Moves(t *testing.T) {
 		},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			capture := captureLogs(t)
-			f := &reconcileFake{
-				pr:       fetchedPR("front", true, tc.labels...),
-				previews: map[string]*preview.Values{tc.removed: onlyFront42()},
-			}
-			lifecycle.ReconcilePR(context.Background(), f.api(t), tc.ev)
+		t.Run(tc.name, func(t *testing.T) { checkMove(t, tc) })
+	}
+}
 
-			teardowns := teardownsLogged(capture)
-			if got := teardownSlugs(teardowns); !slices.Equal(got, tc.teardowns) {
-				t.Errorf("teardowns = %v, want %v", got, tc.teardowns)
-			}
-			for _, td := range teardowns {
-				if td.owner != "acme" || td.repo != "front" || td.number != 42 {
-					t.Errorf("teardown %+v, want acme/front#42 only", td)
-				}
-			}
-			c := f.lastCommit(t)
-			if c.Subject() != tc.subject || len(f.g.pushed()) != 1 {
-				t.Errorf("pushed = %q, want one commit %q", f.g.subjects(), tc.subject)
-			}
-			if want := deletedBody(tc.removed, tc.reason, c); len(f.upserts) != 1 || f.upserts[0] != want {
-				t.Errorf("upserts = %q, want one with body:\n%s", f.upserts, want)
-			}
-			if want := []string{"apply", "upsert", "fanout"}; !slices.Equal(f.calls, want) {
-				t.Errorf("calls = %v, want %v", f.calls, want)
-			}
-		})
+// checkMove runs the case tc of TestReconcile_Moves.
+func checkMove(t *testing.T, tc moveCase) {
+	capture := captureLogs(t)
+	f := &reconcileFake{
+		pr:       fetchedPR("front", true, tc.labels...),
+		previews: map[string]*preview.Values{tc.removed: onlyFront42()},
+	}
+	lifecycle.ReconcilePR(context.Background(), f.api(t), tc.ev)
+
+	teardowns := teardownsLogged(capture)
+	if got := teardownSlugs(teardowns); !slices.Equal(got, tc.teardowns) {
+		t.Errorf("teardowns = %v, want %v", got, tc.teardowns)
+	}
+	for _, td := range teardowns {
+		if td.owner != "acme" || td.repo != "front" || td.number != 42 {
+			t.Errorf("teardown %+v, want acme/front#42 only", td)
+		}
+	}
+	c := f.lastCommit(t)
+	if c.Subject() != tc.subject || len(f.g.pushed()) != 1 {
+		t.Errorf("pushed = %q, want one commit %q", f.g.subjects(), tc.subject)
+	}
+	if want := deletedBody(tc.removed, tc.reason, c); len(f.upserts) != 1 || f.upserts[0] != want {
+		t.Errorf("upserts = %q, want one with body:\n%s", f.upserts, want)
+	}
+	if want := []string{"apply", "upsert", "fanout"}; !slices.Equal(f.calls, want) {
+		t.Errorf("calls = %v, want %v", f.calls, want)
 	}
 }
 

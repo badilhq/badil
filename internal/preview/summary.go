@@ -50,26 +50,10 @@ func BuildSummary(
 	fmt.Fprintf(&b, "## 🚀 Preview: `%s`\n\n", slug)
 	pinned := false
 	for _, svc := range values.Services {
-		sha := svc.CommitSha
-		var prURL, prNumber string
-		if svc.Metadata != nil {
-			prURL, prNumber = svc.Metadata.PRURL, svc.Metadata.PRNumber
-		}
-		if sha != "" {
+		line, svcPinned := serviceLine(parse, svc)
+		b.WriteString(line)
+		if svcPinned {
 			pinned = true
-			shaShort := shortSHA(sha, shortSHALen8)
-			cURL := deriveCommitURL(parse, prURL, sha)
-			commitPart := "📌 `" + shaShort + "`"
-			if cURL != "" {
-				commitPart = fmt.Sprintf("📌 [`%s`](%s)", shaShort, cURL)
-			}
-			prPart := ""
-			if prURL != "" {
-				prPart = fmt.Sprintf(" · [PR #%s](%s)", prNumber, prURL)
-			}
-			fmt.Fprintf(&b, "- **%s** · %s%s", svc.Name, commitPart, prPart)
-		} else {
-			fmt.Fprintf(&b, "- **%s** · 🔄 `%s`", svc.Name, svc.Branch)
 		}
 		if text, url, ok := urls.Link(svc.Name, svc.Host); ok {
 			fmt.Fprintf(&b, " · [%s](%s)", text, url)
@@ -99,6 +83,30 @@ func BuildSummary(
 	b.WriteString("\n---\n")
 	fmt.Fprintf(&b, "🔗 [%s](%s)", commitMessage, commitURL)
 	return b.String()
+}
+
+// serviceLine returns the line of svc in BuildSummary, without its link and
+// newline, and whether svc is pinned (its CommitSha is set).
+func serviceLine(parse PRURLParser, svc ServiceEntry) (string, bool) {
+	sha := svc.CommitSha
+	var prURL, prNumber string
+	if svc.Metadata != nil {
+		prURL, prNumber = svc.Metadata.PRURL, svc.Metadata.PRNumber
+	}
+	if sha == "" {
+		return fmt.Sprintf("- **%s** · 🔄 `%s`", svc.Name, svc.Branch), false
+	}
+	shaShort := shortSHA(sha, shortSHALen8)
+	cURL := deriveCommitURL(parse, prURL, sha)
+	commitPart := "📌 `" + shaShort + "`"
+	if cURL != "" {
+		commitPart = fmt.Sprintf("📌 [`%s`](%s)", shaShort, cURL)
+	}
+	prPart := ""
+	if prURL != "" {
+		prPart = fmt.Sprintf(" · [PR #%s](%s)", prNumber, prURL)
+	}
+	return fmt.Sprintf("- **%s** · %s%s", svc.Name, commitPart, prPart), true
 }
 
 // ArgoCDAppsURL returns the Argo CD UI's application list at argocdURL (no

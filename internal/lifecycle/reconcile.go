@@ -213,18 +213,7 @@ func reconcile(ctx context.Context, api ReconcileAPI, ev Event, headSHA *string)
 		cleanupSlugs: cleanupSlugs(t, pr, ev, catalog.Label), cleanupReason: cleanupReason(t, pr, ev, catalog.Label),
 		timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
-	if deploy {
-		p.services, p.listErr = touchedServices(ctx, api, catalog, ev, pr, services)
-		if p.listErr != nil && len(p.cleanupSlugs) == 0 {
-			return reconcileFailed(ctx, ev, p.listErr)
-		}
-	}
-	kind := store.OpTeardown
-	if deploy {
-		kind = store.OpDeploy
-	}
-	res, applyErr := api.Store.Apply(ctx, store.Op{Kind: kind, Change: p.change})
-	return p.finish(ctx, api, res, applyErr)
+	return p.apply(ctx, api)
 }
 
 // reconcilePlan is a reconcile once the forge was read: the PR, its target,
@@ -277,6 +266,24 @@ type deployStep struct {
 	service string
 	result  *store.WriteResult
 	err     error
+}
+
+// apply lists the services the PR touches when it deploys, then runs change
+// in one Apply of the store and finishes. When the listing fails and the PR
+// leaves no other preview, the reconcile fails without an Apply.
+func (p *reconcilePlan) apply(ctx context.Context, api ReconcileAPI) (string, string) {
+	if p.deploy {
+		p.services, p.listErr = touchedServices(ctx, api, p.catalog, p.ev, p.pr, p.repoServices)
+		if p.listErr != nil && len(p.cleanupSlugs) == 0 {
+			return reconcileFailed(ctx, p.ev, p.listErr)
+		}
+	}
+	kind := store.OpTeardown
+	if p.deploy {
+		kind = store.OpDeploy
+	}
+	res, applyErr := api.Store.Apply(ctx, store.Op{Kind: kind, Change: p.change})
+	return p.finish(ctx, api, res, applyErr)
 }
 
 // target returns the PR's Target in the preview slug.
@@ -337,7 +344,7 @@ func (p *reconcilePlan) change(tree *store.Tree) (store.Summary, error) {
 		}
 		p.deployAll(tree, !removed)
 	}
-	return p.summary(), nil
+	return p.summary(), nil //nolint:nilerr // listErr is recorded for finish, which fails the reconcile after Apply commits the cleanup teardowns
 }
 
 // foreignFunc returns the namespace check of a new preview through c, under

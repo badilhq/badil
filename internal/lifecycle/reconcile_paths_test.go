@@ -367,14 +367,17 @@ func TestReconcile_PathsUnpinFails(t *testing.T) {
 	}, "badil_reconciles_total", "badil_teardowns_total")
 }
 
+// noServiceChangedCase is a case of TestReconcile_PathsNoServiceChanged.
+type noServiceChangedCase struct {
+	name     string
+	previews map[string]*preview.Values
+	push     error
+	result   string
+	calls    []string
+}
+
 func TestReconcile_PathsNoServiceChanged(t *testing.T) {
-	cases := []struct {
-		name     string
-		previews map[string]*preview.Values
-		push     error
-		result   string
-		calls    []string
-	}{
+	cases := []noServiceChangedCase{
 		{
 			name:   "preview does not exist",
 			result: "noop",
@@ -399,41 +402,44 @@ func TestReconcile_PathsNoServiceChanged(t *testing.T) {
 		},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			capture := captureLogs(t)
-			f := platformFake(changed("docs/README.md")...)
-			// Neither the holder nor the limit check runs: api is held and
-			// the cap is reached.
-			f.previews = tc.previews
-			if f.previews == nil {
-				f.previews = listedPreviews("checkout")
-			}
-			f.maxPreviews = 1
-			if tc.push != nil {
-				f.beforePush = func(*storetest.Remote) error { return tc.push }
-			}
-			lifecycle.ReconcilePR(context.Background(), f.api(t), labeledPlatform())
-
-			if !slices.Equal(f.calls, tc.calls) {
-				t.Errorf("calls = %v, want %v", f.calls, tc.calls)
-			}
-			if len(f.upserts) != 1 || f.upserts[0] != noServiceBody {
-				t.Errorf("upserts = %q, want one with body:\n%s", f.upserts, noServiceBody)
-			}
-			if logs := capture.find(slog.LevelInfo, "preview deploy"); len(logs) != 0 {
-				t.Errorf("preview deploy logs = %v, want none", logs)
-			}
-			logs := capture.find(slog.LevelInfo, "preview reconcile skipped")
-			if len(logs) != 1 || logs[0]["reason"].String() != "no service changed" {
-				t.Errorf("skip logs = %v", logs)
-			}
-			assertMetrics(t, f.Metrics, map[string]float64{
-				`badil_reconciles_total{outcome="skipped"}`:                           1,
-				`badil_reconcile_skips_total{reason="no service changed"}`:            1,
-				`badil_teardowns_total{result="` + tc.result + `",trigger="webhook"}`: 1,
-			}, "badil_reconciles_total", "badil_reconcile_skips_total", "badil_teardowns_total")
-		})
+		t.Run(tc.name, func(t *testing.T) { checkNoServiceChanged(t, tc) })
 	}
+}
+
+// checkNoServiceChanged runs the case tc of TestReconcile_PathsNoServiceChanged.
+func checkNoServiceChanged(t *testing.T, tc noServiceChangedCase) {
+	capture := captureLogs(t)
+	f := platformFake(changed("docs/README.md")...)
+	// Neither the holder nor the limit check runs: api is held and
+	// the cap is reached.
+	f.previews = tc.previews
+	if f.previews == nil {
+		f.previews = listedPreviews("checkout")
+	}
+	f.maxPreviews = 1
+	if tc.push != nil {
+		f.beforePush = func(*storetest.Remote) error { return tc.push }
+	}
+	lifecycle.ReconcilePR(context.Background(), f.api(t), labeledPlatform())
+
+	if !slices.Equal(f.calls, tc.calls) {
+		t.Errorf("calls = %v, want %v", f.calls, tc.calls)
+	}
+	if len(f.upserts) != 1 || f.upserts[0] != noServiceBody {
+		t.Errorf("upserts = %q, want one with body:\n%s", f.upserts, noServiceBody)
+	}
+	if logs := capture.find(slog.LevelInfo, "preview deploy"); len(logs) != 0 {
+		t.Errorf("preview deploy logs = %v, want none", logs)
+	}
+	logs := capture.find(slog.LevelInfo, "preview reconcile skipped")
+	if len(logs) != 1 || logs[0]["reason"].String() != "no service changed" {
+		t.Errorf("skip logs = %v", logs)
+	}
+	assertMetrics(t, f.Metrics, map[string]float64{
+		`badil_reconciles_total{outcome="skipped"}`:                           1,
+		`badil_reconcile_skips_total{reason="no service changed"}`:            1,
+		`badil_teardowns_total{result="` + tc.result + `",trigger="webhook"}`: 1,
+	}, "badil_reconciles_total", "badil_reconcile_skips_total", "badil_teardowns_total")
 }
 
 func TestReconcile_PathsNoServiceCommentFails(t *testing.T) {

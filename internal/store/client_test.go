@@ -371,10 +371,10 @@ type writeServer struct {
 	fake      *gitopsFake
 }
 
-func (s *writeServer) start(t *testing.T, opts ...store.Option) *store.GitHubStore {
+func (s *writeServer) start(t *testing.T) *store.GitHubStore {
 	t.Helper()
 	s.fake = newFileFake(t, slugPath, s.files, s.conflicts, nil)
-	return s.fake.open(t, opts...)
+	return s.fake.open(t)
 }
 
 // puts returns the number of pushes.
@@ -519,7 +519,10 @@ func TestDeploy_Created(t *testing.T) {
 	}{
 		{name: "create", want: true},
 		{name: "update", files: []string{pinnedFile("abc1234567890", "0000000old")}},
-		{name: "create lost to a push race", files: []string{"", pinnedFile("abc1234567890", "0000000old")}, conflicts: 1},
+		{
+			name: "create lost to a push race", files: []string{"", pinnedFile("abc1234567890", "0000000old")},
+			conflicts: 1,
+		},
 		{name: "unchanged", files: []string{pinnedFile()}},
 	}
 	for _, tt := range tests {

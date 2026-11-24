@@ -168,7 +168,7 @@ func (c *gitClone) Close() error {
 // short by its caller's context is still seen as cancelled by ensureFresh.
 func (c *gitClone) auth(ctx context.Context) (transport.AuthMethod, error) {
 	if c.creds == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // a nil AuthMethod is go-git's anonymous access, passed as Auth by every caller
 	}
 	user, password, err := c.creds(ctx)
 	if err != nil {
@@ -181,7 +181,7 @@ func (c *gitClone) auth(ctx context.Context) (transport.AuthMethod, error) {
 // credentials; other errors pass through unchanged.
 func classifyGitError(err error) error {
 	if errors.Is(err, transport.ErrAuthenticationRequired) || errors.Is(err, transport.ErrAuthorizationFailed) {
-		return fmt.Errorf("%w: %v", ErrUnauthorized, err)
+		return fmt.Errorf("%w: %w", ErrUnauthorized, err)
 	}
 	return err
 }
