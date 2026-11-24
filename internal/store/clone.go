@@ -18,6 +18,8 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/storage/filesystem"
+
+	"github.com/badilhq/badil/internal/lifecycle"
 )
 
 // remoteCheckTTL is how long a successful ls-remote of the branch head is
@@ -164,24 +166,25 @@ func (c *gitClone) Close() error {
 }
 
 // auth returns the basic auth of c.creds, nil without a provider. A provider
-// error is ErrUnauthorized and keeps its cause in the chain, so a refresh cut
-// short by its caller's context is still seen as cancelled by ensureFresh.
+// error is lifecycle.ErrUnauthorized and keeps its cause in the chain, so a
+// refresh cut short by its caller's context is still seen as cancelled by
+// ensureFresh.
 func (c *gitClone) auth(ctx context.Context) (transport.AuthMethod, error) {
 	if c.creds == nil {
 		return nil, nil //nolint:nilnil // a nil AuthMethod is go-git's anonymous access, passed as Auth by every caller
 	}
 	user, password, err := c.creds(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrUnauthorized, err)
+		return nil, fmt.Errorf("%w: %w", lifecycle.ErrUnauthorized, err)
 	}
 	return &githttp.BasicAuth{Username: user, Password: password}, nil
 }
 
-// classifyGitError returns err as ErrUnauthorized when the remote refused the
-// credentials; other errors pass through unchanged.
+// classifyGitError returns err as lifecycle.ErrUnauthorized when the remote
+// refused the credentials; other errors pass through unchanged.
 func classifyGitError(err error) error {
 	if errors.Is(err, transport.ErrAuthenticationRequired) || errors.Is(err, transport.ErrAuthorizationFailed) {
-		return fmt.Errorf("%w: %w", ErrUnauthorized, err)
+		return fmt.Errorf("%w: %w", lifecycle.ErrUnauthorized, err)
 	}
 	return err
 }

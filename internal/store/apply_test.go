@@ -343,7 +343,7 @@ func TestApply_PushUnauthorized(t *testing.T) {
 		runs++
 		return rename("a", "x", "rename a")(tree)
 	})
-	if !errors.Is(err, store.ErrUnauthorized) ||
+	if !errors.Is(err, lifecycle.ErrUnauthorized) ||
 		!strings.Contains(err.Error(), transport.ErrAuthorizationFailed.Error()) {
 		t.Fatalf("Apply = %v, want ErrUnauthorized with the 403's error", err)
 	}

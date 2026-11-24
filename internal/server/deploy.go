@@ -140,7 +140,7 @@ func writeUpstreamError(ctx context.Context, logger *slog.Logger, w http.Respons
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		status = http.StatusNotFound
-	case errors.Is(err, store.ErrUnauthorized):
+	case errors.Is(err, lifecycle.ErrUnauthorized):
 		status = http.StatusBadGateway
 	}
 	logger.ErrorContext(ctx, "deploy failed", slog.String("op", op), slog.String("err", err.Error()))

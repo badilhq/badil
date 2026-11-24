@@ -220,7 +220,7 @@ func TestSyncer_SyncErrors(t *testing.T) {
 		wantApply  int
 	}{
 		{name: "badil.yaml unavailable", catalogErr: errors.New("parse boom"), wantConfig: true},
-		{name: "operation failure", applyErr: store.ErrUnauthorized, wantApply: 1},
+		{name: "operation failure", applyErr: lifecycle.ErrUnauthorized, wantApply: 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

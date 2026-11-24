@@ -360,7 +360,7 @@ func TestOpen_RemoteRefusesCredentials(t *testing.T) {
 				store.CloneConfig{URL: srv.URL + "/acme/gitops.git", Credentials: creds},
 				storetest.Identity,
 			)
-			if !errors.Is(err, store.ErrUnauthorized) {
+			if !errors.Is(err, lifecycle.ErrUnauthorized) {
 				t.Errorf("Open = %v, want ErrUnauthorized", err)
 			}
 		})
@@ -498,7 +498,7 @@ func TestCredentials_BasicAuth(t *testing.T) {
 					return store.Summary{Subject: "chore(preview): delete a"}, nil
 				},
 			})
-			if !errors.Is(err, store.ErrUnauthorized) {
+			if !errors.Is(err, lifecycle.ErrUnauthorized) {
 				t.Fatalf("Apply = %v, want the push refused with 403", err)
 			}
 
@@ -525,7 +525,7 @@ func TestCredentials_WrongToken(t *testing.T) {
 	if err == nil {
 		_ = st.Close()
 	}
-	if !errors.Is(err, store.ErrUnauthorized) || strings.Contains(err.Error(), token) {
+	if !errors.Is(err, lifecycle.ErrUnauthorized) || strings.Contains(err.Error(), token) {
 		t.Fatalf("Open = %v, want ErrUnauthorized without the token", err)
 	}
 	if reqs := a.requests(); len(reqs) == 0 || reqs[0] != "git-upload-pack x-access-token:"+token {
@@ -546,7 +546,7 @@ func TestOpen_CredentialProviderError(t *testing.T) {
 		store.CloneConfig{URL: srv.URL + "/acme/gitops.git", Credentials: creds},
 		storetest.Identity,
 	)
-	if !errors.Is(err, store.ErrUnauthorized) || !strings.Contains(err.Error(), "token mint failed") {
+	if !errors.Is(err, lifecycle.ErrUnauthorized) || !strings.Contains(err.Error(), "token mint failed") {
 		t.Errorf("Open = %v, want ErrUnauthorized with the provider's error", err)
 	}
 	if n := requests.Load(); n != 0 {
@@ -595,7 +595,7 @@ func TestCredentials_BeforeEachGitCall(t *testing.T) {
 
 	failing.Store(true)
 	st.Invalidate()
-	if _, _, readErr := st.GetPreview(context.Background(), "a"); !errors.Is(readErr, store.ErrUnauthorized) {
+	if _, _, readErr := st.GetPreview(context.Background(), "a"); !errors.Is(readErr, lifecycle.ErrUnauthorized) {
 		t.Errorf("GetPreview = %v, want ErrUnauthorized", readErr)
 	}
 }

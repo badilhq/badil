@@ -13,7 +13,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport"
 
 	"github.com/badilhq/badil/internal/api"
-	"github.com/badilhq/badil/internal/store"
+	"github.com/badilhq/badil/internal/lifecycle"
 )
 
 // postSync posts body to /v1/sync with bearer, none when "".
@@ -119,7 +119,7 @@ func TestSync_Refused(t *testing.T) {
 			wantErr: "gitops: unauthorized",
 			// As the store wraps a git call the remote refused.
 			//nolint:errorlint // as the store wraps it
-			applyErr: fmt.Errorf("%w: %v", store.ErrUnauthorized, transport.ErrAuthenticationRequired),
+			applyErr: fmt.Errorf("%w: %v", lifecycle.ErrUnauthorized, transport.ErrAuthenticationRequired),
 		},
 	}
 	for _, tc := range cases {

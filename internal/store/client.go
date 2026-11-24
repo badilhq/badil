@@ -16,8 +16,7 @@ import (
 
 // Sentinel errors. Callers should test with errors.Is.
 var (
-	ErrNotFound     = lifecycle.ErrNotFound
-	ErrUnauthorized = errors.New("gitops: unauthorized")
+	ErrNotFound = lifecycle.ErrNotFound
 )
 
 // Recorder records the gitops operations of a GitHubStore. *metrics.Metrics
@@ -105,8 +104,8 @@ func WithHeadMoved(f func()) Option {
 // says. Names derive from clone.URL unless WithRepoURL is set; a URL without
 // a repository path of two segments is an error. Apply commits
 // as identity, whose Name and Email must be set. The clone is timed as the
-// clone operation; a failed clone is an error, ErrUnauthorized when the
-// remote or the credential provider refused it.
+// clone operation; a failed clone is an error, lifecycle.ErrUnauthorized when
+// the remote or the credential provider refused it.
 func Open(ctx context.Context, clone CloneConfig, identity CommitIdentity, opts ...Option) (*GitHubStore, error) {
 	if clone.URL == "" {
 		return nil, errors.New("gitops repo URL is required")

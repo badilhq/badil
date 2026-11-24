@@ -11,6 +11,10 @@ import (
 // Callers should test with errors.Is.
 var ErrNotFound = errors.New("gitops: not found")
 
+// ErrUnauthorized is returned when the gitops remote refused the credentials.
+// Callers should test with errors.Is.
+var ErrUnauthorized = errors.New("gitops: unauthorized")
+
 // Operation kinds, the op label of an Apply's duration and push conflicts.
 const (
 	OpDeploy   = "deploy"

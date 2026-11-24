@@ -63,7 +63,7 @@ type Result = lifecycle.Result
 // without force. A push that fails while the remote head moved since the
 // fetch is a conflict: it is counted, and the next attempt starts again from
 // a new fetch, after a backoff, up to maxAttempts attempts. Any other push
-// failure is returned, as ErrUnauthorized when the remote refused the
+// failure is returned, as lifecycle.ErrUnauthorized when the remote refused the
 // credentials. Its duration, retries included, is observed as op.Kind. Once
 // a push landed, Apply calls the store's WithApplied callback with its
 // result.
@@ -115,7 +115,7 @@ func (c *GitHubStore) apply(ctx context.Context, op Op) (Result, error) {
 			return res, err
 		}
 		pushErr := failed.err
-		if errors.Is(pushErr, ErrUnauthorized) {
+		if errors.Is(pushErr, lifecycle.ErrUnauthorized) {
 			return Result{}, pushErr
 		}
 		if err = c.clone.fetch(ctx); err != nil {
@@ -410,7 +410,7 @@ func (c *gitClone) writeBlob(content []byte) (plumbing.Hash, error) {
 
 // push pushes commit to the remote branch without force, holding the read
 // lock. The remote-tracking ref is left alone. A refusal of the credentials
-// is ErrUnauthorized.
+// is lifecycle.ErrUnauthorized.
 func (c *gitClone) push(ctx context.Context, commit plumbing.Hash) error {
 	auth, err := c.auth(ctx)
 	if err != nil {
