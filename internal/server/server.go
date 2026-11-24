@@ -12,51 +12,29 @@ import (
 	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
-	"github.com/badilhq/badil/internal/status"
 )
 
 // syncTimeout caps each config sync run (a push to the gitops default branch,
 // or POST /v1/sync), counted from when the run holds the syncer's guard.
 const syncTimeout = 10 * time.Minute
 
-// Recorder records the webhook deliveries, the renderer status events and the
-// spin-up durations the server observes, and, as a lifecycle.Recorder, the
-// outcomes of the lifecycle operations it runs. *metrics.Metrics implements
-// it.
+// Recorder records the webhook deliveries the server answers.
+// *metrics.Metrics implements it.
 type Recorder interface {
-	lifecycle.Recorder
 	WebhookDelivery(event, status string)
-	StatusEvent(status, result string)
-	SpinUp(service string, d time.Duration)
 }
 
 // nopRecorder is the Recorder of a Server built without WithMetrics: it
 // records nothing.
 type nopRecorder struct{}
 
-func (nopRecorder) Reconcile(string, string) {}
-
-func (nopRecorder) Teardown(string, string) {}
-
-func (nopRecorder) SweepListed(int) {}
-
-func (nopRecorder) SweepDeleted(string) {}
-
-func (nopRecorder) PreviewSynced() {}
-
-func (nopRecorder) PreviewCreated() {}
-
 func (nopRecorder) WebhookDelivery(string, string) {}
-
-func (nopRecorder) StatusEvent(string, string) {}
-
-func (nopRecorder) SpinUp(string, time.Duration) {}
 
 // Option configures a Server built by NewServer.
 type Option func(*Server)
 
-// WithMetrics records webhook deliveries and lifecycle outcomes in m. A nil m
-// leaves the default, which records nothing.
+// WithMetrics records webhook deliveries in m. A nil m leaves the default,
+// which records nothing.
 func WithMetrics(m Recorder) Option {
 	return func(s *Server) {
 		if m != nil {
@@ -65,12 +43,11 @@ func WithMetrics(m Recorder) Option {
 	}
 }
 
-// WithStatus enables POST /webhooks/status, authenticated by the Bearer
-// token, recording into st. An empty token leaves the route unregistered.
-func WithStatus(token string, st *status.Store) Option {
+// WithStatusToken enables POST /webhooks/status, authenticated by the Bearer
+// token; an empty token leaves the route unregistered.
+func WithStatusToken(token string) Option {
 	return func(s *Server) {
 		s.statusToken = token
-		s.status = st
 	}
 }
 
@@ -103,8 +80,6 @@ type Server struct {
 	// statusToken authenticates POST /webhooks/status, "" when it is
 	// disabled.
 	statusToken string
-	// status holds the status the renderer reports.
-	status *status.Store
 	// readToken authenticates the GET /v1 routes, besides deployToken.
 	readToken string
 	// previewTTL is the in-server sweep's TTL, 0 when it does not expire
@@ -152,7 +127,7 @@ func NewServer(
 	r.Use(accessLog)
 	r.Get(healthzPath, s.handleHealthz)
 	r.Post("/webhooks/github", s.handleWebhook)
-	if s.statusToken != "" && s.status != nil {
+	if s.statusToken != "" && s.app.HasStatus() {
 		r.With(requireBearer(s.statusToken)).Post(statusPath, s.handleStatusEvent)
 	}
 	if deployToken != "" || s.readToken != "" {

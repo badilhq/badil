@@ -51,7 +51,7 @@ func serveWaits(t *testing.T) served {
 	f := &loopFake{}
 	a := app.New(app.Config{Store: st, Forge: f, Wake: wake, Status: previewStatus})
 	srv := server.NewServer(a, f, nil, st, "",
-		server.WithReadToken(serveReadToken), server.WithStatus("", previewStatus))
+		server.WithReadToken(serveReadToken))
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

@@ -133,7 +133,7 @@ func serveCmd() *cobra.Command {
 			})
 			srv := server.NewServer(a, f, f, st, cfg.DeployToken,
 				server.WithMetrics(m),
-				server.WithStatus(cfg.StatusToken, previewStatus),
+				server.WithStatusToken(cfg.StatusToken),
 				server.WithReadToken(cfg.ReadToken), server.WithPreviewTTL(ttl))
 			catchUp := a.CatchUp()
 			httpSrv := newHTTPServer(cfg.ListenAddr, srv)

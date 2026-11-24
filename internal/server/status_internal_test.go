@@ -71,7 +71,7 @@ func newStatusServer(
 	m := metrics.New()
 	st := status.NewMemory()
 	a := app.New(app.Config{Store: fg, Forge: fg, Metrics: m, Status: st})
-	return NewServer(a, fg, nil, fg, "test-deploy-token", WithMetrics(m), WithStatus(token, st)), st, m, capture
+	return NewServer(a, fg, nil, fg, "test-deploy-token", WithMetrics(m), WithStatusToken(token)), st, m, capture
 }
 
 func postStatus(srv *Server, path, body, authorization string) *httptest.ResponseRecorder {

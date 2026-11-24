@@ -98,7 +98,7 @@ func newReadServer(
 	st := status.NewMemory()
 	cfg.Status = st
 	s, capture := newTeardownServer(t, fg, cfg, append([]Option{
-		WithStatus(testStatusToken, st), WithReadToken(testReadToken),
+		WithStatusToken(testStatusToken), WithReadToken(testReadToken),
 	}, opts...)...)
 	s.waitTimeout = time.Millisecond
 	return s, st, capture
@@ -210,7 +210,7 @@ func TestReadAPI_Auth(t *testing.T) {
 			fg.open(t)
 			st := status.NewMemory()
 			a := app.New(app.Config{Store: fg, Forge: fg, Status: st})
-			s := NewServer(a, fg, nil, fg, tc.deploy, WithReadToken(tc.read), WithStatus("", st))
+			s := NewServer(a, fg, nil, fg, tc.deploy, WithReadToken(tc.read))
 			s.waitTimeout = time.Millisecond
 			for _, path := range getRoutes {
 				if rec := send(s, http.MethodGet, path, "{}", "Bearer "+testReadToken); rec.Code != tc.allGetsStatus {

@@ -27,6 +27,16 @@ type StatusRepository interface {
 	// Preview returns the latest status of each service of the preview
 	// slug, by name.
 	Preview(slug string) map[string]preview.ServiceStatus
+	// Record sets the status of service in the preview slug to e, unless e
+	// is older than the stored one. It reports whether e was recorded and,
+	// when it was, whether it is the first ready recorded for that service
+	// at e's revision.
+	Record(slug, service string, e preview.ServiceStatus) (bool, bool)
+	// Delete forgets the status of the previews slugs.
+	Delete(slugs ...string)
+	// CollectGarbage asks for the status of the previews no longer in the
+	// gitops repo to be forgotten, in the background.
+	CollectGarbage()
 }
 
 // PreviewView is a preview file read from the gitops clone, with the catalog
