@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-git/go-git/v5/plumbing/transport"
 
+	"github.com/badilhq/badil/internal/api"
 	"github.com/badilhq/badil/internal/store"
 )
 
@@ -28,12 +29,12 @@ func postSync(t *testing.T, s *Server, body, bearer string) *httptest.ResponseRe
 }
 
 // decodeSync decodes a 200 /v1/sync answer.
-func decodeSync(t *testing.T, rec *httptest.ResponseRecorder) SyncResponse {
+func decodeSync(t *testing.T, rec *httptest.ResponseRecorder) api.SyncResponse {
 	t.Helper()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body)
 	}
-	var resp SyncResponse
+	var resp api.SyncResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode %s: %v", rec.Body, err)
 	}
@@ -132,7 +133,7 @@ func TestSync_Refused(t *testing.T) {
 			if rec.Code != tc.status {
 				t.Fatalf("status = %d, want %d (body %s)", rec.Code, tc.status, rec.Body)
 			}
-			var resp ErrorResponse
+			var resp api.ErrorResponse
 			if err := json.Unmarshal(
 				rec.Body.Bytes(),
 				&resp,

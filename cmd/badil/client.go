@@ -18,8 +18,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/badilhq/badil/internal/api"
 	"github.com/badilhq/badil/internal/preview"
-	"github.com/badilhq/badil/internal/server"
 )
 
 // Exit codes of badil wait.
@@ -115,7 +115,7 @@ func (f *clientFlags) get(ctx context.Context, path string) (int, []byte, error)
 // answerError returns the error of a non-2xx answer: its JSON error message,
 // or its status and body.
 func answerError(status int, body []byte) error {
-	var e server.ErrorResponse
+	var e api.ErrorResponse
 	if json.Unmarshal(body, &e) == nil && e.Error != "" {
 		return fmt.Errorf("%d %s: %s", status, http.StatusText(status), e.Error)
 	}
@@ -144,7 +144,7 @@ func listCmd() *cobra.Command {
 				_, err = cmd.OutOrStdout().Write(body)
 				return err
 			}
-			var list server.PreviewList
+			var list api.PreviewList
 			if err = json.Unmarshal(body, &list); err != nil {
 				return fmt.Errorf("parse previews: %w", err)
 			}
@@ -158,7 +158,7 @@ func listCmd() *cobra.Command {
 // printPreviews prints list as a table: each preview's slug, its number of
 // services and dependencies, its pinned entries, how many of them are ready
 // at their pin, and its updatedAt.
-func printPreviews(w io.Writer, list server.PreviewList) error {
+func printPreviews(w io.Writer, list api.PreviewList) error {
 	tw := tabwriter.NewWriter(w, 0, 0, tablePadding, ' ', 0)
 	fmt.Fprintln(tw, "SLUG\tSERVICES\tPINNED\tREADY\tUPDATED")
 	for _, p := range list.Previews {
@@ -270,7 +270,7 @@ func runWait(cmd *cobra.Command, f *waitFlags, path string) error {
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.timeout)
 	defer cancel()
 	out := cmd.OutOrStdout()
-	var last *server.WaitResponse
+	var last *api.WaitResponse
 	var lastBody []byte
 	var lastErr error
 	for {
@@ -285,7 +285,7 @@ func runWait(cmd *cobra.Command, f *waitFlags, path string) error {
 		case status != http.StatusOK:
 			return &codeError{code: exitError, err: answerError(status, body)}
 		default:
-			var resp server.WaitResponse
+			var resp api.WaitResponse
 			if err = json.Unmarshal(body, &resp); err != nil {
 				return &codeError{code: exitError, err: fmt.Errorf("parse wait response: %w", err)}
 			}
@@ -320,7 +320,7 @@ func waitFinal(state string) (int, bool) {
 
 // finishWait prints the final response resp (its body with --json) and
 // returns the error of its exit code, nil for 0.
-func finishWait(cmd *cobra.Command, f *waitFlags, resp *server.WaitResponse, body []byte, code int) error {
+func finishWait(cmd *cobra.Command, f *waitFlags, resp *api.WaitResponse, body []byte, code int) error {
 	out := cmd.OutOrStdout()
 	if f.json {
 		if _, err := out.Write(body); err != nil {
@@ -358,7 +358,7 @@ func waitTimedOut(cmd *cobra.Command, f *waitFlags, lastBody []byte, lastErr err
 
 // stateLine is the line printed for resp: its state, with its reason when
 // set.
-func stateLine(resp *server.WaitResponse) string {
+func stateLine(resp *api.WaitResponse) string {
 	if resp.Reason != "" {
 		return resp.State + ": " + resp.Reason
 	}

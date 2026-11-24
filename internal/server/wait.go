@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/badilhq/badil/internal/api"
 	"github.com/badilhq/badil/internal/app"
 )
 
@@ -18,37 +19,14 @@ import (
 // state.
 const waitTimeout = 25 * time.Second
 
-// WaitResponse is the body of a wait's answer: its state, the reason of a
-// failed, refused or skipped state, the preview and the SHA waited for when
-// known, and the wait set's entries with the URLs of those that have one.
-type WaitResponse struct {
-	State    string            `json:"state"`
-	Reason   string            `json:"reason,omitempty"`
-	Slug     string            `json:"slug,omitempty"`
-	SHA      string            `json:"sha,omitempty"`
-	Services []WaitEntryJSON   `json:"services"`
-	URLs     map[string]string `json:"urls"`
-}
-
-// WaitEntryJSON is an entry of a wait set: its latest status ("unknown"
-// when none) and revision, whether it is ready, and its URL.
-type WaitEntryJSON struct {
-	Name     string `json:"name"`
-	Kind     string `json:"kind"`
-	Status   string `json:"status"`
-	Revision string `json:"revision,omitempty"`
-	Ready    bool   `json:"ready"`
-	URL      string `json:"url,omitempty"`
-}
-
 // waitResponse returns the body of the wait answer r.
-func waitResponse(r *app.WaitResult) *WaitResponse {
-	out := &WaitResponse{
+func waitResponse(r *app.WaitResult) *api.WaitResponse {
+	out := &api.WaitResponse{
 		State: r.State, Reason: r.Reason, Slug: r.Slug, SHA: r.SHA,
-		Services: make([]WaitEntryJSON, 0, len(r.Services)), URLs: r.URLs,
+		Services: make([]api.WaitEntryJSON, 0, len(r.Services)), URLs: r.URLs,
 	}
 	for _, e := range r.Services {
-		out.Services = append(out.Services, WaitEntryJSON{
+		out.Services = append(out.Services, api.WaitEntryJSON{
 			Name: e.Name, Kind: e.Kind, Status: e.Status, Revision: e.Revision, Ready: e.Ready, URL: e.URL,
 		})
 	}

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/badilhq/badil/internal/api"
 	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
@@ -135,13 +136,13 @@ func decode[T any](t *testing.T, rec *httptest.ResponseRecorder, code int) T {
 }
 
 // waitFor returns the 200 wait response of GET path.
-func waitFor(t *testing.T, s *Server, path string) WaitResponse {
+func waitFor(t *testing.T, s *Server, path string) api.WaitResponse {
 	t.Helper()
-	return decode[WaitResponse](t, get(s, path), http.StatusOK)
+	return decode[api.WaitResponse](t, get(s, path), http.StatusOK)
 }
 
 // assertState fails t unless got is in state with reason.
-func assertState(t *testing.T, got WaitResponse, state, reason string) {
+func assertState(t *testing.T, got api.WaitResponse, state, reason string) {
 	t.Helper()
 	if got.State != state || got.Reason != reason {
 		t.Errorf("wait = %s %q, want %s %q", got.State, got.Reason, state, reason)
@@ -236,8 +237,8 @@ func TestReadAPI_ListAndGet(t *testing.T) {
 	at := time.Date(2026, 11, 19, 21, 5, 0, 0, time.UTC)
 	st.Record("feature-x", "backend-1", preview.ServiceStatus{Revision: statusSHA, Status: preview.StatusReady, At: at})
 
-	unpinned := func(slug string) []PreviewEntryJSON {
-		return []PreviewEntryJSON{
+	unpinned := func(slug string) []api.PreviewEntryJSON {
+		return []api.PreviewEntryJSON{
 			{Name: "backend-1", Kind: "service", Branch: "main", Status: "unknown"},
 			{
 				Name:   "front",
@@ -249,33 +250,33 @@ func TestReadAPI_ListAndGet(t *testing.T) {
 			{Name: "postgres", Kind: "dependency", Status: "unknown"},
 		}
 	}
-	featureX := PreviewJSON{
+	featureX := api.PreviewJSON{
 		Slug:      "feature-x",
 		CreatedAt: "2026-11-19T20:00:00Z",
 		UpdatedAt: statusUpdatedAt,
 		ExpiresAt: "2026-11-26T21:00:00Z",
 		Services:  unpinned("feature-x"),
 	}
-	featureX.Services[0] = PreviewEntryJSON{
+	featureX.Services[0] = api.PreviewEntryJSON{
 		Name:   "backend-1",
 		Kind:   "service",
 		Branch: "main",
-		Pinned: &PinnedJSON{
+		Pinned: &api.PinnedJSON{
 			SHA:    statusSHA[:7],
-			PR:     PRJSON{Repo: "acme/backend-1", Number: 42, URL: backend42},
+			PR:     api.PRJSON{Repo: "acme/backend-1", Number: 42, URL: backend42},
 			Author: "octocat",
 		},
 		Status:   "ready",
 		Revision: statusSHA,
 		StatusAt: "2026-11-19T21:05:00Z",
 	}
-	bare := PreviewJSON{Slug: "bare", Services: unpinned("bare")}
+	bare := api.PreviewJSON{Slug: "bare", Services: unpinned("bare")}
 
-	list := decode[PreviewList](t, get(s, "/v1/previews"), http.StatusOK)
-	if want := (PreviewList{Previews: []PreviewJSON{bare, featureX}}); !reflect.DeepEqual(list, want) {
+	list := decode[api.PreviewList](t, get(s, "/v1/previews"), http.StatusOK)
+	if want := (api.PreviewList{Previews: []api.PreviewJSON{bare, featureX}}); !reflect.DeepEqual(list, want) {
 		t.Errorf("GET /v1/previews = %+v, want %+v", list, want)
 	}
-	if got := decode[PreviewJSON](
+	if got := decode[api.PreviewJSON](
 		t,
 		get(s, "/v1/previews/feature-x"),
 		http.StatusOK,
@@ -291,7 +292,7 @@ func TestReadAPI_ListAndGet(t *testing.T) {
 		t.Errorf("GET /v1/previews/bare = %s, want no createdAt, updatedAt nor expiresAt", body)
 	}
 	for _, slug := range []string{"missing", "..%2Fx"} {
-		got := decode[ErrorResponse](t, get(s, "/v1/previews/"+slug), http.StatusNotFound)
+		got := decode[api.ErrorResponse](t, get(s, "/v1/previews/"+slug), http.StatusNotFound)
 		if got.Error != "preview not found" {
 			t.Errorf("GET /v1/previews/%s error = %q, want preview not found", slug, got.Error)
 		}
@@ -300,7 +301,7 @@ func TestReadAPI_ListAndGet(t *testing.T) {
 
 func TestReadAPI_NoExpiryWithoutTTL(t *testing.T) {
 	s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("backend-1", backend42)), app.Config{})
-	got := decode[PreviewJSON](t, get(s, "/v1/previews/feature-x"), http.StatusOK)
+	got := decode[api.PreviewJSON](t, get(s, "/v1/previews/feature-x"), http.StatusOK)
 	if got.UpdatedAt != statusUpdatedAt || got.ExpiresAt != "" {
 		t.Errorf("updatedAt %q expiresAt %q, want %q and none", got.UpdatedAt, got.ExpiresAt, statusUpdatedAt)
 	}
@@ -566,7 +567,7 @@ func TestWait_SlugWithoutPinIsPending(t *testing.T) {
 	if got.Slug != "bare" || len(got.Services) != 0 {
 		t.Errorf("slug %q services %+v, want bare and none", got.Slug, got.Services)
 	}
-	if e := decode[ErrorResponse](
+	if e := decode[api.ErrorResponse](
 		t,
 		get(s, "/v1/previews/missing/wait"),
 		http.StatusNotFound,
@@ -583,7 +584,7 @@ func TestReadAPI_CloneReadFailure(t *testing.T) {
 	}
 	fg.st.Invalidate()
 	for _, path := range []string{"/v1/previews", "/v1/previews/feature-x", "/v1/previews/feature-x/wait", "/v1/wait?repo=acme/backend-1&pr=42"} {
-		got := decode[ErrorResponse](t, get(s, path), http.StatusServiceUnavailable)
+		got := decode[api.ErrorResponse](t, get(s, path), http.StatusServiceUnavailable)
 		if !strings.Contains(got.Error, "ls-remote gitops repo") {
 			t.Errorf("GET %s error = %q, want the ls-remote error", path, got.Error)
 		}
@@ -642,7 +643,7 @@ func TestWait_InvalidQuery(t *testing.T) {
 	s, _, _ := newReadServer(t, readFake(readBadil, pinnedEntry("backend-1", backend42)), app.Config{})
 	for _, q := range []string{"pr=1", "repo=acme/front", "repo=acme/front&pr=0", "repo=acme/front&pr=abc",
 		"repo=acme&pr=1", "repo=acme/front/x&pr=1", "repo=/front&pr=1", "repo=acme/&pr=1", "repo=acme/front&pr=-3"} {
-		if e := decode[ErrorResponse](t, get(s, "/v1/wait?"+q), http.StatusBadRequest); e.Error == "" {
+		if e := decode[api.ErrorResponse](t, get(s, "/v1/wait?"+q), http.StatusBadRequest); e.Error == "" {
 			t.Errorf("GET /v1/wait?%s: no error message", q)
 		}
 	}

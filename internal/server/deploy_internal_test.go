@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/badilhq/badil/internal/api"
 	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
@@ -53,7 +54,7 @@ func TestDeploy_HappyPath(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	var resp DeployResponse
+	var resp api.DeployResponse
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
@@ -95,7 +96,7 @@ func TestDeploy_RedeployAnswersTheHeadCommit(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("deploy %d: status = %d, body = %s", i, rec.Code, rec.Body.String())
 		}
-		var resp DeployResponse
+		var resp api.DeployResponse
 		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 			t.Fatalf("decode response: %v", err)
 		}
@@ -152,7 +153,7 @@ func TestDeploy_FanOutPartialFailureSurfacesAsWarnings(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (write succeeded)", rec.Code)
 	}
-	var resp DeployResponse
+	var resp api.DeployResponse
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}

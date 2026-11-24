@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/badilhq/badil/internal/api"
 	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/store"
@@ -17,7 +18,7 @@ import (
 // answer is the answer of a wait served in the background.
 type answer struct {
 	code    int
-	resp    WaitResponse
+	resp    api.WaitResponse
 	elapsed time.Duration
 }
 
