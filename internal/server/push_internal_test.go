@@ -23,9 +23,9 @@ import (
 // call.
 var errUnexpected = errors.New("unexpected call")
 
-// pushForge is a forge.Forge whose ParseWebhook returns event, which the test
-// sets before each delivery, so the push tests reach the handler without
-// signing.
+// pushForge is a forge.Forge and forge.WebhookParser whose ParseWebhook
+// returns event, which the test sets before each delivery, so the push tests
+// reach the handler without signing.
 type pushForge struct {
 	storetest.GitHubURLs
 
@@ -60,7 +60,8 @@ func newPushServer(t *testing.T, fg *fakeGitops) (*Server, *metrics.Metrics, *Lo
 	t.Cleanup(func() { slog.SetDefault(prev) })
 	m := metrics.New()
 	fg.open(t)
-	return NewServer(&pushForge{}, fg, "t", WithMetrics(m), withFanOut(fg)), m, capture
+	pf := &pushForge{}
+	return NewServer(pf, pf, fg, "t", WithMetrics(m), withFanOut(fg)), m, capture
 }
 
 // pushPayload is a push of ref to repo, whose default branch is main.
@@ -82,9 +83,9 @@ func pushPayload(repo, ref string, deleted bool) forge.Event {
 // waiting for the background sync.
 func push(t *testing.T, s *Server, ev forge.Event) int {
 	t.Helper()
-	pf, ok := s.forge.(*pushForge)
+	pf, ok := s.webhooks.(*pushForge)
 	if !ok {
-		t.Fatalf("forge = %T, want *pushForge", s.forge)
+		t.Fatalf("webhooks = %T, want *pushForge", s.webhooks)
 	}
 	pf.event = ev
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/github", strings.NewReader("{}"))

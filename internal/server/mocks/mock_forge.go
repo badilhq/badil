@@ -6,7 +6,6 @@ package mocks
 
 import (
 	"context"
-	"net/http"
 
 	"github.com/badilhq/badil/internal/forge"
 	mock "github.com/stretchr/testify/mock"
@@ -416,66 +415,6 @@ func (_c *MockForge_ParseRepoURL_Call) Return(owner string, repo string, ok bool
 }
 
 func (_c *MockForge_ParseRepoURL_Call) RunAndReturn(run func(u string) (string, string, bool)) *MockForge_ParseRepoURL_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// ParseWebhook provides a mock function for the type MockForge
-func (_mock *MockForge) ParseWebhook(r *http.Request) (forge.Event, error) {
-	ret := _mock.Called(r)
-
-	if len(ret) == 0 {
-		panic("no return value specified for ParseWebhook")
-	}
-
-	var r0 forge.Event
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(*http.Request) (forge.Event, error)); ok {
-		return returnFunc(r)
-	}
-	if returnFunc, ok := ret.Get(0).(func(*http.Request) forge.Event); ok {
-		r0 = returnFunc(r)
-	} else {
-		r0 = ret.Get(0).(forge.Event)
-	}
-	if returnFunc, ok := ret.Get(1).(func(*http.Request) error); ok {
-		r1 = returnFunc(r)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockForge_ParseWebhook_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ParseWebhook'
-type MockForge_ParseWebhook_Call struct {
-	*mock.Call
-}
-
-// ParseWebhook is a helper method to define mock.On call
-//   - r *http.Request
-func (_e *MockForge_Expecter) ParseWebhook(r any) *MockForge_ParseWebhook_Call {
-	return &MockForge_ParseWebhook_Call{Call: _e.mock.On("ParseWebhook", r)}
-}
-
-func (_c *MockForge_ParseWebhook_Call) Run(run func(r *http.Request)) *MockForge_ParseWebhook_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 *http.Request
-		if args[0] != nil {
-			arg0 = args[0].(*http.Request)
-		}
-		run(
-			arg0,
-		)
-	})
-	return _c
-}
-
-func (_c *MockForge_ParseWebhook_Call) Return(event forge.Event, err error) *MockForge_ParseWebhook_Call {
-	_c.Call.Return(event, err)
-	return _c
-}
-
-func (_c *MockForge_ParseWebhook_Call) RunAndReturn(run func(r *http.Request) (forge.Event, error)) *MockForge_ParseWebhook_Call {
 	_c.Call.Return(run)
 	return _c
 }

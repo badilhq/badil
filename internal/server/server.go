@@ -111,7 +111,9 @@ func WithWake(w *Wake) Option {
 
 type Server struct {
 	forge forge.Forge
-	store storeAPI
+	// webhooks verifies and parses the deliveries of /webhooks/github.
+	webhooks forge.WebhookParser
+	store    storeAPI
 	// fanOut posts a preview's summary on its open PRs:
 	// lifecycle.FanOutPRComments.
 	fanOut  lifecycle.FanOutFunc
@@ -151,17 +153,20 @@ type Server struct {
 	syncer *lifecycle.Syncer
 }
 
-// NewServer returns the server of the webhooks of f, over the gitops repo
-// st, configured by opts. The deploy API is served only when deployToken is
-// set, and the read API when deployToken or the read token is.
+// NewServer returns the server of the webhooks webhooks parses, over the
+// forge f and the gitops repo st, configured by opts. The deploy API is
+// served only when deployToken is set, and the read API when deployToken or
+// the read token is.
 func NewServer(
 	f forge.Forge,
+	webhooks forge.WebhookParser,
 	st storeAPI,
 	deployToken string,
 	opts ...Option,
 ) *Server {
 	s := &Server{
 		forge:       f,
+		webhooks:    webhooks,
 		store:       st,
 		fanOut:      lifecycle.FanOutPRComments,
 		metrics:     nopRecorder{},

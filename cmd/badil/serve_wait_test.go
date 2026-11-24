@@ -47,7 +47,7 @@ func serveWaits(t *testing.T) served {
 	wake := server.NewWake()
 	remote, st := storetest.Gitops(t, "services:\n  backend-1:\n    repo: https://github.com/acme/backend-1.git\n",
 		previews, nil, nil, statusHooks(previewStatus, wake)...)
-	srv := server.NewServer(&loopFake{}, st, "",
+	srv := server.NewServer(&loopFake{}, nil, st, "",
 		server.WithReadToken(serveReadToken), server.WithStatus("", previewStatus), server.WithWake(wake))
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

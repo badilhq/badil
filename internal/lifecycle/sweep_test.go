@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -109,10 +108,6 @@ func (f *fakeAPI) ListChangedFiles(context.Context, string, string, int) ([]forg
 
 func (f *fakeAPI) ListOpenPullRequests(context.Context, string, string) ([]forge.PullRequest, error) {
 	return nil, errors.New("unexpected ListOpenPullRequests")
-}
-
-func (f *fakeAPI) ParseWebhook(*http.Request) (forge.Event, error) {
-	return forge.Event{}, errors.New("unexpected ParseWebhook")
 }
 
 // api is the lifecycle.SweepAPI over f: its store, forge and recorder, with

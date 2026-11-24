@@ -1,5 +1,5 @@
-// Package github implements forge.Forge over the GitHub API, authenticated as
-// the GitHub App installation.
+// Package github implements forge.Forge and forge.WebhookParser over the
+// GitHub API, authenticated as the GitHub App installation.
 package github
 
 import (
@@ -36,6 +36,8 @@ type Forge struct {
 }
 
 var _ forge.Forge = (*Forge)(nil)
+
+var _ forge.WebhookParser = (*Forge)(nil)
 
 // New returns the GitHub forge over client. Webhook deliveries are validated
 // with app and accepted only from the installation installationID. Repo and

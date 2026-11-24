@@ -69,7 +69,7 @@ func newStatusServer(
 	fg.open(t)
 	m := metrics.New()
 	st := status.NewMemory()
-	return NewServer(fg, fg, "test-deploy-token", WithMetrics(m), WithStatus(token, st)), st, m, capture
+	return NewServer(fg, nil, fg, "test-deploy-token", WithMetrics(m), WithStatus(token, st)), st, m, capture
 }
 
 func postStatus(srv *Server, path, body, authorization string) *httptest.ResponseRecorder {
