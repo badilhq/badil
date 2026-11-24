@@ -8,10 +8,8 @@ import (
 	"io"
 	"maps"
 	"net/http"
-	"net/url"
 	"os"
 	"slices"
-	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -19,6 +17,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/badilhq/badil/internal/api"
+	"github.com/badilhq/badil/internal/apiclient"
 	"github.com/badilhq/badil/internal/preview"
 )
 
@@ -38,9 +37,6 @@ var retryInterval = 2 * time.Second //nolint:gochecknoglobals // shortened by te
 
 // tablePadding is the space between two columns of badil list's table.
 const tablePadding = 2
-
-// maxBodyBytes caps the body of an answer of the read API.
-const maxBodyBytes = 8 << 20
 
 // codeError is an error that exits badil with code.
 type codeError struct {
@@ -90,36 +86,9 @@ func (f *clientFlags) resolve() error {
 	return nil
 }
 
-// get sends GET path to the server with the token, within ctx, and returns
-// the answer's status and body.
-func (f *clientFlags) get(ctx context.Context, path string) (int, []byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(f.server, "/")+path, http.NoBody)
-	if err != nil {
-		return 0, nil, err
-	}
-	if f.token != "" {
-		req.Header.Set("Authorization", "Bearer "+f.token)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return 0, nil, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
-	if err != nil {
-		return 0, nil, err
-	}
-	return resp.StatusCode, body, nil
-}
-
-// answerError returns the error of a non-2xx answer: its JSON error message,
-// or its status and body.
-func answerError(status int, body []byte) error {
-	var e api.ErrorResponse
-	if json.Unmarshal(body, &e) == nil && e.Error != "" {
-		return fmt.Errorf("%d %s: %s", status, http.StatusText(status), e.Error)
-	}
-	return fmt.Errorf("%d %s: %s", status, http.StatusText(status), strings.TrimSpace(string(body)))
+// client returns the API client of f's server and token.
+func (f *clientFlags) client() *apiclient.Client {
+	return apiclient.New(f.server, f.token)
 }
 
 // listCmd prints the previews of badil (GET /v1/previews).
@@ -133,12 +102,12 @@ func listCmd() *cobra.Command {
 			if err := f.resolve(); err != nil {
 				return err
 			}
-			status, body, err := f.get(cmd.Context(), "/v1/previews")
+			status, body, err := f.client().Get(cmd.Context(), apiclient.PreviewsPath)
 			if err != nil {
 				return err
 			}
 			if status != http.StatusOK {
-				return answerError(status, body)
+				return apiclient.AnswerError(status, body)
 			}
 			if f.json {
 				_, err = cmd.OutOrStdout().Write(body)
@@ -207,15 +176,11 @@ func (f *waitFlags) path() (string, error) {
 	case byPR && f.slug != "":
 		return "", errors.New("use --repo, --pr and --sha, or --slug, not both")
 	case f.slug != "":
-		return "/v1/previews/" + url.PathEscape(f.slug) + "/wait", nil
+		return apiclient.SlugWaitPath(f.slug), nil
 	case f.repo == "" || f.pr <= 0:
 		return "", errors.New("--repo and a positive --pr, or --slug, are required")
 	}
-	q := url.Values{"repo": {f.repo}, "pr": {strconv.Itoa(f.pr)}}
-	if f.sha != "" {
-		q.Set("sha", f.sha)
-	}
-	return "/v1/wait?" + q.Encode(), nil
+	return apiclient.PRWaitPath(f.repo, f.pr, f.sha), nil
 }
 
 // waitCmd waits for a preview to reach a final state (GET /v1/wait or GET
@@ -271,40 +236,25 @@ func runWait(cmd *cobra.Command, f *waitFlags, path string) error {
 	defer cancel()
 	out := cmd.OutOrStdout()
 	var last *api.WaitResponse
-	var lastBody []byte
-	var lastErr error
-	for {
-		status, body, err := f.get(ctx, path)
-		switch {
-		case ctx.Err() != nil:
-			return waitTimedOut(cmd, f, lastBody, lastErr)
-		case err != nil:
-			lastErr = err
-		case status >= http.StatusInternalServerError:
-			lastErr = answerError(status, body)
-		case status != http.StatusOK:
-			return &codeError{code: exitError, err: answerError(status, body)}
-		default:
-			var resp api.WaitResponse
-			if err = json.Unmarshal(body, &resp); err != nil {
-				return &codeError{code: exitError, err: fmt.Errorf("parse wait response: %w", err)}
-			}
-			lastErr, lastBody = nil, body
-			if code, done := waitFinal(resp.State); done {
-				return finishWait(cmd, f, &resp, body, code)
-			}
-			if !f.json && (last == nil || last.State != resp.State) {
-				fmt.Fprintln(out, stateLine(&resp))
-			}
-			last = &resp
-			continue
-		}
-		select {
-		case <-ctx.Done():
-			return waitTimedOut(cmd, f, lastBody, lastErr)
-		case <-time.After(retryInterval):
-		}
+	final := func(state string) bool {
+		_, done := waitFinal(state)
+		return done
 	}
+	progress := func(resp *api.WaitResponse) {
+		if !f.json && (last == nil || last.State != resp.State) {
+			fmt.Fprintln(out, stateLine(resp))
+		}
+		last = resp
+	}
+	resp, body, err := f.client().Wait(ctx, path, retryInterval, final, progress)
+	if te, ok := errors.AsType[*apiclient.TimeoutError](err); ok {
+		return waitTimedOut(cmd, f, te.LastBody, te.LastErr)
+	}
+	if err != nil {
+		return &codeError{code: exitError, err: err}
+	}
+	code, _ := waitFinal(resp.State)
+	return finishWait(cmd, f, resp, body, code)
 }
 
 // waitFinal returns the exit code of state and true when it is final.
