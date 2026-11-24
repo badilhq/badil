@@ -23,7 +23,6 @@ import (
 	"github.com/badilhq/badil/internal/config"
 	forgegithub "github.com/badilhq/badil/internal/forge/github"
 	"github.com/badilhq/badil/internal/github"
-	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/namespace"
 	"github.com/badilhq/badil/internal/server"
@@ -36,30 +35,11 @@ import (
 // then background teardowns share it, inside the default 30s pod grace period.
 const shutdownTimeout = 25 * time.Second
 
-// cleanupTimeout bounds one cleanup sweep over every preview.
-const cleanupTimeout = 10 * time.Minute
-
 // readHeaderTimeout bounds reading a request's headers on every listener.
 const readHeaderTimeout = 10 * time.Second
 
 // minCleanupInterval is the shortest CLEANUP_INTERVAL accepted.
 const minCleanupInterval = time.Minute
-
-// previewsCountTimeout bounds the startup listing of the previews.
-const previewsCountTimeout = 10 * time.Second
-
-// catchUpRunner runs one catch-up: *lifecycle.CatchUp.
-type catchUpRunner interface {
-	Run(ctx context.Context)
-}
-
-// runCatchUp runs one catch-up of c, bounded by cleanupTimeout and cancelled
-// with ctx.
-func runCatchUp(ctx context.Context, c catchUpRunner) {
-	cctx, cancel := context.WithTimeout(ctx, cleanupTimeout)
-	defer cancel()
-	c.Run(cctx)
-}
 
 func main() {
 	if err := rootCmd().Execute(); err != nil {
@@ -141,11 +121,13 @@ func serveCmd() *cobra.Command {
 			if cfg.DeployToken == "" {
 				slog.InfoContext(ctx, "deploy API disabled", slog.String("reason", "BADIL_DEPLOY_TOKEN is unset"))
 			}
-			countPreviews(ctx, st, m)
+			if m != nil {
+				app.CountPreviews(ctx, st, m)
+			}
 			serveInBackground(ctx, "server", httpSrv)
 			metricsSrv := startMetricsServer(ctx, cfg.MetricsAddr, m)
-			a.Go(func() { runCatchUp(ctx, catchUp) })
-			startSweepLoop(ctx, a, app.SweepAPI(st, f, m), catchUp, m, interval, ttl)
+			a.Go(func() { app.RunCatchUp(ctx, catchUp) })
+			a.StartSweepLoop(ctx, app.SweepAPI(st, f, m), catchUp, m, interval, ttl)
 
 			<-ctx.Done()
 			slog.InfoContext(ctx, "shutting down server")
@@ -176,14 +158,8 @@ func loadStatus(ctx context.Context, s *status.Store) error {
 // longer there. Both wake the waits through wake.
 func statusHooks(s *status.Store, wake *app.Wake) []store.Option {
 	return []store.Option{
-		store.WithApplied(func(res store.Result) {
-			s.Delete(res.Deleted...)
-			wake.Notify()
-		}),
-		store.WithHeadMoved(func() {
-			s.CollectGarbage()
-			wake.Notify()
-		}),
+		store.WithApplied(app.AppliedHook(s, wake)),
+		store.WithHeadMoved(app.HeadMovedHook(s, wake)),
 	}
 }
 
@@ -217,30 +193,6 @@ func startMetricsServer(ctx context.Context, addr string, m *metrics.Metrics) *h
 	return metricsSrv
 }
 
-// previewLister lists the previews of the gitops repo.
-type previewLister interface {
-	ListPreviews(ctx context.Context) ([]string, error)
-}
-
-// countPreviews sets m's previews gauge from one listing of the gitops repo,
-// bounded by previewsCountTimeout. serve calls it before the server accepts
-// requests, so no create or delete races the listing. It lists nothing when m
-// is nil (metrics disabled). A failed or timed-out listing is logged and
-// leaves the gauge as it is.
-func countPreviews(ctx context.Context, api previewLister, m *metrics.Metrics) {
-	if m == nil {
-		return
-	}
-	listCtx, cancel := context.WithTimeout(ctx, previewsCountTimeout)
-	defer cancel()
-	slugs, err := api.ListPreviews(listCtx)
-	if err != nil {
-		slog.Default().WarnContext(ctx, "previews count failed", slog.String("err", err.Error()))
-		return
-	}
-	m.PreviewsListed(len(slugs))
-}
-
 // serveInBackground runs srv.ListenAndServe in the background, logging it as
 // name, and exits the process when it fails for any reason but shutdown.
 func serveInBackground(ctx context.Context, name string, srv *http.Server) {
@@ -266,79 +218,6 @@ func sweepSchedule() (time.Duration, time.Duration, error) {
 		return 0, 0, err
 	}
 	return interval, ttl, nil
-}
-
-// startSweepLoop runs runSweepLoop in the background of a, so shutdown
-// waits for it. It starts nothing when interval is 0.
-func startSweepLoop(
-	ctx context.Context,
-	a *app.App,
-	api lifecycle.SweepAPI,
-	catchUp catchUpRunner,
-	m *metrics.Metrics,
-	interval, ttl time.Duration,
-) {
-	if interval == 0 {
-		return
-	}
-	slog.Default().InfoContext(ctx, "starting cleanup loop",
-		slog.String("interval", interval.String()),
-		slog.String("ttl", ttl.String()),
-	)
-	a.Go(func() {
-		runSweepLoop(ctx, api, catchUp, m, interval, ttl, time.Now)
-	})
-}
-
-// runSweepLoop sweeps every interval until ctx is done, starting one interval
-// from now, and runs a catch-up after each sweep, whether it succeeded or
-// failed, unless ctx is done. Runs never overlap: a tick that comes during a
-// run waits for it. Each sweep and each catch-up is bounded by cleanupTimeout
-// and cancelled with ctx.
-func runSweepLoop(
-	ctx context.Context,
-	api lifecycle.SweepAPI,
-	catchUp catchUpRunner,
-	m *metrics.Metrics,
-	interval, ttl time.Duration,
-	now func() time.Time,
-) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-		runSweep(ctx, api, m, ttl, now)
-		if ctx.Err() != nil {
-			return
-		}
-		runCatchUp(ctx, catchUp)
-	}
-}
-
-// runSweep runs one sweep and records it, unless ctx was done: a sweep
-// cancelled by shutdown is not recorded, one that hit cleanupTimeout is
-// recorded as failed.
-func runSweep(
-	ctx context.Context,
-	api lifecycle.SweepAPI,
-	m *metrics.Metrics,
-	ttl time.Duration,
-	now func() time.Time,
-) {
-	sctx, cancel := context.WithTimeout(ctx, cleanupTimeout)
-	defer cancel()
-	err := lifecycle.Sweep(sctx, api, now().UTC(), ttl)
-	if ctx.Err() != nil {
-		return
-	}
-	if err != nil {
-		slog.Default().ErrorContext(ctx, "cleanup failed", slog.String("err", err.Error()))
-	}
-	m.SweepRun(err == nil, now())
 }
 
 // shutdownServers shuts every non-nil server down concurrently, within ctx,
@@ -491,7 +370,7 @@ func newApp(cfg *config.Config) (*github.App, error) {
 // cleanupCmd runs one sweep over the gitops repo's previews: previews with no
 // pin are deleted, previews idle for longer than CLEANUP_TTL (when set) are
 // deleted, and pins of closed PRs are torn down. A catch-up follows it
-// (runCleanup).
+// (app.RunCleanup).
 func cleanupCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "cleanup",
@@ -509,7 +388,7 @@ func cleanupCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), cleanupTimeout)
+			ctx, cancel := context.WithTimeout(cmd.Context(), app.CleanupTimeout)
 			defer cancel()
 			st, f, err := newStoreAndForge(ctx, ghApp, cfg)
 			if err != nil {
@@ -517,21 +396,9 @@ func cleanupCmd() *cobra.Command {
 			}
 			defer closeStore(ctx, st)
 			catchUp := app.CleanupCatchUp(st, f, namespace.InCluster(ctx))
-			return runCleanup(cmd.Context(), ctx, app.SweepAPI(st, f, nil), catchUp, time.Now().UTC(), ttl)
+			return app.RunCleanup(cmd.Context(), ctx, app.SweepAPI(st, f, nil), catchUp, time.Now().UTC(), ttl)
 		},
 	}
-}
-
-// runCleanup runs one sweep under sweepCtx, then one catch-up of c under its
-// own cleanupTimeout from ctx (runCatchUp), whether the sweep succeeded or
-// failed. It returns the sweep's error: catch-up's failures are only logged
-// and counted.
-func runCleanup(
-	ctx, sweepCtx context.Context, api lifecycle.SweepAPI, c catchUpRunner, now time.Time, ttl time.Duration,
-) error {
-	err := lifecycle.Sweep(sweepCtx, api, now, ttl)
-	runCatchUp(ctx, c)
-	return err
 }
 
 // parseCleanupInterval parses CLEANUP_INTERVAL. Empty means no in-server

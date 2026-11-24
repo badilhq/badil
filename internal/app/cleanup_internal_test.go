@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/store/storetest"
 )
@@ -57,7 +56,7 @@ func TestCleanupCatchUp_ChecksNamespaces(t *testing.T) {
 	f := &cleanupForge{loopFake: &loopFake{openPRs: []forge.PullRequest{pr}}, pr: pr}
 	ns := &foreignNamespaces{}
 
-	app.CleanupCatchUp(st, f, ns).Run(context.Background())
+	CleanupCatchUp(st, f, ns).Run(context.Background())
 
 	if !slices.Equal(ns.checked, []string{"pricing"}) {
 		t.Errorf("checked = %v, want [pricing]", ns.checked)

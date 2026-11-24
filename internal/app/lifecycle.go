@@ -64,19 +64,19 @@ type CleanupStore interface {
 }
 
 // CleanupCatchUp is badil cleanup's catch-up over st and f, recording no
-// metrics: it reconciles at once (ReconcileNow), checking the namespace of a
+// metrics: it reconciles at once (reconcileNow), checking the namespace of a
 // new preview with ns as serve does.
 func CleanupCatchUp(st CleanupStore, f forge.Forge, ns lifecycle.NamespaceChecker) *lifecycle.CatchUp {
 	m := nopMetrics{}
 	reconcile := lifecycle.ReconcileAPI{
 		Store: st, Forge: f, Recorder: m, FanOut: lifecycle.FanOutPRComments, Namespaces: ns,
 	}
-	return lifecycle.NewCatchUp(CatchUpAPI(st, f, m), ReconcileNow(reconcile))
+	return lifecycle.NewCatchUp(CatchUpAPI(st, f, m), reconcileNow(reconcile))
 }
 
-// ReconcileNow reconciles through lifecycle.ReconcilePR over api at once,
+// reconcileNow reconciles through lifecycle.ReconcilePR over api at once,
 // each reconcile capped at ReconcileTimeout, and calls done with its result.
-func ReconcileNow(api lifecycle.ReconcileAPI) lifecycle.ReconcileFunc {
+func reconcileNow(api lifecycle.ReconcileAPI) lifecycle.ReconcileFunc {
 	return func(ctx context.Context, ev lifecycle.Event, done func(lifecycle.ReconcileResult)) {
 		rctx, cancel := context.WithTimeout(ctx, ReconcileTimeout)
 		defer cancel()

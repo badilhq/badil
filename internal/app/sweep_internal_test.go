@@ -1,0 +1,502 @@
+package app
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"log/slog"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+	"testing/synctest"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
+	"github.com/badilhq/badil/internal/forge"
+	"github.com/badilhq/badil/internal/lifecycle"
+	"github.com/badilhq/badil/internal/metrics"
+	"github.com/badilhq/badil/internal/preview"
+	"github.com/badilhq/badil/internal/store"
+	"github.com/badilhq/badil/internal/store/storetest"
+)
+
+var errUnexpected = errors.New("unexpected call")
+
+// loopFake is the store and forge of a lifecycle.SweepAPI (api) whose
+// previews are all gone by the time they are read: its Apply changes
+// nothing. ListPreviews returns slugs or listErr and, while block is
+// open, waits for it to close or for its context to end. It tracks how many
+// ListPreviews calls ran and the most that ran at once. Its catalog holds
+// front, on acme/front, whose open PRs are openPRs, or openErr. Run counts
+// the catch-ups of a sweep loop.
+type loopFake struct {
+	storetest.GitHubURLs
+	*metrics.Metrics
+
+	slugs   []string
+	listErr error
+	block   chan struct{}
+	openPRs []forge.PullRequest
+	openErr error
+
+	mu        sync.Mutex
+	calls     int
+	active    int
+	maxActive int
+	// sweepsAtCatchUp is the number of ListPreviews calls at each Run.
+	sweepsAtCatchUp []int
+	listings        int
+}
+
+func (f *loopFake) Run(context.Context) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sweepsAtCatchUp = append(f.sweepsAtCatchUp, f.calls)
+}
+
+func (f *loopFake) FetchServiceCatalog(context.Context) (*store.ServiceCatalog, error) {
+	return store.ParseCatalog([]byte("services:\n  front: {repo: https://github.com/acme/front.git}\n"))
+}
+
+func (f *loopFake) ListPreviews(ctx context.Context) ([]string, error) {
+	f.mu.Lock()
+	f.calls++
+	f.active++
+	f.maxActive = max(f.maxActive, f.active)
+	f.mu.Unlock()
+	defer func() {
+		f.mu.Lock()
+		f.active--
+		f.mu.Unlock()
+	}()
+	if f.block != nil {
+		select {
+		case <-f.block:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return f.slugs, f.listErr
+}
+
+func (f *loopFake) counts() (int, int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls, f.maxActive
+}
+
+func (f *loopFake) GetPreview(context.Context, string) (*preview.Values, string, error) {
+	return nil, "", store.ErrNotFound
+}
+
+func (f *loopFake) GetPullRequest(context.Context, string, string, int) (*forge.PullRequest, error) {
+	return nil, errUnexpected
+}
+
+func (f *loopFake) Apply(context.Context, store.Op) (store.Result, error) {
+	return store.Result{NoOp: true}, nil
+}
+
+func (f *loopFake) UpsertComment(context.Context, string, string, int, string) error {
+	return errUnexpected
+}
+
+func (f *loopFake) FanOutPRComments(context.Context, preview.Values, string) error {
+	return errUnexpected
+}
+
+func (f *loopFake) ListChangedFiles(context.Context, string, string, int) ([]forge.ChangedFile, error) {
+	return nil, errUnexpected
+}
+
+func (f *loopFake) ListOpenPullRequests(context.Context, string, string) ([]forge.PullRequest, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.listings++
+	return f.openPRs, f.openErr
+}
+
+// api is the lifecycle.SweepAPI over f: its store, forge and recorder, with
+// its FanOutPRComments as the fan-out.
+func (f *loopFake) api() lifecycle.SweepAPI {
+	return lifecycle.SweepAPI{
+		Store:    f,
+		Forge:    f,
+		Recorder: f,
+		FanOut: func(ctx context.Context, _ forge.Forge, vals preview.Values, body string) error {
+			return f.FanOutPRComments(ctx, vals, body)
+		},
+	}
+}
+
+// assertSweepMetrics fails t unless m's sweep runs and last success are
+// exactly expected, in the text exposition format.
+func assertSweepMetrics(t *testing.T, m *metrics.Metrics, expected string) {
+	t.Helper()
+	if err := testutil.GatherAndCompare(m.Gatherer(), strings.NewReader(expected),
+		"badil_sweep_runs_total", "badil_sweep_last_success_timestamp_seconds"); err != nil {
+		t.Error(err)
+	}
+}
+
+// startLoop runs runSweepLoop over f, f also counting the catch-ups, in the
+// background and returns a func
+// that cancels it and waits for it to return; calling it again is a no-op.
+// It must run in a synctest bubble, where a loop that never returns
+// deadlocks the test.
+func startLoop(f *loopFake, interval time.Duration, now func() time.Time) func() {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runSweepLoop(ctx, f.api(), f, f.Metrics, interval, 0, now)
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
+// advance moves the bubble's clock by d and waits for every goroutine in it
+// to block.
+func advance(d time.Duration) {
+	time.Sleep(d)
+	synctest.Wait()
+}
+
+func TestRunSweepLoop_RecordsRuns(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		at := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
+		f := &loopFake{Metrics: metrics.New(), slugs: []string{"a", "b"}}
+		stop := startLoop(f, time.Minute, func() time.Time { return at })
+		advance(2*time.Minute + time.Second)
+		stop()
+
+		assertSweepMetrics(t, f.Metrics, `
+# HELP badil_sweep_runs_total In-server cleanup sweep runs, by result.
+# TYPE badil_sweep_runs_total counter
+badil_sweep_runs_total{result="ok"} 2
+# HELP badil_sweep_last_success_timestamp_seconds Unix time of the last successful in-server cleanup sweep, 0 before the first one.
+# TYPE badil_sweep_last_success_timestamp_seconds gauge
+badil_sweep_last_success_timestamp_seconds `+strconv.FormatInt(at.Unix(), 10)+`
+`)
+		expected := "# HELP badil_previews Previews in the gitops repo: listed at startup, " +
+			"counted on each create and delete by this server, and reset by each in-server cleanup sweep.\n" +
+			"# TYPE badil_previews gauge\nbadil_previews 2\n"
+		err := testutil.GatherAndCompare(f.Gatherer(), strings.NewReader(expected), "badil_previews")
+		if err != nil {
+			t.Error(err)
+		}
+	})
+}
+
+func TestRunSweepLoop_RecordsFailures(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := &loopFake{Metrics: metrics.New(), listErr: errors.New("boom")}
+		stop := startLoop(f, time.Minute, time.Now)
+		advance(time.Minute + time.Second)
+		stop()
+
+		assertSweepMetrics(t, f.Metrics, `
+# HELP badil_sweep_runs_total In-server cleanup sweep runs, by result.
+# TYPE badil_sweep_runs_total counter
+badil_sweep_runs_total{result="error"} 1
+# HELP badil_sweep_last_success_timestamp_seconds Unix time of the last successful in-server cleanup sweep, 0 before the first one.
+# TYPE badil_sweep_last_success_timestamp_seconds gauge
+badil_sweep_last_success_timestamp_seconds 0
+`)
+	})
+}
+
+func TestRunSweepLoop_WaitsOneIntervalFirst(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := &loopFake{}
+		stop := startLoop(f, time.Hour, time.Now)
+		advance(time.Hour - time.Nanosecond)
+		stop()
+
+		if calls, _ := f.counts(); calls != 0 {
+			t.Errorf("sweeps = %d before the first interval, want 0", calls)
+		}
+	})
+}
+
+func TestRunSweepLoop_NeverOverlaps(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := &loopFake{block: make(chan struct{})}
+		stop := startLoop(f, time.Minute, time.Now)
+		defer stop()
+		advance(time.Minute + time.Second)
+		if calls, _ := f.counts(); calls != 1 {
+			t.Fatalf("sweeps = %d after the first interval, want 1", calls)
+		}
+		advance(CleanupTimeout / 2)
+		if calls, _ := f.counts(); calls != 1 {
+			t.Fatalf("sweeps = %d while the first one runs, want 1", calls)
+		}
+		close(f.block)
+		advance(time.Minute)
+		stop()
+
+		calls, most := f.counts()
+		if calls < 3 {
+			t.Errorf("sweeps = %d once the first one returned, want at least 3", calls)
+		}
+		if most != 1 {
+			t.Errorf("concurrent sweeps = %d, want 1", most)
+		}
+	})
+}
+
+func TestRunSweepLoop_CancelStopsAnInFlightSweepUnrecorded(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := &loopFake{Metrics: metrics.New(), block: make(chan struct{})}
+		stop := startLoop(f, time.Minute, time.Now)
+		defer stop()
+		advance(time.Minute + time.Second)
+		if calls, _ := f.counts(); calls != 1 {
+			t.Fatalf("sweeps = %d after the first interval, want 1", calls)
+		}
+		stop()
+
+		if n, err := testutil.GatherAndCount(f.Gatherer(), "badil_sweep_runs_total"); err != nil || n != 0 {
+			t.Errorf("sweep runs = %d (err %v) recorded for a sweep cancelled by shutdown, want 0", n, err)
+		}
+	})
+}
+
+func TestRunSweepLoop_CatchUpAfterEachSweep(t *testing.T) {
+	cases := []struct {
+		name    string
+		listErr error
+	}{
+		{name: "sweep succeeded"},
+		{name: "sweep failed", listErr: errors.New("boom")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				f := &loopFake{listErr: tc.listErr}
+				stop := startLoop(f, time.Minute, time.Now)
+				advance(2*time.Minute + time.Second)
+				stop()
+
+				f.mu.Lock()
+				defer f.mu.Unlock()
+				if want := []int{1, 2}; !slices.Equal(f.sweepsAtCatchUp, want) {
+					t.Errorf("sweeps run at each catch-up = %v, want %v", f.sweepsAtCatchUp, want)
+				}
+			})
+		})
+	}
+}
+
+func TestRunSweepLoop_NoCatchUpAfterShutdown(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := &loopFake{block: make(chan struct{})}
+		stop := startLoop(f, time.Minute, time.Now)
+		advance(time.Minute + time.Second)
+		stop()
+
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if f.calls != 1 || len(f.sweepsAtCatchUp) != 0 {
+			t.Errorf("sweeps = %d, catch-ups = %d; want 1 sweep cancelled by shutdown and no catch-up",
+				f.calls, len(f.sweepsAtCatchUp))
+		}
+	})
+}
+
+// runCleanupCase is a case of TestRunCleanup_ExitsWithTheSweepsError.
+type runCleanupCase struct {
+	name      string
+	listErr   error
+	openErr   error
+	openPRs   []forge.PullRequest
+	sweepDone bool
+	wantErr   string
+	wantLog   string
+}
+
+func TestRunCleanup_ExitsWithTheSweepsError(t *testing.T) {
+	labelled := forge.PullRequest{
+		Open: true, HeadRef: "feature/x", HeadSHA: "abc", URL: "https://github.com/acme/front/pull/7",
+		Labels: []string{"preview"}, FullName: "acme/front", HeadFullName: "acme/front", Number: 7,
+	}
+	cases := []runCleanupCase{
+		{name: "failed sweep", listErr: errors.New("boom"), wantErr: "boom"},
+		{
+			name: "sweep out of time", sweepDone: true, listErr: context.DeadlineExceeded,
+			wantErr: context.DeadlineExceeded.Error(),
+		},
+		{
+			name: "failed sweep and catch-up listing", listErr: errors.New("boom"), openErr: errors.New("down"),
+			wantErr: "boom", wantLog: "catch-up list failed",
+		},
+		{name: "failed catch-up listing", openErr: errors.New("down"), wantLog: "catch-up list failed"},
+		{
+			name: "failed catch-up reconcile", openPRs: []forge.PullRequest{labelled},
+			wantLog: "preview reconcile failed",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) { checkRunCleanup(t, tc) })
+	}
+}
+
+// checkRunCleanup runs the case tc of TestRunCleanup_ExitsWithTheSweepsError.
+func checkRunCleanup(t *testing.T, tc runCleanupCase) {
+	logs := captureText(t)
+	f := &loopFake{listErr: tc.listErr, openErr: tc.openErr, openPRs: tc.openPRs}
+	reconcile := reconcileNow(lifecycle.ReconcileAPI{Store: f, Forge: f, Recorder: f, FanOut: f.api().FanOut})
+	c := lifecycle.NewCatchUp(lifecycle.CatchUpAPI{Store: f, Forge: f, Recorder: f}, reconcile)
+	sweepCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if tc.sweepDone {
+		cancel()
+	}
+
+	err := RunCleanup(context.Background(), sweepCtx, f.api(), c, time.Now(), 0)
+	if tc.wantErr == "" && err != nil {
+		t.Errorf("RunCleanup = %v, want nil", err)
+	}
+	if tc.wantErr != "" && (err == nil || err.Error() != tc.wantErr) {
+		t.Errorf("RunCleanup = %v, want the sweep's %q", err, tc.wantErr)
+	}
+	if f.listings != 1 {
+		t.Errorf("catch-up listings = %d, want 1", f.listings)
+	}
+	if tc.wantLog != "" && !strings.Contains(logs.String(), `msg="`+tc.wantLog+`"`) {
+		t.Errorf("logs = %s, want %q", logs, tc.wantLog)
+	}
+	if !strings.Contains(logs.String(), `msg=catch-up `) {
+		t.Errorf("logs = %s, want the catch-up line", logs)
+	}
+}
+
+func TestStartSweepLoop_TrackedByServer(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		a := New(Config{})
+		ctx, cancel := context.WithCancel(context.Background())
+		a.StartSweepLoop(ctx, (&loopFake{}).api(), &loopFake{}, nil, time.Hour, 0)
+
+		short, cancelShort := context.WithTimeout(context.Background(), time.Second)
+		defer cancelShort()
+		if err := a.WaitBackground(short); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("WaitBackground with the loop running = %v, want deadline exceeded", err)
+		}
+		cancel()
+		if err := a.WaitBackground(context.Background()); err != nil {
+			t.Fatalf("WaitBackground: %v", err)
+		}
+	})
+}
+
+func TestStartSweepLoop_OffStartsNothing(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		a := New(Config{})
+		a.StartSweepLoop(context.Background(), (&loopFake{}).api(), &loopFake{}, nil, 0, 0)
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := a.WaitBackground(ctx); err != nil {
+			t.Errorf("WaitBackground = %v, want nil", err)
+		}
+	})
+}
+
+// countPreviewsCase is a case of TestCountPreviews.
+type countPreviewsCase struct {
+	name        string
+	metrics     bool
+	listErr     error
+	block       bool
+	wantCalls   int
+	want        float64
+	wantElapsed time.Duration
+	wantLog     string
+}
+
+func TestCountPreviews(t *testing.T) {
+	cases := []countPreviewsCase{
+		{name: "metrics enabled", metrics: true, wantCalls: 1, want: 2},
+		{name: "metrics disabled"},
+		{
+			name: "listing failed", metrics: true, listErr: errors.New("boom"), wantCalls: 1, want: 1,
+			wantLog: `level=WARN msg="previews count failed" err=boom`,
+		},
+		{
+			name: "listing timed out", metrics: true, block: true, wantCalls: 1, want: 1,
+			wantElapsed: previewsCountTimeout,
+			wantLog:     `level=WARN msg="previews count failed" err="context deadline exceeded"`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) { synctest.Test(t, func(t *testing.T) { checkCountPreviews(t, tc) }) })
+	}
+}
+
+// checkCountPreviews runs the case tc of TestCountPreviews.
+func checkCountPreviews(t *testing.T, tc countPreviewsCase) {
+	logs := captureText(t)
+
+	f := &loopFake{slugs: []string{"a", "b"}, listErr: tc.listErr}
+	if tc.block {
+		f.block = make(chan struct{})
+	}
+	var m *metrics.Metrics
+	var rec PreviewsRecorder
+	if tc.metrics {
+		m = metrics.New()
+		m.PreviewsListed(1)
+		rec = m
+	}
+
+	start := time.Now()
+	CountPreviews(context.Background(), f, rec)
+
+	if elapsed := time.Since(start); elapsed != tc.wantElapsed {
+		t.Errorf("CountPreviews returned after %v, want %v", elapsed, tc.wantElapsed)
+	}
+	if calls, _ := f.counts(); calls != tc.wantCalls {
+		t.Errorf("listings = %d, want %d", calls, tc.wantCalls)
+	}
+	if m != nil {
+		assertPreviews(t, m, tc.want)
+	}
+	if got := strings.TrimSpace(logs.String()); got != tc.wantLog {
+		t.Errorf("logs = %q, want %q", got, tc.wantLog)
+	}
+}
+
+// captureText routes the default logger to the returned buffer, as text
+// without timestamps, for the rest of t.
+func captureText(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{
+		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return a
+		},
+	})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &logs
+}
+
+// assertPreviews fails t unless m's previews gauge is want.
+func assertPreviews(t *testing.T, m *metrics.Metrics, want float64) {
+	t.Helper()
+	expected := "# HELP badil_previews Previews in the gitops repo: listed at startup, " +
+		"counted on each create and delete by this server, and reset by each in-server cleanup sweep.\n" +
+		"# TYPE badil_previews gauge\nbadil_previews " + strconv.FormatFloat(want, 'f', -1, 64) + "\n"
+	if err := testutil.GatherAndCompare(m.Gatherer(), strings.NewReader(expected), "badil_previews"); err != nil {
+		t.Error(err)
+	}
+}
