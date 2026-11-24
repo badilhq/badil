@@ -221,3 +221,17 @@ func LoadPrivateKey() ([]byte, error) {
 	}
 	return nil, errors.New("GITHUB_PRIVATE_KEY or GITHUB_PRIVATE_KEY_PATH is required")
 }
+
+// LoadAppID reads GITHUB_APP_ID for verify-app: required and numeric. Its
+// errors are verify-app's, not Load's.
+func LoadAppID() (int64, error) {
+	s := os.Getenv("GITHUB_APP_ID")
+	if s == "" {
+		return 0, errors.New("GITHUB_APP_ID is required")
+	}
+	appID, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("GITHUB_APP_ID must be numeric: %w", err)
+	}
+	return appID, nil
+}

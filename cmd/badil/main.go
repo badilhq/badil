@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -37,9 +36,6 @@ const shutdownTimeout = 25 * time.Second
 
 // readHeaderTimeout bounds reading a request's headers on every listener.
 const readHeaderTimeout = 10 * time.Second
-
-// minCleanupInterval is the shortest CLEANUP_INTERVAL accepted.
-const minCleanupInterval = time.Minute
 
 func main() {
 	if err := rootCmd().Execute(); err != nil {
@@ -76,7 +72,7 @@ func serveCmd() *cobra.Command {
 				return fmt.Errorf("loading config: %w", err)
 			}
 
-			interval, ttl, err := sweepSchedule()
+			interval, ttl, err := config.LoadSweepSchedule()
 			if err != nil {
 				return err
 			}
@@ -204,20 +200,6 @@ func serveInBackground(ctx context.Context, name string, srv *http.Server) {
 			os.Exit(1)
 		}
 	}()
-}
-
-// sweepSchedule reads CLEANUP_INTERVAL and, when it is set, CLEANUP_TTL: the
-// in-server sweep's interval (0 when off) and TTL.
-func sweepSchedule() (time.Duration, time.Duration, error) {
-	interval, err := parseCleanupInterval(os.Getenv("CLEANUP_INTERVAL"))
-	if err != nil || interval == 0 {
-		return 0, 0, err
-	}
-	ttl, err := parseCleanupTTL(os.Getenv("CLEANUP_TTL"))
-	if err != nil {
-		return 0, 0, err
-	}
-	return interval, ttl, nil
 }
 
 // shutdownServers shuts every non-nil server down concurrently, within ctx,
@@ -380,7 +362,7 @@ func cleanupCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("loading config: %w", err)
 			}
-			ttl, err := parseCleanupTTL(os.Getenv("CLEANUP_TTL"))
+			ttl, err := config.LoadCleanupTTL()
 			if err != nil {
 				return err
 			}
@@ -401,33 +383,6 @@ func cleanupCmd() *cobra.Command {
 	}
 }
 
-// parseCleanupInterval parses CLEANUP_INTERVAL. Empty means no in-server
-// sweep (0); otherwise it must be a Go duration of at least
-// minCleanupInterval.
-func parseCleanupInterval(raw string) (time.Duration, error) {
-	if raw == "" {
-		return 0, nil
-	}
-	interval, err := time.ParseDuration(raw)
-	if err != nil || interval < minCleanupInterval {
-		return 0, fmt.Errorf("CLEANUP_INTERVAL must be a duration of at least 1m, got %q", raw)
-	}
-	return interval, nil
-}
-
-// parseCleanupTTL parses CLEANUP_TTL. Empty means no expiry (0); otherwise it
-// must be a positive Go duration.
-func parseCleanupTTL(raw string) (time.Duration, error) {
-	if raw == "" {
-		return 0, nil
-	}
-	ttl, err := time.ParseDuration(raw)
-	if err != nil || ttl <= 0 {
-		return 0, fmt.Errorf("CLEANUP_TTL must be a positive duration, got %q", raw)
-	}
-	return ttl, nil
-}
-
 // verifyAppCmd hits GET /app with App-JWT auth using GITHUB_APP_ID and the
 // PEM at GITHUB_PRIVATE_KEY_PATH (or inline GITHUB_PRIVATE_KEY), on the API
 // base of GITHUB_API_URL (config.LoadGitHubURLs). On success
@@ -441,13 +396,9 @@ func verifyAppCmd() *cobra.Command {
 		Use:   "verify-app",
 		Short: "Verify GitHub App credentials and list installations",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			appIDStr := os.Getenv("GITHUB_APP_ID")
-			if appIDStr == "" {
-				return errors.New("GITHUB_APP_ID is required")
-			}
-			appID, err := strconv.ParseInt(appIDStr, 10, 64)
+			appID, err := config.LoadAppID()
 			if err != nil {
-				return fmt.Errorf("GITHUB_APP_ID must be numeric: %w", err)
+				return err
 			}
 			pem, err := config.LoadPrivateKey()
 			if err != nil {
