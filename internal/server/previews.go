@@ -10,7 +10,6 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/badilhq/badil/internal/preview"
-	"github.com/badilhq/badil/internal/status"
 	"github.com/badilhq/badil/internal/store"
 )
 
@@ -185,9 +184,9 @@ func routePattern(r *http.Request) string {
 }
 
 // previewStatus returns the status of the preview slug's entries, by name.
-func (s *Server) previewStatus(slug string) map[string]status.Entry {
+func (s *Server) previewStatus(slug string) map[string]preview.ServiceStatus {
 	if s.status == nil {
-		return map[string]status.Entry{}
+		return map[string]preview.ServiceStatus{}
 	}
 	return s.status.Preview(slug)
 }

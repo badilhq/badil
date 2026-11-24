@@ -11,36 +11,31 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/badilhq/badil/internal/preview"
 )
 
 // The statuses a renderer reports.
 const (
-	Ready       = "ready"
-	Progressing = "progressing"
-	Degraded    = "degraded"
-	SyncFailed  = "sync-failed"
+	// Ready is preview.StatusReady.
+	Ready = preview.StatusReady
+	// Progressing is preview.StatusProgressing.
+	Progressing = preview.StatusProgressing
+	// Degraded is preview.StatusDegraded.
+	Degraded = preview.StatusDegraded
+	// SyncFailed is preview.StatusSyncFailed.
+	SyncFailed = preview.StatusSyncFailed
 )
 
-// Valid reports whether s is one of the statuses a renderer reports.
-func Valid(s string) bool {
-	switch s {
-	case Ready, Progressing, Degraded, SyncFailed:
-		return true
-	}
-	return false
-}
+// Valid is preview.ValidStatus.
+func Valid(s string) bool { return preview.ValidStatus(s) }
 
 // flushInterval is the shortest time between two writes of a preview's
 // ConfigMap.
 const flushInterval = 5 * time.Second
 
-// Entry is the latest status of one service of a preview: the revision it is
-// about, the status and when the renderer reported it.
-type Entry struct {
-	Revision string    `json:"revision"`
-	Status   string    `json:"status"`
-	At       time.Time `json:"at"`
-}
+// Entry is preview.ServiceStatus.
+type Entry = preview.ServiceStatus
 
 // Lister lists the previews whose file is in the gitops repo:
 // *store.GitHubStore.

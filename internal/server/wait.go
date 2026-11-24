@@ -16,7 +16,6 @@ import (
 
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
-	"github.com/badilhq/badil/internal/status"
 )
 
 // waitTimeout is the longest a wait blocks before it answers its current
@@ -288,14 +287,14 @@ func (s *Server) waitSetState(v previewView, root func(*preview.ServiceEntry) bo
 // a pinned entry is ready, or failed, when its status is ready, or degraded
 // or sync-failed, at a revision at its pin; any other entry when its status
 // is. Anything else is progressing.
-func entryState(e entry, st status.Entry, known bool) string {
+func entryState(e entry, st preview.ServiceStatus, known bool) string {
 	if !known || (e.pinned() && !preview.AtPin(st.Revision, e.svc.CommitSha)) {
 		return stateProgressing
 	}
 	switch st.Status {
-	case status.Ready:
+	case preview.StatusReady:
 		return stateReady
-	case status.Degraded, status.SyncFailed:
+	case preview.StatusDegraded, preview.StatusSyncFailed:
 		return stateFailed
 	}
 	return stateProgressing

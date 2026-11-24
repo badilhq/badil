@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/badilhq/badil/internal/preview"
-	"github.com/badilhq/badil/internal/status"
 	"github.com/badilhq/badil/internal/store"
 )
 
@@ -55,7 +54,7 @@ func (e statusEvent) parse() (time.Time, error) {
 		return time.Time{}, errors.New("apiVersion must be " + preview.APIVersion)
 	case e.Preview == "" || e.Service == "" || e.Revision == "":
 		return time.Time{}, errors.New("preview, service and revision are required")
-	case !status.Valid(e.Status):
+	case !preview.ValidStatus(e.Status):
 		return time.Time{}, errors.New("status must be ready, progressing, degraded or sync-failed")
 	}
 	at, err := time.Parse(time.RFC3339, e.At)
@@ -116,7 +115,7 @@ func (s *Server) handleStatusEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	if reason == "" {
 		recorded, firstReady := s.status.Record(e.Preview, e.Service,
-			status.Entry{Revision: e.Revision, Status: e.Status, At: at})
+			preview.ServiceStatus{Revision: e.Revision, Status: e.Status, At: at})
 		switch {
 		case !recorded:
 			reason = reasonStale

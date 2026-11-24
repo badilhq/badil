@@ -431,19 +431,6 @@ func TestInCluster_MemoryOnlyOutsideACluster(t *testing.T) {
 	}
 }
 
-func TestValid(t *testing.T) {
-	for _, s := range []string{"ready", "progressing", "degraded", "sync-failed"} {
-		if !status.Valid(s) {
-			t.Errorf("Valid(%q) = false", s)
-		}
-	}
-	for _, s := range []string{"", "healthy", "Ready", "unknown"} {
-		if status.Valid(s) {
-			t.Errorf("Valid(%q) = true", s)
-		}
-	}
-}
-
 // syncBuffer is a bytes.Buffer safe for concurrent writes.
 type syncBuffer struct {
 	mu  sync.Mutex
