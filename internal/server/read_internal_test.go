@@ -97,6 +97,7 @@ func newReadServer(
 ) (*Server, *status.Store, *LogCapture) {
 	t.Helper()
 	st := status.NewMemory()
+	cfg.Status = st
 	s, capture := newTeardownServer(t, fg, cfg, append([]Option{
 		WithStatus(testStatusToken, st), WithReadToken(testReadToken),
 	}, opts...)...)
@@ -150,7 +151,7 @@ func assertState(t *testing.T, got WaitResponse, state, reason string) {
 
 // record records the status of service in feature-x.
 func record(st *status.Store, service, revision, s string) {
-	st.Record("feature-x", service, status.Entry{Revision: revision, Status: s, At: time.Now()})
+	st.Record("feature-x", service, preview.ServiceStatus{Revision: revision, Status: s, At: time.Now()})
 }
 
 func TestReadAPI_Auth(t *testing.T) {
@@ -208,8 +209,9 @@ func TestReadAPI_Auth(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fg := readFake(readBadil, pinnedEntry("backend-1", backend42))
 			fg.open(t)
-			a := app.New(app.Config{Store: fg, Forge: fg})
-			s := NewServer(a, fg, nil, fg, tc.deploy, WithReadToken(tc.read), WithStatus("", status.NewMemory()))
+			st := status.NewMemory()
+			a := app.New(app.Config{Store: fg, Forge: fg, Status: st})
+			s := NewServer(a, fg, nil, fg, tc.deploy, WithReadToken(tc.read), WithStatus("", st))
 			s.waitTimeout = time.Millisecond
 			for _, path := range getRoutes {
 				if rec := send(s, http.MethodGet, path, "{}", "Bearer "+testReadToken); rec.Code != tc.allGetsStatus {
@@ -233,7 +235,7 @@ func TestReadAPI_ListAndGet(t *testing.T) {
 	fg := readFake(readBadil, pinnedEntry("backend-1", backend42))
 	s, st, _ := newReadServer(t, fg, app.Config{}, WithPreviewTTL(168*time.Hour))
 	at := time.Date(2026, 11, 19, 21, 5, 0, 0, time.UTC)
-	st.Record("feature-x", "backend-1", status.Entry{Revision: statusSHA, Status: status.Ready, At: at})
+	st.Record("feature-x", "backend-1", preview.ServiceStatus{Revision: statusSHA, Status: preview.StatusReady, At: at})
 
 	unpinned := func(slug string) []PreviewEntryJSON {
 		return []PreviewEntryJSON{
@@ -533,11 +535,11 @@ func TestWait_PinAndWaitSet(t *testing.T) {
 		t.Errorf("wait set = %v, want %v", names, want)
 	}
 
-	record(st, "front", statusSHA, status.Ready)
+	record(st, "front", statusSHA, preview.StatusReady)
 	assertState(t, waitFor(t, s, path), "progressing", "")
-	record(st, "backend-1", "0123456", status.Ready)
+	record(st, "backend-1", "0123456", preview.StatusReady)
 	assertState(t, waitFor(t, s, path), "progressing", "")
-	record(st, "postgres", "1.0.0", status.Ready)
+	record(st, "postgres", "1.0.0", preview.StatusReady)
 	got = waitFor(t, s, path)
 	assertState(t, got, "ready", "")
 	assertState(t, waitFor(t, s, "/v1/previews/feature-x/wait"), "ready", "")
@@ -547,11 +549,11 @@ func TestWait_PinAndWaitSet(t *testing.T) {
 		}
 	}
 
-	record(st, "front", "fff0000", status.SyncFailed)
+	record(st, "front", "fff0000", preview.StatusSyncFailed)
 	assertState(t, waitFor(t, s, path), "progressing", "")
-	record(st, "front", statusSHA, status.Degraded)
+	record(st, "front", statusSHA, preview.StatusDegraded)
 	assertState(t, waitFor(t, s, path), "failed", "front is degraded at "+statusSHA)
-	record(st, "front", statusSHA, status.SyncFailed)
+	record(st, "front", statusSHA, preview.StatusSyncFailed)
 	assertState(t, waitFor(t, s, path), "failed", "front is sync-failed at "+statusSHA)
 }
 

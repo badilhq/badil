@@ -1,52 +1,22 @@
 package server
 
 import (
-	"cmp"
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/badilhq/badil/internal/lifecycle"
-	"github.com/badilhq/badil/internal/preview"
-	"github.com/badilhq/badil/internal/status"
+	"github.com/badilhq/badil/internal/app"
 )
 
 // waitTimeout is the longest a wait blocks before it answers its current
 // state.
 const waitTimeout = 25 * time.Second
-
-// States of a wait.
-const (
-	statePending     = "pending"
-	stateProgressing = "progressing"
-	stateReady       = "ready"
-	stateFailed      = "failed"
-	stateRefused     = "refused"
-	stateSkipped     = "skipped"
-)
-
-// Reasons of a wait state that no reconcile reason carries.
-const (
-	reasonTornDown        = "torn down"
-	reasonReconcileFailed = "reconcile failed"
-)
-
-// final reports whether a wait in state answers at once.
-func final(state string) bool {
-	switch state {
-	case stateReady, stateFailed, stateRefused, stateSkipped:
-		return true
-	}
-	return false
-}
 
 // WaitResponse is the body of a wait's answer: its state, the reason of a
 // failed, refused or skipped state, the preview and the SHA waited for when
@@ -71,51 +41,37 @@ type WaitEntryJSON struct {
 	URL      string `json:"url,omitempty"`
 }
 
-// newWaitResponse returns a response in state with no entry.
-func newWaitResponse(state, reason, slug, sha string) *WaitResponse {
-	return &WaitResponse{
-		State: state, Reason: reason, Slug: slug, SHA: sha,
-		Services: []WaitEntryJSON{}, URLs: map[string]string{},
+// waitResponse returns the body of the wait answer r.
+func waitResponse(r *app.WaitResult) *WaitResponse {
+	out := &WaitResponse{
+		State: r.State, Reason: r.Reason, Slug: r.Slug, SHA: r.SHA,
+		Services: make([]WaitEntryJSON, 0, len(r.Services)), URLs: r.URLs,
 	}
-}
-
-// prQuery is the query of GET /v1/wait.
-type prQuery struct {
-	owner, repo string
-	number      int
-	sha         string
+	for _, e := range r.Services {
+		out.Services = append(out.Services, WaitEntryJSON{
+			Name: e.Name, Kind: e.Kind, Status: e.Status, Revision: e.Revision, Ready: e.Ready, URL: e.URL,
+		})
+	}
+	return out
 }
 
 // parsePRQuery validates the query of GET /v1/wait: repo as owner/repo
 // (exactly one "/", both parts non-empty), pr a positive integer and an
 // optional sha.
-func parsePRQuery(q url.Values) (prQuery, error) {
+func parsePRQuery(q url.Values) (app.PRQuery, error) {
 	repo, pr := q.Get("repo"), q.Get("pr")
 	if repo == "" || pr == "" {
-		return prQuery{}, errors.New("repo and pr are required")
+		return app.PRQuery{}, errors.New("repo and pr are required")
 	}
 	owner, name, ok := strings.Cut(repo, "/")
 	if !ok || owner == "" || name == "" || strings.Contains(name, "/") {
-		return prQuery{}, errors.New("repo must be owner/repo")
+		return app.PRQuery{}, errors.New("repo must be owner/repo")
 	}
 	number, err := strconv.Atoi(pr)
 	if err != nil || number <= 0 {
-		return prQuery{}, errors.New("pr must be a positive integer")
+		return app.PRQuery{}, errors.New("pr must be a positive integer")
 	}
-	return prQuery{owner: owner, repo: name, number: number, sha: q.Get("sha")}, nil
-}
-
-// shaMatch reports whether the SHAs a and b match: both are non-empty and,
-// in lowercase, the longer starts with the shorter.
-func shaMatch(a, b string) bool {
-	if a == "" || b == "" {
-		return false
-	}
-	a, b = strings.ToLower(a), strings.ToLower(b)
-	if len(a) < len(b) {
-		a, b = b, a
-	}
-	return strings.HasPrefix(a, b)
+	return app.PRQuery{Owner: owner, Repo: name, Number: number, SHA: q.Get("sha")}, nil
 }
 
 // handleWait answers GET /v1/wait: the state of a PR's preview, long-polled.
@@ -125,23 +81,23 @@ func (s *Server) handleWait(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.longPoll(w, r, func(ctx context.Context) (*WaitResponse, error) { return s.evalPR(ctx, q) })
+	s.longPoll(w, r, func(ctx context.Context) (*app.WaitResult, error) { return s.app.EvaluatePRWait(ctx, q) })
 }
 
 // handleSlugWait answers GET /v1/previews/{slug}/wait: the state of a
 // preview, long-polled.
 func (s *Server) handleSlugWait(w http.ResponseWriter, r *http.Request) {
 	slug := chi.URLParam(r, "slug")
-	s.longPoll(w, r, func(ctx context.Context) (*WaitResponse, error) { return s.evalSlug(ctx, slug) })
+	s.longPoll(w, r, func(ctx context.Context) (*app.WaitResult, error) { return s.app.EvaluateSlugWait(ctx, slug) })
 }
 
 // longPoll answers r with eval's response: at once when it is final,
-// errNoPreview (404) or another error (503); otherwise once a
+// app.ErrNoPreview (404) or another error (503); otherwise once a
 // re-evaluation, on each Notify of the app's wake, changes its state or
 // reason or is final or an error. When
 // waitTimeout passes, or the HTTP server's shutdown starts, it answers the
 // current response. The client's disconnect ends it without an answer.
-func (s *Server) longPoll(w http.ResponseWriter, r *http.Request, eval func(context.Context) (*WaitResponse, error)) {
+func (s *Server) longPoll(w http.ResponseWriter, r *http.Request, eval func(context.Context) (*app.WaitResult, error)) {
 	ctx := r.Context()
 	route := routePattern(r)
 	timer := time.NewTimer(s.waitTimeout)
@@ -151,152 +107,28 @@ func (s *Server) longPoll(w http.ResponseWriter, r *http.Request, eval func(cont
 	current := first
 	for {
 		switch {
-		case errors.Is(err, errNoPreview):
+		case errors.Is(err, app.ErrNoPreview):
 			writeJSONError(ctx, w, http.StatusNotFound, err.Error())
 			return
 		case err != nil:
 			readFailed(ctx, w, route, err)
 			return
-		case final(current.State) || current.State != first.State || current.Reason != first.Reason:
-			writeJSON(ctx, w, http.StatusOK, current)
+		case current.Final() || current.State != first.State || current.Reason != first.Reason:
+			writeJSON(ctx, w, http.StatusOK, waitResponse(current))
 			return
 		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			writeJSON(ctx, w, http.StatusOK, current)
+			writeJSON(ctx, w, http.StatusOK, waitResponse(current))
 			return
 		case <-s.shutdown:
-			writeJSON(ctx, w, http.StatusOK, current)
+			writeJSON(ctx, w, http.StatusOK, waitResponse(current))
 			return
 		case <-woken:
 			woken = s.app.Wake().Wait()
 			current, err = eval(ctx)
 		}
 	}
-}
-
-// evalPR evaluates the wait of the PR of q, in this order: refused when the
-// catalog has no service of its repo; the state its latest recorded outcome
-// decides, when that outcome's head SHA matches q's sha or q has none;
-// pending when no preview has an entry pinned by the PR (at q's sha, when
-// set); otherwise the state of the PR's wait set in that preview.
-func (s *Server) evalPR(ctx context.Context, q prQuery) (*WaitResponse, error) {
-	catalog, err := s.readCatalog(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if len(catalog.ServicesForRepo(s.forge.ParseRepoURL, q.owner, q.repo)) == 0 {
-		return newWaitResponse(stateRefused, lifecycle.RepoNotInCatalogReason, "", q.sha), nil
-	}
-	target := lifecycle.Target{Owner: q.owner, Repo: q.repo, Number: q.number}
-	if o, ok := s.app.LatestOutcome(target); ok && (q.sha == "" || shaMatch(q.sha, o.HeadSHA)) {
-		if state, reason, decided := outcomeState(o.ReconcileResult); decided {
-			return newWaitResponse(state, reason, "", cmp.Or(q.sha, o.HeadSHA)), nil
-		}
-	}
-	views, err := s.listPreviews(ctx, catalog)
-	if err != nil {
-		return nil, err
-	}
-	byPR := func(svc *preview.ServiceEntry) bool {
-		return svc.CommitSha != "" && svc.Metadata != nil &&
-			preview.MatchesPR(s.forge.ParsePRURL, svc.Metadata.PRURL, q.owner, q.repo, q.number)
-	}
-	for _, v := range views {
-		for i := range v.vals.Services {
-			svc := &v.vals.Services[i]
-			if !byPR(svc) || (q.sha != "" && !shaMatch(q.sha, svc.CommitSha)) {
-				continue
-			}
-			return s.waitSetState(v, byPR, cmp.Or(q.sha, svc.CommitSha)), nil
-		}
-	}
-	return newWaitResponse(statePending, "", "", q.sha), nil
-}
-
-// evalSlug evaluates the wait of the preview slug: errNoPreview when it does
-// not exist, pending when it has no pinned entry, otherwise the state of its
-// wait set.
-func (s *Server) evalSlug(ctx context.Context, slug string) (*WaitResponse, error) {
-	v, err := s.readPreview(ctx, slug)
-	if err != nil {
-		return nil, err
-	}
-	if slices.ContainsFunc(v.vals.Services, func(e preview.ServiceEntry) bool { return e.CommitSha != "" }) {
-		return s.waitSetState(*v, func(*preview.ServiceEntry) bool { return true }, ""), nil
-	}
-	return newWaitResponse(statePending, "", v.slug, ""), nil
-}
-
-// outcomeState returns the wait state and reason a recorded reconcile
-// outcome decides, and false when it decides none.
-func outcomeState(res lifecycle.ReconcileResult) (string, string, bool) {
-	switch res.Outcome {
-	case lifecycle.OutcomeTornDown:
-		return stateRefused, reasonTornDown, true
-	case lifecycle.OutcomeFailed:
-		return stateFailed, reasonReconcileFailed, true
-	case lifecycle.OutcomeSkipped:
-		switch res.Reason {
-		case lifecycle.ServiceHeldReason, lifecycle.PreviewLimitReason, lifecycle.NamespaceInUseReason,
-			lifecycle.LabelConflictReason, lifecycle.ForkPRReason, lifecycle.RepoNotInCatalogReason:
-			return stateRefused, res.Reason, true
-		case lifecycle.NoServiceReason, lifecycle.NotLabeledReason:
-			return stateSkipped, res.Reason, true
-		}
-	}
-	return "", "", false
-}
-
-// waitSetState returns the state of the wait set of v whose roots are its
-// pinned service entries for which root is true: those entries and every
-// service and dependency in the transitive needs of the catalog services
-// among them (preview.Catalog.PinnedClosure). It is failed when an entry is
-// failed, with the first one, in file order, as the reason; ready when every
-// entry is ready; otherwise progressing.
-func (s *Server) waitSetState(v previewView, root func(*preview.ServiceEntry) bool, sha string) *WaitResponse {
-	set := v.catalog.PinnedClosure(v.vals.Services, root)
-	statuses := s.previewStatus(v.slug)
-	res := newWaitResponse(stateReady, "", v.slug, sha)
-	for _, e := range entries(v) {
-		if !set[e.name] {
-			continue
-		}
-		st, known := statuses[e.name]
-		state := entryState(e, st, known)
-		j := WaitEntryJSON{Name: e.name, Kind: e.kind, Status: statusUnknown, Ready: state == stateReady, URL: e.url}
-		if known {
-			j.Status, j.Revision = st.Status, st.Revision
-		}
-		res.Services = append(res.Services, j)
-		if e.url != "" {
-			res.URLs[e.name] = e.url
-		}
-		switch {
-		case state == stateFailed && res.State != stateFailed:
-			res.State, res.Reason = stateFailed, fmt.Sprintf("%s is %s at %s", e.name, st.Status, st.Revision)
-		case state != stateReady && res.State == stateReady:
-			res.State = stateProgressing
-		}
-	}
-	return res
-}
-
-// entryState returns the state of e, whose latest status is st when known:
-// a pinned entry is ready, or failed, when its status is ready, or degraded
-// or sync-failed, at a revision at its pin; any other entry when its status
-// is. Anything else is progressing.
-func entryState(e entry, st status.Entry, known bool) string {
-	if !known || (e.pinned() && !preview.AtPin(st.Revision, e.svc.CommitSha)) {
-		return stateProgressing
-	}
-	switch st.Status {
-	case status.Ready:
-		return stateReady
-	case status.Degraded, status.SyncFailed:
-		return stateFailed
-	}
-	return stateProgressing
 }

@@ -159,7 +159,9 @@ func serveCmd() *cobra.Command {
 			defer closeStore(ctx, st)
 			previewStatus.Start(ctx, st)
 
-			a := app.New(app.Config{Store: st, Forge: f, Metrics: m, Namespaces: namespaces, Wake: wake})
+			a := app.New(app.Config{
+				Store: st, Forge: f, Metrics: m, Namespaces: namespaces, Wake: wake, Status: previewStatus,
+			})
 			srv := server.NewServer(a, f, f, st, cfg.DeployToken,
 				server.WithMetrics(m),
 				server.WithStatus(cfg.StatusToken, previewStatus),
