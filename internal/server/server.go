@@ -12,8 +12,6 @@ import (
 
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
-	"github.com/badilhq/badil/internal/metrics"
-	"github.com/badilhq/badil/internal/namespace"
 	"github.com/badilhq/badil/internal/status"
 )
 
@@ -21,19 +19,56 @@ import (
 // or POST /v1/sync), counted from when the run holds the syncer's guard.
 const syncTimeout = 10 * time.Minute
 
+// Recorder records the webhook deliveries, the renderer status events and the
+// spin-up durations the server observes, and, as a lifecycle.Recorder, the
+// outcomes of the lifecycle operations it runs. *metrics.Metrics implements
+// it.
+type Recorder interface {
+	lifecycle.Recorder
+	WebhookDelivery(event, status string)
+	StatusEvent(status, result string)
+	SpinUp(service string, d time.Duration)
+}
+
+// nopRecorder is the Recorder of a Server built without WithMetrics: it
+// records nothing.
+type nopRecorder struct{}
+
+func (nopRecorder) Reconcile(string, string) {}
+
+func (nopRecorder) Teardown(string, string) {}
+
+func (nopRecorder) SweepListed(int) {}
+
+func (nopRecorder) SweepDeleted(string) {}
+
+func (nopRecorder) PreviewSynced() {}
+
+func (nopRecorder) PreviewCreated() {}
+
+func (nopRecorder) WebhookDelivery(string, string) {}
+
+func (nopRecorder) StatusEvent(string, string) {}
+
+func (nopRecorder) SpinUp(string, time.Duration) {}
+
 // Option configures a Server built by NewServer.
 type Option func(*Server)
 
-// WithMetrics records webhook deliveries and lifecycle outcomes in m.
-func WithMetrics(m *metrics.Metrics) Option {
+// WithMetrics records webhook deliveries and lifecycle outcomes in m. A nil m
+// leaves the default, which records nothing.
+func WithMetrics(m Recorder) Option {
 	return func(s *Server) {
-		s.metrics = m
+		if m != nil {
+			s.metrics = m
+		}
 	}
 }
 
 // WithNamespaces checks the namespace of each new preview through c before
-// it is written (namespace.Checker). Without it, no namespace is checked.
-func WithNamespaces(c namespace.Checker) Option {
+// it is written (lifecycle.NamespaceChecker). Without it, no namespace is
+// checked.
+func WithNamespaces(c lifecycle.NamespaceChecker) Option {
 	return func(s *Server) {
 		s.namespaces = c
 	}
@@ -80,10 +115,10 @@ type Server struct {
 	// fanOut posts a preview's summary on its open PRs:
 	// lifecycle.FanOutPRComments.
 	fanOut  lifecycle.FanOutFunc
-	metrics *metrics.Metrics
+	metrics Recorder
 	// namespaces checks the namespace of a new preview, nil when none is
 	// checked.
-	namespaces  namespace.Checker
+	namespaces  lifecycle.NamespaceChecker
 	deployToken string
 	// statusToken authenticates POST /webhooks/status, "" when it is
 	// disabled.
@@ -129,6 +164,7 @@ func NewServer(
 		forge:       f,
 		store:       st,
 		fanOut:      lifecycle.FanOutPRComments,
+		metrics:     nopRecorder{},
 		deployToken: deployToken,
 		jobTimeout:  ReconcileTimeout,
 		outcomes:    newOutcomes(),
@@ -171,7 +207,7 @@ func NewServer(
 }
 
 // reconcileAPI is the store, the forge, the metrics, the fan-out and the
-// namespace check as lifecycle.ReconcilePR expects them. A nil *metrics.Metrics records nothing.
+// namespace check as lifecycle.ReconcilePR expects them.
 func (s *Server) reconcileAPI() lifecycle.ReconcileAPI {
 	return lifecycle.ReconcileAPI{
 		Store: s.store, Forge: s.forge, Recorder: s.metrics, FanOut: s.fanOut, Namespaces: s.namespaces,

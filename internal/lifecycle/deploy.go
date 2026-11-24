@@ -7,7 +7,6 @@ import (
 
 	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/forge"
-	"github.com/badilhq/badil/internal/namespace"
 	"github.com/badilhq/badil/internal/preview"
 )
 
@@ -20,8 +19,16 @@ var ErrPreviewLimit = errors.New("preview limit reached")
 // Callers test it with errors.Is.
 var ErrNamespaceInUse = errors.New("namespace in use")
 
+// NamespaceChecker reads the namespace of a new preview.
+type NamespaceChecker interface {
+	// Foreign reports whether the namespace name exists and is not a preview
+	// namespace for the slug name: one labelled badil.dev/preview=<name>. A
+	// failed read is returned.
+	Foreign(ctx context.Context, name string) (bool, error)
+}
+
 // NamespaceCheckError is the error of a failed namespace check of a new
-// preview (namespace.Checker.Foreign).
+// preview (NamespaceChecker.Foreign).
 type NamespaceCheckError struct {
 	Err error
 }
@@ -50,7 +57,7 @@ type DeployAPI struct {
 	Forge      forge.Forge
 	Recorder   Recorder
 	FanOut     FanOutFunc
-	Namespaces namespace.Checker
+	Namespaces NamespaceChecker
 }
 
 // DeployResult is the outcome of DeployPR: the operation's commit, the

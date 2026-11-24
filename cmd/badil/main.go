@@ -28,6 +28,7 @@ import (
 	"github.com/badilhq/badil/internal/namespace"
 	"github.com/badilhq/badil/internal/server"
 	"github.com/badilhq/badil/internal/status"
+	statuskube "github.com/badilhq/badil/internal/status/kube"
 	"github.com/badilhq/badil/internal/store"
 )
 
@@ -69,7 +70,7 @@ type cleanupStore interface {
 // cleanupCatchUp is badil cleanup's catch-up over st and f, recording no
 // metrics: it reconciles at once (reconcileNow), checking the namespace of a
 // new preview with ns as serve does.
-func cleanupCatchUp(st cleanupStore, f forge.Forge, ns namespace.Checker) *lifecycle.CatchUp {
+func cleanupCatchUp(st cleanupStore, f forge.Forge, ns lifecycle.NamespaceChecker) *lifecycle.CatchUp {
 	var m *metrics.Metrics
 	reconcile := lifecycle.ReconcileAPI{
 		Store: st, Forge: f, Recorder: m, FanOut: lifecycle.FanOutPRComments, Namespaces: ns,
@@ -143,7 +144,7 @@ func serveCmd() *cobra.Command {
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
-			previewStatus := status.InCluster(ctx)
+			previewStatus := statuskube.InCluster(ctx)
 			namespaces := namespace.InCluster(ctx)
 			if err = loadStatus(ctx, previewStatus); err != nil {
 				return err

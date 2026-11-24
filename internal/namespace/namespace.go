@@ -15,32 +15,26 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+
+	"github.com/badilhq/badil/internal/lifecycle"
 )
 
 // previewLabel is the label the preview-apps chart sets on a preview
 // namespace, with the preview's slug as value.
 const previewLabel = "badil.dev/preview"
 
-// Checker reads the namespace of a new preview.
-type Checker interface {
-	// Foreign reports whether the namespace name exists and is not a preview
-	// namespace for the slug name: one labelled badil.dev/preview=<name>. A
-	// failed read is returned.
-	Foreign(ctx context.Context, name string) (bool, error)
-}
-
 // client checks namespaces through a Kubernetes client.
 type client struct {
 	kube kubernetes.Interface
 }
 
-// New returns a Checker reading namespaces through kube.
-func New(kube kubernetes.Interface) Checker {
+// New returns a lifecycle.NamespaceChecker reading namespaces through kube.
+func New(kube kubernetes.Interface) lifecycle.NamespaceChecker {
 	return &client{kube: kube}
 }
 
-// Foreign implements Checker with one Get of the namespace. Any error but
-// NotFound, Forbidden included, is returned.
+// Foreign implements lifecycle.NamespaceChecker with one Get of the
+// namespace. Any error but NotFound, Forbidden included, is returned.
 func (c *client) Foreign(ctx context.Context, name string) (bool, error) {
 	ns, err := c.kube.CoreV1().Namespaces().Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
@@ -68,7 +62,7 @@ func (f failing) Foreign(context.Context, string) (bool, error) { return false, 
 // namespace is foreign, and logs why, once. Inside a cluster, when the client
 // cannot be built, such as without a readable ServiceAccount token, it returns
 // a Checker for which every check fails with that error.
-func InCluster(ctx context.Context) Checker {
+func InCluster(ctx context.Context) lifecycle.NamespaceChecker {
 	cfg, err := rest.InClusterConfig()
 	if errors.Is(err, rest.ErrNotInCluster) {
 		slog.Default().InfoContext(ctx, "namespace check disabled", slog.String("reason", err.Error()))

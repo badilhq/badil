@@ -22,6 +22,7 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/badilhq/badil/internal/status"
+	"github.com/badilhq/badil/internal/status/kube"
 )
 
 const namespace = "badil"
@@ -71,7 +72,7 @@ func statusConfigMap(t *testing.T, slug string, services map[string]status.Entry
 	}
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: status.ConfigMapName(slug), Namespace: namespace,
+			Name: kube.ConfigMapName(slug), Namespace: namespace,
 			Labels: map[string]string{"app.kubernetes.io/managed-by": "badil", "badil.dev/preview": slug},
 		},
 		Data: data,
@@ -82,7 +83,7 @@ func statusConfigMap(t *testing.T, slug string, services map[string]status.Entry
 // over l, and closes it at the end of the test.
 func startStore(t *testing.T, client *fake.Clientset, interval time.Duration, l status.Lister) *status.Store {
 	t.Helper()
-	s := status.New(client, namespace)
+	s := kube.New(client, namespace)
 	status.SetInterval(s, interval)
 	if err := s.Load(context.Background()); err != nil {
 		t.Fatalf("Load: %v", err)
@@ -97,7 +98,7 @@ func startStore(t *testing.T, client *fake.Clientset, interval time.Duration, l 
 func configMapData(t *testing.T, client *fake.Clientset, slug string) (map[string]status.Entry, bool) {
 	t.Helper()
 	cm, err := client.CoreV1().ConfigMaps(namespace).Get(
-		context.Background(), status.ConfigMapName(slug), metav1.GetOptions{})
+		context.Background(), kube.ConfigMapName(slug), metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return nil, false
 	}
@@ -283,7 +284,7 @@ func TestLoad_RebuildsFromLabelledConfigMaps(t *testing.T) {
 	}
 	client := fake.NewClientset(statusConfigMap(t, "feature-x", want), other, noPreview, elsewhere)
 
-	s := status.New(client, namespace)
+	s := kube.New(client, namespace)
 	if err := s.Load(context.Background()); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -312,7 +313,7 @@ func TestLoad_ListFailureIsAnError(t *testing.T) {
 	client.PrependReactor("list", "configmaps", func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "configmaps"}, "", errors.New("rbac"))
 	})
-	if err := status.New(client, namespace).Load(context.Background()); err == nil {
+	if err := kube.New(client, namespace).Load(context.Background()); err == nil {
 		t.Fatal("Load: want an error")
 	}
 }
@@ -382,7 +383,7 @@ func TestCollectGarbage(t *testing.T) {
 // recorded since the last flush.
 func TestClose_FlushesDirtyPreviews(t *testing.T) {
 	client := fake.NewClientset()
-	s := status.New(client, namespace)
+	s := kube.New(client, namespace)
 	status.SetInterval(s, time.Hour)
 	s.Start(context.Background(), &lister{slugs: []string{"feature-x"}})
 	s.Record("feature-x", "backend-1", entry("aaa", status.Ready, 0))
@@ -402,7 +403,7 @@ func TestInCluster_MemoryOnlyOutsideACluster(t *testing.T) {
 	t.Setenv("POD_NAMESPACE", "badil")
 	logs := captureLogs(t)
 
-	s := status.InCluster(context.Background())
+	s := kube.InCluster(context.Background())
 	if status.Persisted(s) {
 		t.Fatal("Persisted = true outside a cluster")
 	}

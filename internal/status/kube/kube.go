@@ -1,4 +1,6 @@
-package status
+// Package kube keeps the status of the previews (package status) in one
+// ConfigMap per preview in badil's namespace.
+package kube
 
 import (
 	"context"
@@ -15,6 +17,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
+
+	"github.com/badilhq/badil/internal/status"
 )
 
 // Labels of the status ConfigMaps.
@@ -42,14 +46,14 @@ type configMaps struct {
 }
 
 // New returns a Store persisted as ConfigMaps in namespace through client.
-func New(client kubernetes.Interface, namespace string) *Store {
-	return newStore(&configMaps{client: client, namespace: namespace})
+func New(client kubernetes.Interface, namespace string) *status.Store {
+	return status.NewPersisted(&configMaps{client: client, namespace: namespace})
 }
 
 // InCluster returns a Store persisted in POD_NAMESPACE through the in-cluster
 // configuration. Without one, or without POD_NAMESPACE, it returns a
 // memory-only Store and logs why, once.
-func InCluster(ctx context.Context) *Store {
+func InCluster(ctx context.Context) *status.Store {
 	reason := ""
 	cfg, err := rest.InClusterConfig()
 	namespace := os.Getenv("POD_NAMESPACE")
@@ -66,7 +70,7 @@ func InCluster(ctx context.Context) *Store {
 	}
 	if reason != "" {
 		slog.Default().InfoContext(ctx, "status persistence disabled", slog.String("reason", reason))
-		return NewMemory()
+		return status.NewMemory()
 	}
 	return New(client, namespace)
 }
@@ -83,19 +87,19 @@ func (c *configMaps) managed(ctx context.Context) ([]corev1.ConfigMap, error) {
 	return slices.DeleteFunc(items.Items, func(cm corev1.ConfigMap) bool { return cm.Labels[previewLabel] == "" }), nil
 }
 
-// list returns, by preview, the status read from the ConfigMaps badil
+// List returns, by preview, the status read from the ConfigMaps badil
 // manages that carry the preview label. A value that does not parse is
 // logged and skipped.
-func (c *configMaps) list(ctx context.Context) (map[string]map[string]Entry, error) {
+func (c *configMaps) List(ctx context.Context) (map[string]map[string]status.Entry, error) {
 	items, err := c.managed(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := map[string]map[string]Entry{}
+	out := map[string]map[string]status.Entry{}
 	for _, cm := range items {
-		services := map[string]Entry{}
+		services := map[string]status.Entry{}
 		for service, raw := range cm.Data {
-			var e Entry
+			var e status.Entry
 			if err = json.Unmarshal([]byte(raw), &e); err != nil {
 				slog.Default().WarnContext(ctx, "skipping unreadable status",
 					slog.String("configmap", cm.Name), slog.String("service", service), slog.String("err", err.Error()))
@@ -108,9 +112,9 @@ func (c *configMaps) list(ctx context.Context) (map[string]map[string]Entry, err
 	return out, nil
 }
 
-// names returns the previews of the ConfigMaps badil manages that carry the
+// Names returns the previews of the ConfigMaps badil manages that carry the
 // preview label.
-func (c *configMaps) names(ctx context.Context) ([]string, error) {
+func (c *configMaps) Names(ctx context.Context) ([]string, error) {
 	items, err := c.managed(ctx)
 	if err != nil {
 		return nil, err
@@ -122,12 +126,12 @@ func (c *configMaps) names(ctx context.Context) ([]string, error) {
 	return slugs, nil
 }
 
-// write creates or updates the ConfigMap of the preview slug with the status
+// Write creates or updates the ConfigMap of the preview slug with the status
 // snapshot returns, read at each attempt; it writes nothing once snapshot
 // reports the preview gone. A conflict reads the ConfigMap again and
 // replaces its data, up to maxWriteAttempts attempts: badil is its only
 // writer.
-func (c *configMaps) write(ctx context.Context, slug string, snapshot func() (map[string]Entry, bool)) error {
+func (c *configMaps) Write(ctx context.Context, slug string, snapshot func() (map[string]status.Entry, bool)) error {
 	api := c.client.CoreV1().ConfigMaps(c.namespace)
 	retriable := func(err error) bool { return apierrors.IsConflict(err) || apierrors.IsAlreadyExists(err) }
 	return retry.OnError(wait.Backoff{Steps: maxWriteAttempts}, retriable, func() error {
@@ -155,9 +159,9 @@ func (c *configMaps) write(ctx context.Context, slug string, snapshot func() (ma
 	})
 }
 
-// delete deletes the ConfigMap of the preview slug; one already gone is no
+// Delete deletes the ConfigMap of the preview slug; one already gone is no
 // error.
-func (c *configMaps) delete(ctx context.Context, slug string) error {
+func (c *configMaps) Delete(ctx context.Context, slug string) error {
 	err := c.client.CoreV1().ConfigMaps(c.namespace).Delete(ctx, ConfigMapName(slug), metav1.DeleteOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("delete configmap %s: %w", ConfigMapName(slug), err)
@@ -189,7 +193,7 @@ func mergeLabels(labels map[string]string, slug string) map[string]string {
 }
 
 // encode returns services as ConfigMap data: one JSON entry per service.
-func encode(services map[string]Entry) (map[string]string, error) {
+func encode(services map[string]status.Entry) (map[string]string, error) {
 	data := make(map[string]string, len(services))
 	for name, e := range services {
 		raw, err := json.Marshal(e)

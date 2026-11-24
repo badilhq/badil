@@ -14,5 +14,5 @@ func SetInterval(s *Store, d time.Duration) {
 
 // Persisted reports whether s keeps the status in ConfigMaps.
 func Persisted(s *Store) bool {
-	return s.kube != nil
+	return s.persist != nil
 }

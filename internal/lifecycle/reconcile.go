@@ -14,7 +14,6 @@ import (
 
 	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/forge"
-	"github.com/badilhq/badil/internal/namespace"
 	"github.com/badilhq/badil/internal/preview"
 )
 
@@ -82,7 +81,7 @@ type ReconcileAPI struct {
 	Forge      forge.Forge
 	Recorder   Recorder
 	FanOut     FanOutFunc
-	Namespaces namespace.Checker
+	Namespaces NamespaceChecker
 }
 
 // teardownAPI narrows a to what a teardown uses.
@@ -118,7 +117,7 @@ type Event struct {
 // deployed there at its head SHA, unless another PR already pins one of them,
 // or the preview does not exist and preview.maxPreviews previews already do,
 // or the preview does not exist and its namespace exists and is not a
-// preview namespace for its slug (namespace.Checker); before that deploy,
+// preview namespace for its slug (NamespaceChecker); before that deploy,
 // the PR's entries there for the other services of its repo are unpinned. A
 // PR that touches no service is torn down from its target and told so, and
 // the reconcile is skipped. An open PR with conflicting named labels is told
@@ -348,9 +347,9 @@ func (p *reconcilePlan) change(tree Tree) (Summary, error) {
 }
 
 // foreignFunc returns the namespace check of a new preview through c, under
-// ctx: whether its namespace is foreign (namespace.Checker.Foreign), a failed
+// ctx: whether its namespace is foreign (NamespaceChecker.Foreign), a failed
 // check as a *NamespaceCheckError. A nil c checks nothing.
-func foreignFunc(ctx context.Context, c namespace.Checker) func(slug string) (bool, error) {
+func foreignFunc(ctx context.Context, c NamespaceChecker) func(slug string) (bool, error) {
 	return func(slug string) (bool, error) {
 		if c == nil {
 			return false, nil
