@@ -7,12 +7,19 @@ import (
 
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
+	"github.com/badilhq/badil/internal/preview"
 )
 
 // Store is the gitops store the lifecycle APIs of an App are built over.
 type Store interface {
 	lifecycle.ReconcileStore
 	lifecycle.SyncStore
+	// ListPreviewFiles lists the slugs of the previews whose values.yaml is
+	// in the gitops repo, sorted.
+	ListPreviewFiles(ctx context.Context) ([]string, error)
+	// GetPreview reads previews/<slug>/values.yaml, store.ErrNotFound when
+	// it does not exist.
+	GetPreview(ctx context.Context, slug string) (*preview.Values, string, error)
 }
 
 // Metrics records the outcomes of the lifecycle operations an App runs.
@@ -59,11 +66,15 @@ type Config struct {
 	// JobTimeout caps each background job, counted from when it holds the
 	// job queue. 0 is ReconcileTimeout.
 	JobTimeout time.Duration
+	// Status holds the status the renderer reports. Nil means no status is
+	// known.
+	Status StatusRepository
 }
 
 // App is badil's application services: the background job queue that runs
 // reconciles, the latest reconcile outcome of each PR, the wake signal of the
-// waits and the lifecycle APIs, built by New.
+// waits, the lifecycle APIs, the read model of the previews and the evaluation
+// of the waits, built by New.
 type App struct {
 	store   Store
 	forge   forge.Forge
@@ -85,6 +96,8 @@ type App struct {
 	jobs sync.Mutex
 	// jobTimeout caps each background job, counted from when it holds jobs.
 	jobTimeout time.Duration
+	// status holds the status the renderer reports, nil when none is known.
+	status StatusRepository
 }
 
 // New returns the App cfg configures.
@@ -98,6 +111,7 @@ func New(cfg Config) *App {
 		outcomes:   newOutcomes(),
 		wake:       cfg.Wake,
 		jobTimeout: cfg.JobTimeout,
+		status:     cfg.Status,
 	}
 	if a.metrics == nil {
 		a.metrics = nopMetrics{}
