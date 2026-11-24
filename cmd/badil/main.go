@@ -131,7 +131,7 @@ func serveCmd() *cobra.Command {
 			a := app.New(app.Config{
 				Store: st, Forge: f, Metrics: m, Namespaces: namespaces, Wake: wake, Status: previewStatus,
 			})
-			srv := server.NewServer(a, f, f, st, cfg.DeployToken,
+			srv := server.NewServer(a, f, f, cfg.DeployToken,
 				server.WithMetrics(m),
 				server.WithStatusToken(cfg.StatusToken),
 				server.WithReadToken(cfg.ReadToken), server.WithPreviewTTL(ttl))

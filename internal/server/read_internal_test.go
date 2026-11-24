@@ -210,7 +210,7 @@ func TestReadAPI_Auth(t *testing.T) {
 			fg.open(t)
 			st := status.NewMemory()
 			a := app.New(app.Config{Store: fg, Forge: fg, Status: st})
-			s := NewServer(a, fg, nil, fg, tc.deploy, WithReadToken(tc.read))
+			s := NewServer(a, fg, nil, tc.deploy, WithReadToken(tc.read))
 			s.waitTimeout = time.Millisecond
 			for _, path := range getRoutes {
 				if rec := send(s, http.MethodGet, path, "{}", "Bearer "+testReadToken); rec.Code != tc.allGetsStatus {

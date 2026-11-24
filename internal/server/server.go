@@ -11,12 +11,7 @@ import (
 
 	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/forge"
-	"github.com/badilhq/badil/internal/lifecycle"
 )
-
-// syncTimeout caps each config sync run (a push to the gitops default branch,
-// or POST /v1/sync), counted from when the run holds the syncer's guard.
-const syncTimeout = 10 * time.Minute
 
 // Recorder records the webhook deliveries the server answers.
 // *metrics.Metrics implements it.
@@ -68,13 +63,13 @@ func WithPreviewTTL(ttl time.Duration) Option {
 }
 
 type Server struct {
-	// app runs the reconciles, holds their outcomes and the wake of the
-	// waits, and builds the lifecycle APIs.
+	// app runs the reconciles, the deploys, the config syncs and the
+	// status intake, and holds the reconcile outcomes and the wake of the
+	// waits.
 	app   *app.App
 	forge forge.Forge
 	// webhooks verifies and parses the deliveries of /webhooks/github.
 	webhooks    forge.WebhookParser
-	store       storeAPI
 	metrics     Recorder
 	deployToken string
 	// statusToken authenticates POST /webhooks/status, "" when it is
@@ -91,19 +86,15 @@ type Server struct {
 	shutdown     chan struct{}
 	shutdownOnce sync.Once
 	router       chi.Router
-	// syncer runs the config syncs, one at a time.
-	syncer *lifecycle.Syncer
 }
 
 // NewServer returns the server of the webhooks webhooks parses, over the
-// application services a (non-nil), the forge f and the gitops repo st,
-// configured by opts. The deploy API is served only when deployToken is set,
+// application services a (non-nil) and the forge f, configured by opts. The deploy API is served only when deployToken is set,
 // and the read API when deployToken or the read token is.
 func NewServer(
 	a *app.App,
 	f forge.Forge,
 	webhooks forge.WebhookParser,
-	st storeAPI,
 	deployToken string,
 	opts ...Option,
 ) *Server {
@@ -111,7 +102,6 @@ func NewServer(
 		app:         a,
 		forge:       f,
 		webhooks:    webhooks,
-		store:       st,
 		metrics:     nopRecorder{},
 		deployToken: deployToken,
 		waitTimeout: waitTimeout,
@@ -120,7 +110,6 @@ func NewServer(
 	for _, opt := range opts {
 		opt(s)
 	}
-	s.syncer = lifecycle.NewSyncer(a.SyncAPI(), syncTimeout)
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)

@@ -45,7 +45,7 @@ func TestDeploy_NamespaceRefusals(t *testing.T) {
 			fg := &fakeGitops{catalog: []string{"backend-1"}}
 			fg.open(t)
 			a := app.New(app.Config{Store: fg, Forge: fg, FanOut: fakeFanOut(fg), Namespaces: tc.c})
-			srv := NewServer(a, fg, nil, fg, "test-token")
+			srv := NewServer(a, fg, nil, "test-token")
 			rec := postDeploy(t, srv, previewBody(), "test-token")
 
 			if rec.Code != tc.status {

@@ -20,6 +20,9 @@ type Store interface {
 	// GetPreview reads previews/<slug>/values.yaml, store.ErrNotFound when
 	// it does not exist.
 	GetPreview(ctx context.Context, slug string) (*preview.Values, string, error)
+	FullName() string
+	// Invalidate makes the next read check the gitops remote at once.
+	Invalidate()
 }
 
 // Metrics records the outcomes of the lifecycle operations an App runs, the
@@ -110,6 +113,8 @@ type App struct {
 	jobTimeout time.Duration
 	// status holds the status the renderer reports, nil when none is known.
 	status StatusRepository
+	// syncer runs the config syncs, one at a time.
+	syncer *lifecycle.Syncer
 }
 
 // New returns the App cfg configures.
@@ -137,6 +142,7 @@ func New(cfg Config) *App {
 	if a.jobTimeout == 0 {
 		a.jobTimeout = ReconcileTimeout
 	}
+	a.syncer = lifecycle.NewSyncer(a.SyncAPI(), SyncTimeout)
 	return a
 }
 

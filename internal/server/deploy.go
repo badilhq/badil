@@ -11,7 +11,6 @@ import (
 
 	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/lifecycle"
-	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
 )
 
@@ -20,23 +19,6 @@ import (
 // up to a few round-trips; 30s is generous without letting a stuck request
 // pin a goroutine forever.
 const deployTimeout = 30 * time.Second
-
-// storeAPI is the subset of store.GitHubStore used by the deploy, reconcile,
-// teardown, sync, push and read handlers. Defined here so tests can inject
-// fakes.
-type storeAPI interface {
-	lifecycle.ReconcileStore
-	lifecycle.SyncStore
-	FullName() string
-	// ListPreviewFiles lists the slugs of the previews whose values.yaml is
-	// in the gitops repo, sorted.
-	ListPreviewFiles(ctx context.Context) ([]string, error)
-	// GetPreview reads previews/<slug>/values.yaml, store.ErrNotFound when
-	// it does not exist.
-	GetPreview(ctx context.Context, slug string) (*preview.Values, string, error)
-	// Invalidate makes the next read check the gitops remote at once.
-	Invalidate()
-}
 
 // DeployRequest is the body of POST /v1/deploy. All fields are required; the
 // server stamps timestamp from time.Now() so retries don't drift.

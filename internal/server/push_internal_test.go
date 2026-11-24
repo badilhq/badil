@@ -63,7 +63,7 @@ func newPushServer(t *testing.T, fg *fakeGitops) (*Server, *metrics.Metrics, *Lo
 	fg.open(t)
 	pf := &pushForge{}
 	a := app.New(app.Config{Store: fg, Forge: pf, Metrics: m, FanOut: fakeFanOut(fg)})
-	return NewServer(a, pf, pf, fg, "t", WithMetrics(m)), m, capture
+	return NewServer(a, pf, pf, "t", WithMetrics(m)), m, capture
 }
 
 // pushPayload is a push of ref to repo, whose default branch is main.
@@ -202,8 +202,8 @@ func TestPush_BoundedBySyncTimeout(t *testing.T) {
 	fg := syncFake()
 	s, _, _ := newPushServer(t, fg)
 	pushAndWait(t, s, pushPayload("acme/gitops", "refs/heads/main", false))
-	if left := time.Until(fg.catalogDeadline); left < syncTimeout-time.Minute || left > syncTimeout {
-		t.Errorf("sync deadline in %v, want the %v syncTimeout bound", left, syncTimeout)
+	if left := time.Until(fg.catalogDeadline); left < app.SyncTimeout-time.Minute || left > app.SyncTimeout {
+		t.Errorf("sync deadline in %v, want the %v app.SyncTimeout bound", left, app.SyncTimeout)
 	}
 }
 
