@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/forge"
-	"github.com/badilhq/badil/internal/store"
 )
 
 // Config sync triggers, the trigger attribute of the config sync logs.
@@ -28,7 +28,7 @@ var (
 // SyncStore is the subset of store.GitHubStore used by Syncer.
 type SyncStore interface {
 	Applier
-	FetchServiceCatalogSHA(ctx context.Context) (*store.ServiceCatalog, string, error)
+	FetchServiceCatalogSHA(ctx context.Context) (*catalog.Catalog, string, error)
 }
 
 // SyncAPI is what Syncer uses: the store, the forge, the Recorder and the
@@ -48,7 +48,7 @@ type SyncReport struct {
 	Failed    []string
 }
 
-// Syncer runs the sweep's sync step (store.Tree.Sync) over every preview, or
+// Syncer runs the sweep's sync step (Tree.Sync) over every preview, or
 // one, outside the sweep, as one sync operation. One guarded run happens at a time in the process: a
 // push run (Push) or an API run (Sync), each waiting for the guard in turn.
 // Waiters acquire the guard in no particular order. Each run is capped at
@@ -185,8 +185,8 @@ func finish(ctx context.Context, trigger string, report SyncReport, err error) {
 
 // syncAll syncs every preview with catalog in one sync operation, and
 // returns the operation's error.
-func (s *Syncer) syncAll(ctx context.Context, catalog *store.ServiceCatalog) (SyncReport, error) {
-	report, _, err := s.sync(ctx, catalog, func(tree *store.Tree) ([]string, error) {
+func (s *Syncer) syncAll(ctx context.Context, catalog *catalog.Catalog) (SyncReport, error) {
+	report, _, err := s.sync(ctx, catalog, func(tree Tree) ([]string, error) {
 		return tree.ListPreviews()
 	})
 	return report, err
@@ -194,8 +194,8 @@ func (s *Syncer) syncAll(ctx context.Context, catalog *store.ServiceCatalog) (Sy
 
 // syncOne syncs the preview slug with catalog. It reports false, syncing
 // nothing, when the file of slug does not exist.
-func (s *Syncer) syncOne(ctx context.Context, catalog *store.ServiceCatalog, slug string) (SyncReport, bool, error) {
-	return s.sync(ctx, catalog, func(*store.Tree) ([]string, error) {
+func (s *Syncer) syncOne(ctx context.Context, catalog *catalog.Catalog, slug string) (SyncReport, bool, error) {
+	return s.sync(ctx, catalog, func(Tree) ([]string, error) {
 		return []string{slug}, nil
 	})
 }
@@ -204,7 +204,7 @@ func (s *Syncer) syncOne(ctx context.Context, catalog *store.ServiceCatalog, slu
 // or its error.
 type previewSync struct {
 	slug   string
-	result *store.SyncResult
+	result *SyncResult
 	err    error
 }
 
@@ -214,16 +214,16 @@ type previewSync struct {
 // host (afterSync). A preview that can't be synced is logged and reported as
 // failed. It reports false when none of the previews has a file.
 func (s *Syncer) sync(
-	ctx context.Context, catalog *store.ServiceCatalog, slugs func(*store.Tree) ([]string, error),
+	ctx context.Context, catalog *catalog.Catalog, slugs func(Tree) ([]string, error),
 ) (SyncReport, bool, error) {
 	var syncs []previewSync
-	res, err := s.api.Store.Apply(ctx, store.Op{
-		Kind: store.OpSync,
-		Change: func(tree *store.Tree) (store.Summary, error) {
+	res, err := s.api.Store.Apply(ctx, Op{
+		Kind: OpSync,
+		Change: func(tree Tree) (Summary, error) {
 			syncs = nil
 			names, err := slugs(tree)
 			if err != nil {
-				return store.Summary{}, err
+				return Summary{}, err
 			}
 			var changed []string
 			for _, slug := range names {
@@ -262,11 +262,11 @@ func (s *Syncer) sync(
 
 // syncSummary returns the commit subject of a sync that rewrote the
 // previews changed.
-func syncSummary(changed []string) store.Summary {
+func syncSummary(changed []string) Summary {
 	if len(changed) == 1 {
-		return store.Summary{Subject: fmt.Sprintf("chore(preview): sync %s with badil.yaml", changed[0])}
+		return Summary{Subject: fmt.Sprintf("chore(preview): sync %s with badil.yaml", changed[0])}
 	}
-	return store.Summary{Subject: fmt.Sprintf("chore(preview): sync %d previews with badil.yaml", len(changed))}
+	return Summary{Subject: fmt.Sprintf("chore(preview): sync %d previews with badil.yaml", len(changed))}
 }
 
 // previewSyncFailed logs a preview a run failed to sync.

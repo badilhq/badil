@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/server"
 	"github.com/badilhq/badil/internal/status"
@@ -134,7 +135,7 @@ func TestServe_AppliedWakesWaits(t *testing.T) {
 
 	if _, err := sv.st.Apply(
 		context.Background(),
-		store.Op{Kind: store.OpSweep, Change: func(tree *store.Tree) (store.Summary, error) {
+		store.Op{Kind: store.OpSweep, Change: func(tree lifecycle.Tree) (store.Summary, error) {
 			tree.DeletePreview("feature-x")
 			return store.Summary{Subject: "chore(preview): sweep"}, nil
 		}},

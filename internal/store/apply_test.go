@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-git/go-git/v5/plumbing/transport"
 
+	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
@@ -31,8 +32,8 @@ var applyFiles = map[string]string{ //nolint:gochecknoglobals // test fixture
 
 // rename returns a Change that renames the only service of the preview slug
 // to name, recorded as a sync, with subject.
-func rename(slug, name, subject string) func(*store.Tree) (store.Summary, error) {
-	return func(tree *store.Tree) (store.Summary, error) {
+func rename(slug, name, subject string) func(lifecycle.Tree) (store.Summary, error) {
+	return func(tree lifecycle.Tree) (store.Summary, error) {
 		vals, err := tree.GetPreview(slug)
 		if err != nil {
 			return store.Summary{}, err
@@ -54,7 +55,7 @@ func TestApply_OneCommitOnFetchedHead(t *testing.T) {
 	parent := f.remote.Head()
 
 	runs := 0
-	out, err := apply(c, store.OpSweep, func(tree *store.Tree) (store.Summary, error) {
+	out, err := apply(c, store.OpSweep, func(tree lifecycle.Tree) (store.Summary, error) {
 		runs++
 		vals, getErr := tree.GetPreview("b")
 		if getErr != nil || vals.Services[0].Name != "b2" {
@@ -121,7 +122,7 @@ func TestApply_ConflictRerunsOnNewTree(t *testing.T) {
 	c := f.open(t, store.WithMetrics(m))
 
 	var seen []string
-	out, err := apply(c, store.OpDeploy, func(tree *store.Tree) (store.Summary, error) {
+	out, err := apply(c, store.OpDeploy, func(tree lifecycle.Tree) (store.Summary, error) {
 		vals, getErr := tree.GetPreview("b")
 		if getErr != nil {
 			return store.Summary{}, getErr
@@ -184,7 +185,7 @@ func TestApply_PushFailureNotRetried(t *testing.T) {
 	})
 
 	runs := 0
-	_, err := apply(c, store.OpSync, func(tree *store.Tree) (store.Summary, error) {
+	_, err := apply(c, store.OpSync, func(tree lifecycle.Tree) (store.Summary, error) {
 		runs++
 		return rename("a", "x", "rename a")(tree)
 	})
@@ -215,7 +216,7 @@ func TestApply_ConflictsExhausted(t *testing.T) {
 	})
 
 	runs := 0
-	_, err := apply(c, store.OpTeardown, func(tree *store.Tree) (store.Summary, error) {
+	_, err := apply(c, store.OpTeardown, func(tree lifecycle.Tree) (store.Summary, error) {
 		runs++
 		return rename("a", "x", "rename a")(tree)
 	})
@@ -264,9 +265,9 @@ func TestBackoff(t *testing.T) {
 func TestApply_NoOp(t *testing.T) {
 	cases := []struct {
 		name   string
-		change func(*store.Tree) (store.Summary, error)
+		change func(lifecycle.Tree) (store.Summary, error)
 	}{
-		{name: "nothing staged", change: func(*store.Tree) (store.Summary, error) {
+		{name: "nothing staged", change: func(lifecycle.Tree) (store.Summary, error) {
 			return store.Summary{Subject: "nothing"}, nil
 		}},
 		{name: "same content", change: rename("a", "a", "same")},
@@ -298,7 +299,7 @@ func TestApply_ChangeErrorCommitsNothing(t *testing.T) {
 	c := f.open(t)
 	head := f.remote.Head()
 	boom := errors.New("boom")
-	_, err := apply(c, store.OpDeploy, func(tree *store.Tree) (store.Summary, error) {
+	_, err := apply(c, store.OpDeploy, func(tree lifecycle.Tree) (store.Summary, error) {
 		_, _ = rename("a", "x", "rename")(tree)
 		return store.Summary{}, boom
 	})
@@ -324,7 +325,7 @@ func TestApply_PushUnauthorized(t *testing.T) {
 	c := openStore(t, srv.URL+"/acme/gitops.git", store.WithMetrics(m))
 
 	runs := 0
-	_, err := apply(c, store.OpDeploy, func(tree *store.Tree) (store.Summary, error) {
+	_, err := apply(c, store.OpDeploy, func(tree lifecycle.Tree) (store.Summary, error) {
 		runs++
 		return rename("a", "x", "rename a")(tree)
 	})
@@ -412,7 +413,7 @@ func TestApply_WaitBoundedByContext(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
 	first := make(chan error, 1)
 	go func() {
-		_, err := apply(c, store.OpSweep, func(tree *store.Tree) (store.Summary, error) {
+		_, err := apply(c, store.OpSweep, func(tree lifecycle.Tree) (store.Summary, error) {
 			close(started)
 			<-release
 			return rename("a", "renamed-a", "rename a")(tree)
@@ -424,7 +425,7 @@ func TestApply_WaitBoundedByContext(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	ran := false
-	_, err := c.Apply(ctx, store.Op{Kind: store.OpDeploy, Change: func(*store.Tree) (store.Summary, error) {
+	_, err := c.Apply(ctx, store.Op{Kind: store.OpDeploy, Change: func(lifecycle.Tree) (store.Summary, error) {
 		ran = true
 		return store.Summary{}, nil
 	}})

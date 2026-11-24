@@ -14,15 +14,21 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
+
+	"github.com/badilhq/badil/internal/lifecycle"
 )
 
-// Operation kinds, the op label of an Apply's duration and push conflicts.
-const (
-	OpDeploy   = "deploy"
-	OpTeardown = "teardown"
-	OpSweep    = "sweep"
-	OpSync     = "sync"
-)
+// OpDeploy is lifecycle.OpDeploy.
+const OpDeploy = lifecycle.OpDeploy
+
+// OpTeardown is lifecycle.OpTeardown.
+const OpTeardown = lifecycle.OpTeardown
+
+// OpSweep is lifecycle.OpSweep.
+const OpSweep = lifecycle.OpSweep
+
+// OpSync is lifecycle.OpSync.
+const OpSync = lifecycle.OpSync
 
 // maxAttempts is how many times Apply runs an operation and pushes it before
 // it gives up on conflicts.
@@ -41,34 +47,14 @@ type CommitIdentity struct {
 	Name, Email string
 }
 
-// Summary describes the change an operation made: the subject of its commit.
-type Summary struct {
-	Subject string
-}
+// Summary is lifecycle.Summary.
+type Summary = lifecycle.Summary
 
-// Op is one write to the gitops repo. Kind is OpDeploy, OpTeardown, OpSweep
-// or OpSync. Change reads the tree of the remote head and puts or deletes its
-// files through it; it may run several times, once per attempt, so it reads
-// nothing but tree and has no other side effect. An error from Change fails
-// the operation with nothing committed.
-type Op struct {
-	Kind   string
-	Change func(tree *Tree) (Summary, error)
-}
+// Op is lifecycle.Op.
+type Op = lifecycle.Op
 
-// Result is the outcome of a successful Apply. NoOp is true when the last
-// attempt's Change changed nothing: nothing was committed, and Commit is the
-// remote head it ran on. Otherwise Commit is the pushed commit. Subject is
-// Commit's subject line, URL its GitHub URL. Deleted holds the sorted slugs
-// of the previews whose previews/<slug>/values.yaml the pushed commit
-// deleted, empty when none.
-type Result struct {
-	NoOp    bool
-	Commit  string
-	Subject string
-	URL     string
-	Deleted []string
-}
+// Result is lifecycle.Result.
+type Result = lifecycle.Result
 
 // Apply runs op on the gitops repo as one commit. Operations are serialised
 // in the process. Each attempt fetches the default branch, runs op.Change on

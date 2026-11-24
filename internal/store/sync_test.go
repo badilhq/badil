@@ -4,6 +4,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
 )
@@ -151,7 +152,7 @@ func TestSync(t *testing.T) {
 			}
 
 			var result *store.SyncResult
-			out, err := apply(c, store.OpSync, func(tree *store.Tree) (store.Summary, error) {
+			out, err := apply(c, store.OpSync, func(tree lifecycle.Tree) (store.Summary, error) {
 				var syncErr error
 				result, syncErr = tree.Sync("slug", catalog)
 				return store.Summary{Subject: "sync"}, syncErr

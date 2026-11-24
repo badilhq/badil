@@ -5,6 +5,7 @@ import (
 	"maps"
 	"testing"
 
+	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/store"
 )
@@ -18,11 +19,11 @@ func TestClientMetrics_TimesApplyByKind(t *testing.T) {
 	// The clone made when the store opened is timed too.
 	want := map[string]uint64{"clone/ok": 1}
 
-	fail := func(*store.Tree) (store.Summary, error) { return store.Summary{}, errors.New("boom") }
-	noop := func(*store.Tree) (store.Summary, error) { return store.Summary{Subject: "noop"}, nil }
+	fail := func(lifecycle.Tree) (store.Summary, error) { return store.Summary{}, errors.New("boom") }
+	noop := func(lifecycle.Tree) (store.Summary, error) { return store.Summary{Subject: "noop"}, nil }
 	for _, op := range []struct {
 		kind   string
-		change func(*store.Tree) (store.Summary, error)
+		change func(lifecycle.Tree) (store.Summary, error)
 	}{
 		{store.OpDeploy, rename("a", "deployed", "deploy")},
 		{store.OpTeardown, fail},

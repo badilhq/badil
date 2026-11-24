@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/status"
@@ -397,7 +398,7 @@ func TestStatusEvent_PreviewDeletedWhileRecording(t *testing.T) {
 				t.Helper()
 				res, err := fg.st.Apply(t.Context(), store.Op{
 					Kind: store.OpTeardown,
-					Change: func(tree *store.Tree) (store.Summary, error) {
+					Change: func(tree lifecycle.Tree) (store.Summary, error) {
 						tree.DeletePreview("feature-x")
 						return store.Summary{Subject: "teardown feature-x"}, nil
 					},

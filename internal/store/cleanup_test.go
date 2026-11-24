@@ -7,6 +7,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/store"
 )
 
@@ -72,7 +73,7 @@ func TestTree_DeletePreview(t *testing.T) {
 	})
 	c := f.open(t)
 	var listed []string
-	_, err := apply(c, store.OpSweep, func(tree *store.Tree) (store.Summary, error) {
+	_, err := apply(c, store.OpSweep, func(tree lifecycle.Tree) (store.Summary, error) {
 		for _, slug := range []string{"feature-x", "other", "single"} {
 			tree.DeletePreview(slug)
 		}

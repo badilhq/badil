@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/store"
 	"github.com/badilhq/badil/internal/store/storetest"
@@ -305,7 +306,7 @@ func TestFreshness_ApplyReadsBackAtOnce(t *testing.T) {
 	clock := &fakeClock{t: time.Now()}
 	store.SetNow(st, clock.now)
 
-	_, err := apply(st, store.OpDeploy, func(tree *store.Tree) (store.Summary, error) {
+	_, err := apply(st, store.OpDeploy, func(tree lifecycle.Tree) (store.Summary, error) {
 		vals, getErr := tree.GetPreview("a")
 		if getErr != nil {
 			return store.Summary{}, getErr
@@ -496,7 +497,7 @@ func TestCredentials_BasicAuth(t *testing.T) {
 			}
 			_, err = st.Apply(context.Background(), store.Op{
 				Kind: store.OpDeploy,
-				Change: func(tree *store.Tree) (store.Summary, error) {
+				Change: func(tree lifecycle.Tree) (store.Summary, error) {
 					tree.DeletePreview("a")
 					return store.Summary{Subject: "chore(preview): delete a"}, nil
 				},
