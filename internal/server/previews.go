@@ -9,54 +9,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/badilhq/badil/internal/api"
 	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/preview"
 )
-
-// PreviewList is the body of GET /v1/previews.
-type PreviewList struct {
-	Previews []PreviewJSON `json:"previews"`
-}
-
-// PreviewJSON is a preview in the read API: its file in the gitops clone and
-// its status in memory. CreatedAt and UpdatedAt are the oldest created-at and
-// the newest updated-at of its pinned entries, and ExpiresAt is UpdatedAt
-// plus the in-server sweep's TTL; each is omitted when unknown.
-type PreviewJSON struct {
-	Slug      string             `json:"slug"`
-	CreatedAt string             `json:"createdAt,omitempty"`
-	UpdatedAt string             `json:"updatedAt,omitempty"`
-	ExpiresAt string             `json:"expiresAt,omitempty"`
-	Services  []PreviewEntryJSON `json:"services"`
-}
-
-// PreviewEntryJSON is a service or dependency entry of a preview.
-type PreviewEntryJSON struct {
-	Name     string      `json:"name"`
-	Kind     string      `json:"kind"`
-	Pinned   *PinnedJSON `json:"pinned,omitempty"`
-	Branch   string      `json:"branch,omitempty"`
-	URL      string      `json:"url,omitempty"`
-	Status   string      `json:"status"`
-	Revision string      `json:"revision,omitempty"`
-	StatusAt string      `json:"statusAt,omitempty"`
-}
-
-// PinnedJSON is the pin of a pinned entry: its commit and the PR that pinned
-// it.
-type PinnedJSON struct {
-	SHA    string `json:"sha"`
-	PR     PRJSON `json:"pr"`
-	Author string `json:"author"`
-}
-
-// PRJSON is a pull request: owner/repo, number and URL, from the pr-url of
-// the entry.
-type PRJSON struct {
-	Repo   string `json:"repo"`
-	Number int    `json:"number"`
-	URL    string `json:"url"`
-}
 
 // readFailed logs a failed read of the gitops clone on route and answers 503
 // with its error. When ctx is done the client has gone and the read failed
@@ -78,7 +34,7 @@ func (s *Server) handleListPreviews(w http.ResponseWriter, r *http.Request) {
 		readFailed(ctx, w, routePattern(r), err)
 		return
 	}
-	out := PreviewList{Previews: make([]PreviewJSON, 0, len(views))}
+	out := api.PreviewList{Previews: make([]api.PreviewJSON, 0, len(views))}
 	for _, v := range views {
 		out.Previews = append(out.Previews, s.previewJSON(v))
 	}
@@ -105,11 +61,11 @@ func routePattern(r *http.Request) string {
 }
 
 // previewJSON returns the read API view of v, with its status from memory.
-func (s *Server) previewJSON(v app.PreviewView) PreviewJSON {
+func (s *Server) previewJSON(v app.PreviewView) api.PreviewJSON {
 	statuses := s.app.PreviewStatus(v.Slug)
-	out := PreviewJSON{
+	out := api.PreviewJSON{
 		Slug:     v.Slug,
-		Services: make([]PreviewEntryJSON, 0, len(v.Values.Services)+len(v.Values.Dependencies)),
+		Services: make([]api.PreviewEntryJSON, 0, len(v.Values.Services)+len(v.Values.Dependencies)),
 	}
 	if created, ok := preview.FirstCreated(*v.Values); ok {
 		out.CreatedAt = created.UTC().Format(time.RFC3339)
@@ -121,7 +77,7 @@ func (s *Server) previewJSON(v app.PreviewView) PreviewJSON {
 		}
 	}
 	for _, e := range v.Entries() {
-		j := PreviewEntryJSON{Name: e.Name, Kind: e.Kind, Branch: e.Branch, URL: e.URL, Status: app.StatusUnknown}
+		j := api.PreviewEntryJSON{Name: e.Name, Kind: e.Kind, Branch: e.Branch, URL: e.URL, Status: app.StatusUnknown}
 		if e.Pinned() {
 			j.Pinned = pinnedJSON(s.forge.ParsePRURL, e.Service)
 		}
@@ -135,8 +91,8 @@ func (s *Server) previewJSON(v app.PreviewView) PreviewJSON {
 
 // pinnedJSON returns the pin of the pinned entry svc, its PR's repo and number
 // parsed from its pr-url with parse.
-func pinnedJSON(parse preview.PRURLParser, svc *preview.ServiceEntry) *PinnedJSON {
-	p := &PinnedJSON{SHA: svc.CommitSha}
+func pinnedJSON(parse preview.PRURLParser, svc *preview.ServiceEntry) *api.PinnedJSON {
+	p := &api.PinnedJSON{SHA: svc.CommitSha}
 	if svc.Metadata == nil {
 		return p
 	}

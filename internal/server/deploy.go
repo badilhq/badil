@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/badilhq/badil/internal/api"
 	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/store"
@@ -20,33 +21,9 @@ import (
 // pin a goroutine forever.
 const deployTimeout = 30 * time.Second
 
-// DeployRequest is the body of POST /v1/deploy. All fields are required; the
-// server stamps timestamp from time.Now() so retries don't drift.
-type DeployRequest struct {
-	Service        string `json:"service"`
-	HeadRef        string `json:"head_ref"`
-	CommitSha      string `json:"commit_sha"`
-	PRAuthor       string `json:"pr_author"`
-	PRURL          string `json:"pr_url"`
-	PRNumber       string `json:"pr_number"`
-	WorkflowRunURL string `json:"workflow_run_url"`
-}
-
-// DeployResponse is the success body. Warnings is populated when the values
-// write succeeded but the comment fan-out had partial failures.
-type DeployResponse struct {
-	PreviewSlug     string   `json:"preview_slug"`
-	GitOpsCommitURL string   `json:"gitops_commit_url"`
-	Warnings        []string `json:"warnings,omitempty"`
-}
-
-// ErrorResponse is the failure body for every non-2xx response.
-type ErrorResponse struct {
-	Error string `json:"error"`
-}
-
-// validate returns the first missing field's JSON tag, or "" if all are set.
-func (r DeployRequest) validate() string {
+// validateDeployRequest returns the first missing field's JSON tag, or "" if
+// all are set.
+func validateDeployRequest(r api.DeployRequest) string {
 	switch {
 	case r.Service == "":
 		return "service"
@@ -70,14 +47,14 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), deployTimeout)
 	defer cancel()
 
-	var req DeployRequest
+	var req api.DeployRequest
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
 		writeJSONError(ctx, w, http.StatusBadRequest, fmt.Sprintf("invalid body: %v", err))
 		return
 	}
-	if missing := req.validate(); missing != "" {
+	if missing := validateDeployRequest(req); missing != "" {
 		writeJSONError(ctx, w, http.StatusBadRequest, fmt.Sprintf("missing required field: %s", missing))
 		return
 	}
@@ -130,7 +107,7 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := DeployResponse{PreviewSlug: slug, GitOpsCommitURL: out.Deployed.Commit.URL}
+	resp := api.DeployResponse{PreviewSlug: slug, GitOpsCommitURL: out.Deployed.Commit.URL}
 	if out.FanOutErr != nil {
 		logger.WarnContext(ctx, "comment fan-out had failures", slog.String("err", out.FanOutErr.Error()))
 		resp.Warnings = splitJoinedErr(out.FanOutErr)
@@ -171,7 +148,7 @@ func writeUpstreamError(ctx context.Context, logger *slog.Logger, w http.Respons
 }
 
 func writeJSONError(ctx context.Context, w http.ResponseWriter, status int, msg string) {
-	writeJSON(ctx, w, status, ErrorResponse{Error: msg})
+	writeJSON(ctx, w, status, api.ErrorResponse{Error: msg})
 }
 
 func writeJSON(ctx context.Context, w http.ResponseWriter, status int, body any) {

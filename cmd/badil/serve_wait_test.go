@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/badilhq/badil/internal/api"
 	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
@@ -74,7 +75,7 @@ func startWaitRequest(base, path string) <-chan waitAnswer {
 			return
 		}
 		defer resp.Body.Close()
-		var body server.WaitResponse
+		var body api.WaitResponse
 		err = json.NewDecoder(resp.Body).Decode(&body)
 		out <- waitAnswer{code: resp.StatusCode, state: body.State, err: err}
 	}()

@@ -8,31 +8,18 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/badilhq/badil/internal/api"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
 )
-
-// SyncRequest is the optional body of POST /v1/sync. Without a slug, every
-// preview is synced.
-type SyncRequest struct {
-	Slug *string `json:"slug"`
-}
-
-// SyncResponse is the success body of POST /v1/sync: the slugs rewritten, the
-// number of previews left unchanged and the slugs that failed.
-type SyncResponse struct {
-	Synced    []string `json:"synced"`
-	Unchanged int      `json:"unchanged"`
-	Failed    []string `json:"failed"`
-}
 
 // handleSync syncs every preview, or the one the body names, with badil.yaml,
 // waiting for the config sync guard, and answers with what it rewrote. A slug
 // that is empty or not its own Slugify form is refused before any gitops read.
 func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	var req SyncRequest
+	var req api.SyncRequest
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
@@ -68,7 +55,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(ctx, w, status, msg)
 		return
 	}
-	resp := SyncResponse{Synced: report.Synced, Unchanged: report.Unchanged, Failed: report.Failed}
+	resp := api.SyncResponse{Synced: report.Synced, Unchanged: report.Unchanged, Failed: report.Failed}
 	if resp.Synced == nil {
 		resp.Synced = []string{}
 	}

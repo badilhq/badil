@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/badilhq/badil/internal/api"
 	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/preview"
 )
@@ -18,19 +19,8 @@ const (
 	maxStatusEventBytes = 64 << 10
 )
 
-// statusEvent is the body of POST /webhooks/status: the status a renderer
-// reports for one service of a preview, at a revision.
-type statusEvent struct {
-	APIVersion string `json:"apiVersion"`
-	Preview    string `json:"preview"`
-	Service    string `json:"service"`
-	Revision   string `json:"revision"`
-	Status     string `json:"status"`
-	At         string `json:"at"`
-}
-
-// parse validates e and returns its time.
-func (e statusEvent) parse() (time.Time, error) {
+// parseStatusEvent validates e and returns its time.
+func parseStatusEvent(e api.StatusEvent) (time.Time, error) {
 	switch {
 	case e.APIVersion != preview.APIVersion:
 		return time.Time{}, errors.New("apiVersion must be " + preview.APIVersion)
@@ -57,12 +47,12 @@ func (s *Server) handleStatusEvent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid payload", http.StatusBadRequest)
 		return
 	}
-	var e statusEvent
+	var e api.StatusEvent
 	if err = json.Unmarshal(body, &e); err != nil {
 		http.Error(w, "invalid payload", http.StatusBadRequest)
 		return
 	}
-	at, err := e.parse()
+	at, err := parseStatusEvent(e)
 	if err != nil {
 		http.Error(w, "invalid payload: "+err.Error(), http.StatusBadRequest)
 		return
