@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.29.0](https://github.com/badilhq/badil/compare/v0.28.0...v0.29.0) (2026-11-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* label preview objects with badil.dev/preview ([#136](https://github.com/badilhq/badil/issues/136))
+
+### Features
+
+* label preview objects with badil.dev/preview ([#136](https://github.com/badilhq/badil/issues/136)) ([3f3bb60](https://github.com/badilhq/badil/commit/3f3bb60ada4d31e708ecf5c124636f250ac1ce3c))
+
 ## [0.28.0](https://github.com/badilhq/badil/compare/v0.27.1...v0.28.0) (2026-11-23)
 
 
