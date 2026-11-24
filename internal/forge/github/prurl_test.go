@@ -1,26 +1,15 @@
-package preview_test
+package github_test
 
 import (
 	"testing"
 
-	forgegithub "github.com/badilhq/badil/internal/forge/github"
 	"github.com/badilhq/badil/internal/preview"
 )
-
-// githubForge returns the GitHub forge on webURL, for its URL rules only.
-func githubForge(t *testing.T, webURL string) *forgegithub.Forge {
-	t.Helper()
-	f, err := forgegithub.New(nil, nil, 0, webURL)
-	if err != nil {
-		t.Fatalf("forgegithub.New(%q): %v", webURL, err)
-	}
-	return f
-}
 
 // parsePR is the default GitHub pull request URL rule.
 func parsePR(t *testing.T) preview.PRURLParser {
 	t.Helper()
-	return githubForge(t, "https://github.com").ParsePRURL
+	return newURLForge(t, "https://github.com").ParsePRURL
 }
 
 func TestMatchesPR(t *testing.T) {
@@ -48,7 +37,7 @@ func TestMatchesPR(t *testing.T) {
 }
 
 func TestMatchesPR_CustomHost(t *testing.T) {
-	parse := githubForge(t, "http://gitea.local:3000").ParsePRURL
+	parse := newURLForge(t, "http://gitea.local:3000").ParsePRURL
 	if !preview.MatchesPR(parse, "http://gitea.local:3000/acme/front/pull/7", "acme", "front", 7) {
 		t.Error("MatchesPR on gitea.local = false for its own PR URL, want true")
 	}
