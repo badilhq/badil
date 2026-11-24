@@ -303,7 +303,7 @@ kubectl patch secret badil -n badil --type merge \
 kubectl rollout restart deployment/badil -n badil
 ```
 
-Then, where the job runs, with the CLI installed ([Install the badil CLI](#install-the-badil-cli)). A `BADIL_SERVER` reached through the chart's Ingress needs `ingress.api: true` ([Install badil](#6-install-badil)):
+A `BADIL_SERVER` reached through the chart's Ingress needs `ingress.api: true` ([Install badil](#6-install-badil)). Then, where the job runs, with the CLI installed ([Install the badil CLI](#install-the-badil-cli)):
 
 ```bash
 export BADIL_SERVER=https://badil.example.com BADIL_TOKEN="$BADIL_READ_TOKEN"

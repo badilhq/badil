@@ -214,7 +214,7 @@ badil wait --slug feature-pricing   # with BADIL_SERVER and BADIL_TOKEN set
 
 Reaching `/v1` through the chart's Ingress needs `ingress.api: true`.
 
-It asks the wait route again until a final state or `--timeout` (a Go duration, default `15m`), and prints one line per state change, then the final state with its reason and the URLs; with `--json`, only the final response body. Connection errors and 5xx answers are retried every 2s until the timeout. It exits:
+`badil wait` asks the wait route again until a final state or `--timeout` (a Go duration, default `15m`), and prints one line per state change, then the final state with its reason and the URLs; with `--json`, only the final response body. Connection errors and 5xx answers are retried every 2s until the timeout. It exits:
 
 | Code | When |
 |---|---|
