@@ -13,6 +13,7 @@ import (
 
 	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/forge"
+	"github.com/badilhq/badil/internal/forge/github/githubtest"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
@@ -37,7 +38,7 @@ import (
 // read back from the pushed file), the last preview a PR left (teardownSlug,
 // teardownOwner, teardownRepo, teardownNumber) and the previews synced.
 type fakeGitops struct {
-	storetest.GitHubURLs
+	githubtest.URLs
 
 	t          *testing.T
 	catalog    []string

@@ -17,10 +17,10 @@ import (
 
 	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/forge"
+	"github.com/badilhq/badil/internal/forge/github/githubtest"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
-	"github.com/badilhq/badil/internal/store/storetest"
 )
 
 var errUnexpected = errors.New("unexpected call")
@@ -33,7 +33,7 @@ var errUnexpected = errors.New("unexpected call")
 // front, on acme/front, whose open PRs are openPRs, or openErr. Run counts
 // the catch-ups of a sweep loop.
 type loopFake struct {
-	storetest.GitHubURLs
+	githubtest.URLs
 	*metrics.Metrics
 
 	slugs   []string

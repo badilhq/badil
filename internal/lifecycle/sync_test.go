@@ -11,10 +11,10 @@ import (
 
 	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/forge"
+	"github.com/badilhq/badil/internal/forge/github/githubtest"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
-	"github.com/badilhq/badil/internal/store/storetest"
 )
 
 // quiet is how long a test waits to conclude that nothing happens.
@@ -113,11 +113,11 @@ func (f *syncFake) Apply(ctx context.Context, op lifecycle.Op) (lifecycle.Result
 
 // api is the lifecycle.SyncAPI over f: its store and recorder, with a
 // fan-out that posts nothing. Its forge is only the default GitHub URL rules
-// (storetest.GitHubForge): it has no client.
+// (githubtest.Forge): it has no client.
 func (f *syncFake) api() lifecycle.SyncAPI {
 	return lifecycle.SyncAPI{
 		Store:    f,
-		Forge:    storetest.GitHubForge,
+		Forge:    githubtest.Forge,
 		Recorder: f,
 		FanOut: func(context.Context, forge.Forge, preview.Values, string) error {
 			return nil

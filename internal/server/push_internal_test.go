@@ -15,9 +15,9 @@ import (
 
 	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/forge"
+	"github.com/badilhq/badil/internal/forge/github/githubtest"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
-	"github.com/badilhq/badil/internal/store/storetest"
 )
 
 // errUnexpected is returned by the pushForge methods the push tests do not
@@ -28,7 +28,7 @@ var errUnexpected = errors.New("unexpected call")
 // returns event, which the test sets before each delivery, so the push tests
 // reach the handler without signing.
 type pushForge struct {
-	storetest.GitHubURLs
+	githubtest.URLs
 
 	event forge.Event
 }

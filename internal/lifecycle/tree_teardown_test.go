@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/badilhq/badil/internal/forge/github/githubtest"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
@@ -73,7 +74,7 @@ func (g *teardownGitHub) run(
 func runTeardown(t *testing.T, g *teardownGitHub) (*lifecycle.TeardownResult, error) {
 	t.Helper()
 	return g.run(t, func(tree lifecycle.Tree) (*lifecycle.TeardownResult, error) {
-		return lifecycle.TeardownPreview(tree, storetest.GitHubForge.ParsePRURL, "feature-x", "acme", "backend-1", 42)
+		return lifecycle.TeardownPreview(tree, githubtest.Forge.ParsePRURL, "feature-x", "acme", "backend-1", 42)
 	})
 }
 
@@ -296,7 +297,7 @@ dependencies:
 func TestTeardown_DropsPartsOnlyThePRNeeded(t *testing.T) {
 	g := &teardownGitHub{gets: []string{frontAndPayments}, badil: needsBadil}
 	result, err := g.run(t, func(tree lifecycle.Tree) (*lifecycle.TeardownResult, error) {
-		return lifecycle.TeardownPreview(tree, storetest.GitHubForge.ParsePRURL, "feature-x", "acme", "payments", 42)
+		return lifecycle.TeardownPreview(tree, githubtest.Forge.ParsePRURL, "feature-x", "acme", "payments", 42)
 	})
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -439,7 +440,7 @@ func runUnpin(t *testing.T, g *teardownGitHub, services ...string) (*lifecycle.T
 	return g.run(t, func(tree lifecycle.Tree) (*lifecycle.TeardownResult, error) {
 		return lifecycle.UnpinPreviewServices(
 			tree,
-			storetest.GitHubForge.ParsePRURL,
+			githubtest.Forge.ParsePRURL,
 			"feature-x",
 			"acme",
 			"backend-1",

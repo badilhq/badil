@@ -10,6 +10,7 @@ import (
 
 	"github.com/badilhq/badil/internal/api"
 	"github.com/badilhq/badil/internal/app"
+	"github.com/badilhq/badil/internal/forge/github/githubtest"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/server"
@@ -49,8 +50,8 @@ func serveWaits(t *testing.T) served {
 	wake := app.NewWake()
 	remote, st := storetest.Gitops(t, "services:\n  backend-1:\n    repo: https://github.com/acme/backend-1.git\n",
 		previews, nil, nil, statusHooks(previewStatus, wake)...)
-	a := app.New(app.Config{Store: st, Forge: storetest.GitHubForge, Wake: wake, Status: previewStatus})
-	srv := server.NewServer(a, storetest.GitHubForge, nil, "",
+	a := app.New(app.Config{Store: st, Forge: githubtest.Forge, Wake: wake, Status: previewStatus})
+	srv := server.NewServer(a, githubtest.Forge, nil, "",
 		server.WithReadToken(serveReadToken))
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

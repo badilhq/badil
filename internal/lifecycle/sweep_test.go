@@ -12,6 +12,7 @@ import (
 
 	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/forge"
+	"github.com/badilhq/badil/internal/forge/github/githubtest"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
@@ -50,7 +51,7 @@ type fanOut struct {
 // "owner/repo#n". Each push first runs beforePush when set, whose error fails
 // the push. Metrics records the outcomes; nil records nothing.
 type fakeAPI struct {
-	storetest.GitHubURLs
+	githubtest.URLs
 	*metrics.Metrics
 
 	noCatalog  bool

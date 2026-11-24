@@ -12,6 +12,7 @@ import (
 
 	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/forge"
+	"github.com/badilhq/badil/internal/forge/github/githubtest"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
@@ -42,7 +43,7 @@ const fetchedSHA = "fe7c4ed0000000000000000000000000000000ff"
 // whose error fails the push. calls logs, in order, "files", "apply",
 // "upsert" and "fanout". Metrics records the outcomes; nil records nothing.
 type reconcileFake struct {
-	storetest.GitHubURLs
+	githubtest.URLs
 	*metrics.Metrics
 
 	badil       string
