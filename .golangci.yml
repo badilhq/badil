@@ -108,6 +108,501 @@ linters:
           deny:
             - pkg: log$
               desc: Use log/slog instead
+        domain:
+          list-mode: strict
+          files:
+            - "**/internal/preview/*.go"
+            - "**/internal/catalog/*.go"
+            - "!$test"
+          allow:
+            - "$gostd"
+            - "github.com/bmatcuk/doublestar/v4"
+            - "github.com/invopop/jsonschema"
+            - "gopkg.in/yaml.v3"
+            - "github.com/badilhq/badil/internal/catalog$"
+            - "github.com/badilhq/badil/internal/preview$"
+        use cases:
+          list-mode: strict
+          files:
+            - "**/internal/forge/*.go"
+            - "**/internal/lifecycle/*.go"
+            - "**/internal/app/*.go"
+            - "!$test"
+          allow:
+            - "$gostd"
+            - "github.com/bmatcuk/doublestar/v4"
+            - "github.com/invopop/jsonschema"
+            - "gopkg.in/yaml.v3"
+            - "github.com/badilhq/badil/internal/catalog$"
+            - "github.com/badilhq/badil/internal/preview$"
+            - "github.com/badilhq/badil/internal/app$"
+            - "github.com/badilhq/badil/internal/forge$"
+            - "github.com/badilhq/badil/internal/lifecycle$"
+        store adapter:
+          list-mode: lax
+          files:
+            - "**/internal/store/*.go"
+            - "**/internal/store/**/*.go"
+            - "!$test"
+          deny:
+            - pkg: "github.com/badilhq/badil/internal/forge/github$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/forge/github/githubtest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/github$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/github/manifest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/namespace$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/status$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/status/kube$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/metrics$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/server$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/server/mocks$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/api$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/apiclient$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/config$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/chartvalues$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/fakegithub$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/archtest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+        forge github adapter:
+          list-mode: lax
+          files:
+            - "**/internal/forge/github/*.go"
+            - "**/internal/forge/github/**/*.go"
+            - "!$test"
+          deny:
+            - pkg: "github.com/badilhq/badil/internal/store$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/store/storetest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/github/manifest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/namespace$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/status$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/status/kube$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/metrics$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/server$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/server/mocks$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/api$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/apiclient$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/config$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/chartvalues$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/fakegithub$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/archtest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+        github adapter:
+          list-mode: lax
+          files:
+            - "**/internal/github/*.go"
+            - "!$test"
+          deny:
+            - pkg: "github.com/badilhq/badil/internal/store$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/store/storetest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/forge/github$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/forge/github/githubtest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/github/manifest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/namespace$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/status$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/status/kube$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/metrics$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/server$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/server/mocks$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/api$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/apiclient$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/config$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/chartvalues$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/fakegithub$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/archtest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+        github manifest adapter:
+          list-mode: lax
+          files:
+            - "**/internal/github/manifest/*.go"
+            - "!$test"
+          deny:
+            - pkg: "github.com/badilhq/badil/internal/store$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/store/storetest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/forge/github$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/forge/github/githubtest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/namespace$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/status$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/status/kube$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/metrics$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/server$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/server/mocks$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/api$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/apiclient$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/config$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/chartvalues$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/fakegithub$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/archtest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+        namespace adapter:
+          list-mode: lax
+          files:
+            - "**/internal/namespace/*.go"
+            - "!$test"
+          deny:
+            - pkg: "github.com/badilhq/badil/internal/store$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/store/storetest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/forge/github$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/forge/github/githubtest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/github$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/github/manifest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/status$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/status/kube$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/metrics$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/server$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/server/mocks$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/api$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/apiclient$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/config$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/chartvalues$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/fakegithub$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/archtest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+        status adapter:
+          list-mode: lax
+          files:
+            - "**/internal/status/*.go"
+            - "!$test"
+          deny:
+            - pkg: "github.com/badilhq/badil/internal/store$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/store/storetest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/forge/github$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/forge/github/githubtest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/github$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/github/manifest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/namespace$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/status/kube$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/metrics$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/server$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/server/mocks$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/api$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/apiclient$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/config$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/chartvalues$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/fakegithub$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/archtest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+        status kube adapter:
+          list-mode: lax
+          files:
+            - "**/internal/status/kube/*.go"
+            - "!$test"
+          deny:
+            - pkg: "github.com/badilhq/badil/internal/store$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/store/storetest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/forge/github$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/forge/github/githubtest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/github$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/github/manifest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/namespace$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/metrics$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/server$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/server/mocks$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/api$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/apiclient$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/config$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/chartvalues$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/fakegithub$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/archtest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+        metrics adapter:
+          list-mode: lax
+          files:
+            - "**/internal/metrics/*.go"
+            - "!$test"
+          deny:
+            - pkg: "github.com/badilhq/badil/internal/store$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/store/storetest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/forge/github$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/forge/github/githubtest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/github$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/github/manifest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/namespace$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/status$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/status/kube$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/server$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/server/mocks$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/api$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/apiclient$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/config$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/chartvalues$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/fakegithub$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/archtest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+        server adapter:
+          list-mode: lax
+          files:
+            - "**/internal/server/*.go"
+            - "**/internal/server/**/*.go"
+            - "!$test"
+          deny:
+            - pkg: "github.com/badilhq/badil/internal/store$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/store/storetest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/forge/github$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/forge/github/githubtest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/github$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/github/manifest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/namespace$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/status$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/status/kube$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/metrics$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/apiclient$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/config$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/chartvalues$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/fakegithub$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/archtest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+        api adapter:
+          list-mode: lax
+          files:
+            - "**/internal/api/*.go"
+            - "!$test"
+          deny:
+            - pkg: "github.com/badilhq/badil/internal/store$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/store/storetest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/forge/github$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/forge/github/githubtest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/github$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/github/manifest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/namespace$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/status$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/status/kube$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/metrics$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/server$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/server/mocks$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/apiclient$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/config$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/chartvalues$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/fakegithub$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/archtest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+        apiclient adapter:
+          list-mode: lax
+          files:
+            - "**/internal/apiclient/*.go"
+            - "!$test"
+          deny:
+            - pkg: "github.com/badilhq/badil/internal/store$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/store/storetest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/forge/github$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/forge/github/githubtest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/github$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/github/manifest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/namespace$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/status$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/status/kube$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/metrics$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/server$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/server/mocks$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/config$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/chartvalues$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/fakegithub$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/archtest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+        config adapter:
+          list-mode: lax
+          files:
+            - "**/internal/config/*.go"
+            - "!$test"
+          deny:
+            - pkg: "github.com/badilhq/badil/internal/store$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/store/storetest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/forge/github$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/forge/github/githubtest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/github/manifest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/namespace$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/status$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/status/kube$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/metrics$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/server$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/server/mocks$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/api$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/apiclient$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/chartvalues$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/fakegithub$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
+            - pkg: "github.com/badilhq/badil/internal/archtest$"
+              desc: adapters import only domain, use cases and the adapters docs/ARCHITECTURE.md allows
     embeddedstructfieldcheck:
       forbid-mutex: true
     errcheck:
