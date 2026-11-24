@@ -6,10 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/badilhq/badil/internal/forge"
-	"github.com/badilhq/badil/internal/lifecycle"
 )
 
 // countDelivery records a delivery answered with status. event is the
@@ -67,7 +65,7 @@ func (s *Server) dispatchEvent(ctx context.Context, ev forge.Event) {
 	case forge.KindPullRequest:
 		s.handlePullRequest(ctx, ev)
 	case forge.KindPush:
-		s.handlePush(ctx, ev.Push)
+		s.app.OnPush(ctx, ev.Push)
 	case forge.KindOther:
 	}
 }
@@ -82,58 +80,5 @@ func (s *Server) handlePullRequest(ctx context.Context, ev forge.Event) {
 		slog.String("head_sha", e.HeadSHA),
 		slog.String("pr_author", e.Author),
 	)
-	switch e.Action {
-	case "opened", "reopened", "synchronize", "labeled", "unlabeled", "closed":
-		s.app.StartReconcile(ctx, e)
-	}
-}
-
-// handlePush starts a config sync in the background for a push to the gitops
-// repo's default branch that did not delete it, once the store is told to
-// check the remote on its next read. Any other push is ignored.
-func (s *Server) handlePush(ctx context.Context, e forge.PushEvent) {
-	repo := e.FullName
-	reason := ""
-	switch {
-	case !strings.EqualFold(repo, s.store.FullName()):
-		reason = "not the gitops repo"
-	case e.Ref != "refs/heads/"+e.DefaultBranch:
-		reason = "not the default branch"
-	case e.Deleted:
-		reason = "branch deleted"
-	}
-	attrs := []any{
-		slog.String("repo", repo),
-		slog.String("ref", e.Ref),
-		slog.String("after", e.After),
-		slog.Bool("deleted", e.Deleted),
-	}
-	if reason != "" {
-		attrs = append(attrs, slog.String("reason", reason))
-	}
-	slog.InfoContext(ctx, "webhook push", attrs...)
-	if reason == "" {
-		s.store.Invalidate()
-		s.startPushSync(ctx)
-	}
-}
-
-// startPushSync runs the push config sync in the background, tracked for
-// the app's WaitBackground. It does not take the app's job queue: the
-// syncer's guard serializes it with the other config syncs, and caps it at
-// syncTimeout from when it holds the guard. Its context is detached from
-// ctx's cancellation.
-func (s *Server) startPushSync(ctx context.Context) {
-	sctx := context.WithoutCancel(ctx)
-	s.app.Go(func() {
-		defer func() {
-			if rec := recover(); rec != nil {
-				slog.ErrorContext(sctx, "config sync panicked",
-					slog.String("trigger", lifecycle.TriggerPush),
-					slog.Any("panic", rec),
-				)
-			}
-		}()
-		s.syncer.Push(sctx)
-	})
+	s.app.OnPullRequest(ctx, e)
 }

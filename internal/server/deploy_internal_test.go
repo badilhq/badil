@@ -32,7 +32,7 @@ func newTestServer(t *testing.T, fg *fakeGitops) *Server {
 	t.Helper()
 	fg.open(t)
 	a := app.New(app.Config{Store: fg, Forge: fg, FanOut: fakeFanOut(fg)})
-	return NewServer(a, fg, nil, fg, "test-token")
+	return NewServer(a, fg, nil, "test-token")
 }
 
 func postDeploy(t *testing.T, srv *Server, body, bearer string) *httptest.ResponseRecorder {
@@ -375,7 +375,7 @@ func TestDeploy_PushUnauthorized(t *testing.T) {
 	fg.open(t)
 	fg.st = st
 	a := app.New(app.Config{Store: fg, Forge: fg, FanOut: fakeFanOut(fg)})
-	rec := postDeploy(t, NewServer(a, fg, nil, fg, "test-token"), previewBody(), "test-token")
+	rec := postDeploy(t, NewServer(a, fg, nil, "test-token"), previewBody(), "test-token")
 
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502 (body: %s)", rec.Code, rec.Body.String())
@@ -442,7 +442,10 @@ func TestDeploy_PreviewLimitReadErrors(t *testing.T) {
 // nil *metrics.Metrics deploys a new preview, which lifecycle records through
 // the server's recorder, without recording or panicking.
 func TestWithMetrics_NilRecordsNothing(t *testing.T) {
-	for name, m := range map[string]Recorder{
+	for name, m := range map[string]interface {
+		Recorder
+		app.Metrics
+	}{
 		"untyped nil":          nil,
 		"nil *metrics.Metrics": (*metrics.Metrics)(nil),
 	} {
@@ -450,7 +453,7 @@ func TestWithMetrics_NilRecordsNothing(t *testing.T) {
 			fg := &fakeGitops{catalog: []string{"backend-1"}}
 			fg.open(t)
 			a := app.New(app.Config{Store: fg, Forge: fg, Metrics: m, FanOut: fakeFanOut(fg)})
-			srv := NewServer(a, fg, nil, fg, "test-token", WithMetrics(m))
+			srv := NewServer(a, fg, nil, "test-token", WithMetrics(m))
 			if rec := postDeploy(t, srv, validBody(), "test-token"); rec.Code != http.StatusOK {
 				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 			}

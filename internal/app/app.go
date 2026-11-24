@@ -20,12 +20,21 @@ type Store interface {
 	// GetPreview reads previews/<slug>/values.yaml, store.ErrNotFound when
 	// it does not exist.
 	GetPreview(ctx context.Context, slug string) (*preview.Values, string, error)
+	FullName() string
+	// Invalidate makes the next read check the gitops remote at once.
+	Invalidate()
 }
 
-// Metrics records the outcomes of the lifecycle operations an App runs.
-// *metrics.Metrics implements it.
+// Metrics records the outcomes of the lifecycle operations an App runs, the
+// reconciles its catch-up starts, the renderer status events and the spin-up
+// durations it observes. *metrics.Metrics implements it.
 type Metrics interface {
 	lifecycle.Recorder
+	lifecycle.CatchUpRecorder
+	// StatusEvent records one renderer status event and its result.
+	StatusEvent(status, result string)
+	// SpinUp records the time a service took to become ready.
+	SpinUp(service string, d time.Duration)
 }
 
 // nopMetrics is the Metrics of an App built without one: it records
@@ -43,6 +52,12 @@ func (nopMetrics) SweepDeleted(string) {}
 func (nopMetrics) PreviewSynced() {}
 
 func (nopMetrics) PreviewCreated() {}
+
+func (nopMetrics) CatchUpReconcile() {}
+
+func (nopMetrics) StatusEvent(string, string) {}
+
+func (nopMetrics) SpinUp(string, time.Duration) {}
 
 // Config configures an App built by New.
 type Config struct {
@@ -98,6 +113,8 @@ type App struct {
 	jobTimeout time.Duration
 	// status holds the status the renderer reports, nil when none is known.
 	status StatusRepository
+	// syncer runs the config syncs, one at a time.
+	syncer *lifecycle.Syncer
 }
 
 // New returns the App cfg configures.
@@ -125,6 +142,7 @@ func New(cfg Config) *App {
 	if a.jobTimeout == 0 {
 		a.jobTimeout = ReconcileTimeout
 	}
+	a.syncer = lifecycle.NewSyncer(a.SyncAPI(), SyncTimeout)
 	return a
 }
 

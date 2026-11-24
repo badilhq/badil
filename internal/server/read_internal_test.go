@@ -15,7 +15,6 @@ import (
 	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
-	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/status"
 )
@@ -99,7 +98,7 @@ func newReadServer(
 	st := status.NewMemory()
 	cfg.Status = st
 	s, capture := newTeardownServer(t, fg, cfg, append([]Option{
-		WithStatus(testStatusToken, st), WithReadToken(testReadToken),
+		WithStatusToken(testStatusToken), WithReadToken(testReadToken),
 	}, opts...)...)
 	s.waitTimeout = time.Millisecond
 	return s, st, capture
@@ -211,7 +210,7 @@ func TestReadAPI_Auth(t *testing.T) {
 			fg.open(t)
 			st := status.NewMemory()
 			a := app.New(app.Config{Store: fg, Forge: fg, Status: st})
-			s := NewServer(a, fg, nil, fg, tc.deploy, WithReadToken(tc.read), WithStatus("", st))
+			s := NewServer(a, fg, nil, tc.deploy, WithReadToken(tc.read))
 			s.waitTimeout = time.Millisecond
 			for _, path := range getRoutes {
 				if rec := send(s, http.MethodGet, path, "{}", "Bearer "+testReadToken); rec.Code != tc.allGetsStatus {
@@ -412,12 +411,8 @@ func TestWait_CatchUpRecordsTheFilteredPRs(t *testing.T) {
 		reconciled++
 		s.app.QueueReconcile(ctx, ev, done)
 	}
-	api := lifecycle.CatchUpAPI{
-		Store:    fg,
-		Forge:    fg,
-		Recorder: (*metrics.Metrics)(nil),
-		Skipped:  s.app.RecordCatchUpSkip,
-	}
+	api := app.CatchUpAPI(fg, fg, nil)
+	api.Skipped = s.app.RecordCatchUpSkip
 	lifecycle.NewCatchUp(api, reconcile).Run(context.Background())
 	if err := s.app.WaitBackground(context.Background()); err != nil {
 		t.Fatal(err)
@@ -440,9 +435,8 @@ func TestWait_CatchUpSkipAndNewerOutcome(t *testing.T) {
 	path := "/v1/wait?repo=acme/front&pr=7&sha=" + statusSHA
 	run := func(t *testing.T, fg *fakeGitops, s *Server) {
 		t.Helper()
-		api := lifecycle.CatchUpAPI{
-			Store: fg, Forge: fg, Recorder: (*metrics.Metrics)(nil), Skipped: s.app.RecordCatchUpSkip,
-		}
+		api := app.CatchUpAPI(fg, fg, nil)
+		api.Skipped = s.app.RecordCatchUpSkip
 		lifecycle.NewCatchUp(api, s.app.QueueReconcile).Run(context.Background())
 		if err := s.app.WaitBackground(context.Background()); err != nil {
 			t.Fatal(err)

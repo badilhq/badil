@@ -39,7 +39,7 @@ func newMetricsServer(t *testing.T) (*server.Server, *metrics.Metrics) {
 		t.Fatalf("New: %v", err)
 	}
 	a := app.New(app.Config{Forge: f, Metrics: m})
-	return server.NewServer(a, f, f, nil, "test-deploy-token", server.WithMetrics(m)), m
+	return server.NewServer(a, f, f, "test-deploy-token", server.WithMetrics(m)), m
 }
 
 func TestWebhookMetrics(t *testing.T) {

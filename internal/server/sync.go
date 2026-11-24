@@ -48,7 +48,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	report, err := s.syncer.Sync(ctx, slug)
+	report, err := s.app.Sync(ctx, slug)
 	if err != nil {
 		status := http.StatusInternalServerError
 		msg := err.Error()

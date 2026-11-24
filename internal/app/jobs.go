@@ -51,10 +51,10 @@ func (a *App) RunJob(ctx context.Context, onPanic func(rec any), job func(contex
 	})
 }
 
-// StartReconcile reconciles the event's PR with its preview in a background
+// startReconcile reconciles the event's PR with its preview in a background
 // job. Events missing the fields needed to find the PR, and closed events
 // with neither a head branch slug nor a named label slug, start nothing. A closed event logs as a teardown.
-func (a *App) StartReconcile(ctx context.Context, e forge.PullRequestEvent) {
+func (a *App) startReconcile(ctx context.Context, e forge.PullRequestEvent) {
 	ev := lifecycle.Event{
 		Target:  prTarget(e),
 		Action:  e.Action,
