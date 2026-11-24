@@ -12,7 +12,7 @@ import (
 
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/server"
-	"github.com/badilhq/badil/internal/status"
+	statuskube "github.com/badilhq/badil/internal/status/kube"
 	"github.com/badilhq/badil/internal/store"
 	"github.com/badilhq/badil/internal/store/storetest"
 )
@@ -26,7 +26,7 @@ const previewFile = "apiVersion: badil.dev/v1beta1\nservices:\n  - name: backend
 func statusCM(slug string) *corev1.ConfigMap {
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: status.ConfigMapName(slug), Namespace: statusNamespace,
+			Name: statuskube.ConfigMapName(slug), Namespace: statusNamespace,
 			Labels: map[string]string{"app.kubernetes.io/managed-by": "badil", "badil.dev/preview": slug},
 		},
 		Data: map[string]string{"backend-1": `{"revision":"aaa","status":"ready","at":"2026-11-19T21:00:00Z"}`},
@@ -37,7 +37,7 @@ func statusCM(slug string) *corev1.ConfigMap {
 func hasCM(t *testing.T, client *fake.Clientset, slug string) bool {
 	t.Helper()
 	_, err := client.CoreV1().ConfigMaps(statusNamespace).Get(
-		context.Background(), status.ConfigMapName(slug), metav1.GetOptions{})
+		context.Background(), statuskube.ConfigMapName(slug), metav1.GetOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestStatusHooks(t *testing.T) {
 	})
 	client := fake.NewClientset(statusCM("applied"), statusCM("external"), statusCM("kept"))
 	ctx := context.Background()
-	previewStatus := status.New(client, statusNamespace)
+	previewStatus := statuskube.New(client, statusNamespace)
 	if err := loadStatus(ctx, previewStatus); err != nil {
 		t.Fatal(err)
 	}

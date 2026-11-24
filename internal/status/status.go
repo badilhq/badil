@@ -1,8 +1,7 @@
 // Package status keeps the latest status the renderer reported for each
-// service of each preview. Memory is the source of truth for reads; when a
-// Kubernetes client is given, each preview's status is also kept in one
-// ConfigMap of badil's namespace, written at most once per flush interval
-// and read back on start.
+// service of each preview. Memory is the source of truth for reads; with a
+// Persistence, each preview's status is also written at most once per flush
+// interval and read back on start.
 package status
 
 import (
@@ -49,6 +48,22 @@ type Lister interface {
 	ListPreviewFiles(ctx context.Context) ([]string, error)
 }
 
+// Persistence keeps each preview's status outside the process:
+// internal/status/kube keeps it in ConfigMaps.
+type Persistence interface {
+	// List returns, by preview, the persisted status of each service.
+	List(ctx context.Context) (map[string]map[string]Entry, error)
+	// Names returns the previews that have persisted status.
+	Names(ctx context.Context) ([]string, error)
+	// Write persists the status snapshot returns for the preview slug,
+	// calling snapshot at each attempt and writing nothing once it reports
+	// the preview gone.
+	Write(ctx context.Context, slug string, snapshot func() (map[string]Entry, bool)) error
+	// Delete removes the persisted status of slug, already absent being no
+	// error.
+	Delete(ctx context.Context, slug string) error
+}
+
 // previewStatus is the status of a preview's services.
 type previewStatus struct {
 	services map[string]Entry
@@ -63,7 +78,7 @@ type previewStatus struct {
 // Store is the status of every preview, in memory and, with a Kubernetes
 // client, in ConfigMaps. Its methods are safe for concurrent use.
 type Store struct {
-	kube     *configMaps
+	persist  Persistence
 	interval time.Duration
 
 	mu       sync.Mutex
@@ -83,11 +98,10 @@ type Store struct {
 	wg      sync.WaitGroup
 }
 
-// newStore returns an empty Store, persisted through kube when it is not
-// nil.
-func newStore(kube *configMaps) *Store {
+// newStore returns an empty Store, persisted through p when it is not nil.
+func newStore(p Persistence) *Store {
 	return &Store{
-		kube:     kube,
+		persist:  p,
 		interval: flushInterval,
 		previews: map[string]*previewStatus{},
 		dirty:    map[string]bool{},
@@ -100,6 +114,12 @@ func newStore(kube *configMaps) *Store {
 // NewMemory returns a Store kept in memory only.
 func NewMemory() *Store {
 	return newStore(nil)
+}
+
+// NewPersisted returns an empty Store persisted through p, which must not be
+// nil.
+func NewPersisted(p Persistence) *Store {
+	return newStore(p)
 }
 
 // Record sets the status of service in the preview slug to e, unless e is
@@ -159,7 +179,7 @@ func (s *Store) Delete(slugs ...string) {
 func (s *Store) forget(slug string) {
 	delete(s.previews, slug)
 	delete(s.dirty, slug)
-	if s.kube != nil {
+	if s.persist != nil {
 		s.gone[slug] = true
 	}
 }
@@ -182,10 +202,10 @@ func (s *Store) signal(ch chan struct{}) {
 // Load reads every preview's status back from its ConfigMap. It reads
 // nothing when s is memory-only. A failed listing is returned.
 func (s *Store) Load(ctx context.Context) error {
-	if s.kube == nil {
+	if s.persist == nil {
 		return nil
 	}
-	loaded, err := s.kube.list(ctx)
+	loaded, err := s.persist.List(ctx)
 	if err != nil {
 		return err
 	}
@@ -202,7 +222,7 @@ func (s *Store) Load(ctx context.Context) error {
 func (s *Store) Start(ctx context.Context, lister Lister) {
 	ctx, s.stop = context.WithCancel(ctx)
 	s.wg.Go(func() { s.runCollector(ctx, lister) })
-	if s.kube != nil {
+	if s.persist != nil {
 		s.wg.Go(func() { s.runWriter(ctx) })
 	}
 	s.CollectGarbage()
@@ -215,7 +235,7 @@ func (s *Store) Close(ctx context.Context) {
 		s.stop()
 	}
 	s.wg.Wait()
-	if s.kube != nil {
+	if s.persist != nil {
 		s.deleteGone(ctx)
 		s.flush(ctx)
 	}
@@ -270,8 +290,8 @@ func (s *Store) collectGarbage(ctx context.Context, lister Lister) {
 		return
 	}
 	var stored []string
-	if s.kube != nil {
-		if stored, err = s.kube.names(ctx); err != nil {
+	if s.persist != nil {
+		if stored, err = s.persist.Names(ctx); err != nil {
 			if ctx.Err() == nil {
 				slog.Default().WarnContext(ctx, "status garbage collection failed", slog.String("err", err.Error()))
 			}
@@ -311,7 +331,7 @@ func (s *Store) deleteGone(ctx context.Context) {
 	clear(s.gone)
 	s.mu.Unlock()
 	for _, slug := range slugs {
-		if err := s.kube.delete(ctx, slug); err != nil {
+		if err := s.persist.Delete(ctx, slug); err != nil {
 			slog.Default().WarnContext(ctx, "deleting status configmap failed",
 				slog.String("preview", slug), slog.String("err", err.Error()))
 			s.mu.Lock()
@@ -331,7 +351,7 @@ func (s *Store) flush(ctx context.Context) {
 	clear(s.dirty)
 	s.mu.Unlock()
 	for _, slug := range slugs {
-		if err := s.kube.write(ctx, slug, func() (map[string]Entry, bool) { return s.snapshot(slug) }); err != nil {
+		if err := s.persist.Write(ctx, slug, func() (map[string]Entry, bool) { return s.snapshot(slug) }); err != nil {
 			slog.Default().WarnContext(ctx, "writing status configmap failed",
 				slog.String("preview", slug), slog.String("err", err.Error()))
 			s.mu.Lock()

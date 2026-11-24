@@ -28,6 +28,7 @@ import (
 	"github.com/badilhq/badil/internal/namespace"
 	"github.com/badilhq/badil/internal/server"
 	"github.com/badilhq/badil/internal/status"
+	statuskube "github.com/badilhq/badil/internal/status/kube"
 	"github.com/badilhq/badil/internal/store"
 )
 
@@ -143,7 +144,7 @@ func serveCmd() *cobra.Command {
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
-			previewStatus := status.InCluster(ctx)
+			previewStatus := statuskube.InCluster(ctx)
 			namespaces := namespace.InCluster(ctx)
 			if err = loadStatus(ctx, previewStatus); err != nil {
 				return err
