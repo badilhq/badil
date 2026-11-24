@@ -27,7 +27,7 @@ func TestSync(t *testing.T) {
 		wantNotFound bool
 		wantPuts     int
 		// want turns the last file read into the file written.
-		want func(*preview.PreviewValues)
+		want func(*preview.Values)
 	}{
 		{name: "matches", files: []string{pinnedFile()}},
 		{
@@ -37,7 +37,7 @@ func TestSync(t *testing.T) {
 				c.Catalog.Repos["front"] = "https://github.com/acme/front.git"
 			},
 			wantChanged: true, wantNotify: true, wantPuts: 1,
-			want: func(v *preview.PreviewValues) {
+			want: func(v *preview.Values) {
 				v.Services = slices.Insert(v.Services, 1, preview.ServiceEntry{
 					Name: "front", RepoURL: "https://github.com/acme/front.git", Branch: "main",
 					ImageTag: "${ARGOCD_APP_REVISION}", Chart: preview.ChartSettings{
@@ -55,7 +55,7 @@ func TestSync(t *testing.T) {
 				}
 			},
 			wantChanged: true, wantPuts: 1,
-			want: func(v *preview.PreviewValues) {
+			want: func(v *preview.Values) {
 				v.Services[1].Chart.Path = "deploy/helm"
 				v.Services[1].Chart.ValueFiles = []string{"values-preview.yaml"}
 			},
@@ -64,7 +64,7 @@ func TestSync(t *testing.T) {
 			name: "added dependencies", files: []string{pinnedFile()},
 			catalog:     withDependencies,
 			wantChanged: true, wantNotify: true, wantPuts: 1,
-			want: func(v *preview.PreviewValues) {
+			want: func(v *preview.Values) {
 				v.Dependencies = decode(t, withDependenciesFile()).Dependencies
 			},
 		},
@@ -79,7 +79,7 @@ func TestSync(t *testing.T) {
 				c.Dependencies = c.Dependencies[1:]
 			},
 			wantChanged: true, wantNotify: true, wantPuts: 1,
-			want: func(v *preview.PreviewValues) { v.Dependencies = v.Dependencies[1:] },
+			want: func(v *preview.Values) { v.Dependencies = v.Dependencies[1:] },
 		},
 		{
 			name: "dependency no longer exposed", files: []string{withDependenciesFile()},
@@ -88,43 +88,43 @@ func TestSync(t *testing.T) {
 				delete(c.URLs.Expose, "mailpit")
 			},
 			wantChanged: true, wantNotify: true, wantPuts: 1,
-			want: func(v *preview.PreviewValues) {
+			want: func(v *preview.Values) {
 				v.Dependencies[1].Host, v.Dependencies[1].HostParam = "", ""
 			},
 		},
 		{
 			name: "host change", files: []string{pinnedFile("    host: backend-1-slug.127.0.0.1.nip.io\n", "")},
 			wantChanged: true, wantNotify: true, wantPuts: 1,
-			want: func(v *preview.PreviewValues) { v.Services[0].Host = "backend-1-slug.127.0.0.1.nip.io" },
+			want: func(v *preview.Values) { v.Services[0].Host = "backend-1-slug.127.0.0.1.nip.io" },
 		},
 		{
 			name: "branch only", files: []string{staleBranchFile()},
 			wantChanged: true, wantPuts: 1,
-			want: func(v *preview.PreviewValues) { v.Services[1].Branch = "main" },
+			want: func(v *preview.Values) { v.Services[1].Branch = "main" },
 		},
 		{
 			name: "stale repo url", files: []string{pinnedFile("acme/backend-2.git", "acme/old.git")},
 			wantChanged: true, wantPuts: 1,
-			want: func(v *preview.PreviewValues) {
+			want: func(v *preview.Values) {
 				v.Services[1].RepoURL = "https://github.com/acme/backend-2.git"
 			},
 		},
 		{
 			name: "file without apiVersion", files: []string{pinnedFile("apiVersion: badil.dev/v1beta1\n", "")},
 			wantChanged: true, wantPuts: 1,
-			want: func(v *preview.PreviewValues) { v.APIVersion = preview.APIVersion },
+			want: func(v *preview.Values) { v.APIVersion = preview.APIVersion },
 		},
 		{
 			name:        "badil.dev/v1 file",
 			files:       []string{pinnedFile("apiVersion: badil.dev/v1beta1\n", "apiVersion: badil.dev/v1\n")},
 			wantChanged: true, wantPuts: 1,
-			want: func(v *preview.PreviewValues) { v.APIVersion = preview.APIVersion },
+			want: func(v *preview.Values) { v.APIVersion = preview.APIVersion },
 		},
 		{
 			name:      "changed after a lost push",
 			files:     []string{staleBranchFile(), pinnedFile("acme/backend-2.git", "acme/x.git")},
 			conflicts: 1, wantChanged: true, wantPuts: 2,
-			want: func(v *preview.PreviewValues) {
+			want: func(v *preview.Values) {
 				v.Services[1].RepoURL = "https://github.com/acme/backend-2.git"
 			},
 		},
@@ -180,7 +180,7 @@ func assertSyncWrite(
 	result *store.SyncResult,
 	out store.Result,
 	files []string,
-	edit func(*preview.PreviewValues),
+	edit func(*preview.Values),
 ) {
 	t.Helper()
 	if !result.Changed {

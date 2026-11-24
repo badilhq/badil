@@ -20,7 +20,7 @@ const catchUpAction = "synchronize"
 // CatchUpStore is the subset of store.GitHubStore used by CatchUp.
 type CatchUpStore interface {
 	FetchServiceCatalog(ctx context.Context) (*store.ServiceCatalog, error)
-	GetPreview(ctx context.Context, slug string) (*preview.PreviewValues, string, error)
+	GetPreview(ctx context.Context, slug string) (*preview.Values, string, error)
 }
 
 // CatchUpRecorder records the reconciles catch-up starts. *metrics.Metrics

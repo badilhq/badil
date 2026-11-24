@@ -75,7 +75,7 @@ func TestFanOutPRComments_SkipsClosedPRs(t *testing.T) {
 	srv := httptest.NewServer(g)
 	defer srv.Close()
 
-	vals := preview.PreviewValues{Services: []preview.ServiceEntry{
+	vals := preview.Values{Services: []preview.ServiceEntry{
 		pinnedBy("backend-1", "https://github.com/acme/backend-1/pull/42"),
 		pinnedBy("backend-2", "https://github.com/acme/backend-2/pull/7"),
 	}}
@@ -95,7 +95,7 @@ func TestFanOutPRComments_StateError(t *testing.T) {
 	srv := httptest.NewServer(g)
 	defer srv.Close()
 
-	vals := preview.PreviewValues{Services: []preview.ServiceEntry{
+	vals := preview.Values{Services: []preview.ServiceEntry{
 		pinnedBy("backend-1", "https://github.com/acme/backend-1/pull/42"),
 		pinnedBy("front", "https://github.com/acme/front/pull/9"),
 	}}
@@ -152,7 +152,7 @@ func TestFanOutPRComments_UpdateAndCreate(t *testing.T) {
 	in2.PRURL = "https://github.com/acme/backend-2/pull/7"
 	in2.PRNumber = "7"
 
-	vals := preview.PreviewValues{Services: []preview.ServiceEntry{
+	vals := preview.Values{Services: []preview.ServiceEntry{
 		{Name: "backend-1", CommitSha: "abc", Metadata: preview.BuildServiceMetadata(in1)},
 		{Name: "backend-2", CommitSha: "def", Metadata: preview.BuildServiceMetadata(in2)},
 	}}

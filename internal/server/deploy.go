@@ -33,7 +33,7 @@ type storeAPI interface {
 	ListPreviewFiles(ctx context.Context) ([]string, error)
 	// GetPreview reads previews/<slug>/values.yaml, store.ErrNotFound when
 	// it does not exist.
-	GetPreview(ctx context.Context, slug string) (*preview.PreviewValues, string, error)
+	GetPreview(ctx context.Context, slug string) (*preview.Values, string, error)
 	// Invalidate makes the next read check the gitops remote at once.
 	Invalidate()
 }

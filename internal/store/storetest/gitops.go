@@ -53,7 +53,7 @@ var Identity = store.CommitIdentity{ //nolint:gochecknoglobals // test fixture
 
 // Project returns vals projected on catalog, as a sync of the acme/gitops
 // store writes it. The projection's logs are discarded.
-func Project(slug string, vals preview.PreviewValues, catalog *store.ServiceCatalog) preview.PreviewValues {
+func Project(slug string, vals preview.Values, catalog *store.ServiceCatalog) preview.Values {
 	cat := catalog.Catalog
 	cat.GitopsRepoURL = GitopsURL
 	prev := slog.Default()
@@ -70,7 +70,7 @@ func Project(slug string, vals preview.PreviewValues, catalog *store.ServiceCata
 func Gitops(
 	t testing.TB,
 	badil string,
-	previews map[string]*preview.PreviewValues,
+	previews map[string]*preview.Values,
 	stale map[string]bool,
 	raw map[string]string,
 	opts ...store.Option,

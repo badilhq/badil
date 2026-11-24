@@ -370,7 +370,7 @@ func limitReached(tree *store.Tree, maxPreviews int) (bool, error) {
 // vals, of the PR's entries for the services of its repo it does not touch,
 // which never deletes the file; nil when vals is nil (the preview does not
 // exist) or the PR pins none of them there.
-func (p *reconcilePlan) untouchedUnpin(vals *preview.PreviewValues) *teardownStep {
+func (p *reconcilePlan) untouchedUnpin(vals *preview.Values) *teardownStep {
 	if vals == nil {
 		return nil
 	}
@@ -631,7 +631,7 @@ func touches(patterns []string, files []forge.ChangedFile) bool {
 // services for a PR other than self, its pr-url parsed with parse: its
 // service, its holder's PR URL and true. It returns false when there is none.
 func heldBy(
-	parse preview.PRURLParser, vals *preview.PreviewValues, services []string, self Target,
+	parse preview.PRURLParser, vals *preview.Values, services []string, self Target,
 ) (string, string, bool) {
 	for _, svc := range vals.Services {
 		if !slices.Contains(services, svc.Name) || svc.CommitSha == "" || svc.Metadata == nil {

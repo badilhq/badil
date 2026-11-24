@@ -20,7 +20,7 @@ func dependencyNames(deps []preview.DependencyEntry) []string {
 
 func TestApplyCatalog_Dependencies(t *testing.T) {
 	const gitops = "https://github.com/acme/gitops.git"
-	in := preview.PreviewValues{
+	in := preview.Values{
 		Services: []preview.ServiceEntry{{Name: "backend-1"}},
 		Dependencies: []preview.DependencyEntry{
 			{Name: "removed", Chart: preview.DependencyChart{RepoURL: "oci://r/removed", Version: "1"}},
@@ -54,7 +54,7 @@ func TestApplyCatalog_DependencyShadowedByPinnedEntry(t *testing.T) {
 	pinnedPostgres := preview.ServiceEntry{
 		Name: "postgres", RepoURL: "https://github.com/acme/postgres.git", CommitSha: "abc", Metadata: md,
 	}
-	in := preview.PreviewValues{Services: []preview.ServiceEntry{{Name: "backend-1"}, pinnedPostgres}}
+	in := preview.Values{Services: []preview.ServiceEntry{{Name: "backend-1"}, pinnedPostgres}}
 	cat := preview.Catalog{Services: []string{"backend-1"}, Repos: catalogRepos(), Dependencies: sampleDependencies()}
 
 	proj := preview.ApplyCatalog(in, cat)
@@ -77,7 +77,7 @@ func TestApplyCatalog_DependencyShadowedByPinnedEntry(t *testing.T) {
 }
 
 func TestApplyHosts_Dependencies(t *testing.T) {
-	in := preview.PreviewValues{Dependencies: sampleDependencies()}
+	in := preview.Values{Dependencies: sampleDependencies()}
 	in.Dependencies[1].Host = "stale.example.com"
 	urls := hostURLs()
 	urls.Expose["mailpit"] = "/"
@@ -103,11 +103,11 @@ func TestApplyHosts_Dependencies(t *testing.T) {
 }
 
 func TestEqual_Dependencies(t *testing.T) {
-	base := preview.PreviewValues{
+	base := preview.Values{
 		GitopsRepoURL: "https://github.com/acme/gitops.git",
 		Dependencies:  sampleDependencies(),
 	}
-	with := func(change func(v *preview.PreviewValues)) preview.PreviewValues {
+	with := func(change func(v *preview.Values)) preview.Values {
 		v := base
 		v.Dependencies = sampleDependencies()
 		change(&v)
@@ -115,29 +115,29 @@ func TestEqual_Dependencies(t *testing.T) {
 	}
 	tests := []struct {
 		name string
-		b    preview.PreviewValues
+		b    preview.Values
 		want bool
 	}{
-		{"same", with(func(*preview.PreviewValues) {}), true},
-		{"other gitopsRepoURL", with(func(v *preview.PreviewValues) { v.GitopsRepoURL = "x" }), false},
-		{"other version", with(func(v *preview.PreviewValues) { v.Dependencies[0].Chart.Version = "1" }), false},
-		{"other chart name", with(func(v *preview.PreviewValues) { v.Dependencies[1].Chart.Name = "x" }), false},
-		{"other host", with(func(v *preview.PreviewValues) { v.Dependencies[1].Host = "x" }), false},
-		{"other hostParam", with(func(v *preview.PreviewValues) { v.Dependencies[1].HostParam = "x" }), false},
-		{"other valueFiles", with(func(v *preview.PreviewValues) { v.Dependencies[0].ValueFiles = nil }), false},
+		{"same", with(func(*preview.Values) {}), true},
+		{"other gitopsRepoURL", with(func(v *preview.Values) { v.GitopsRepoURL = "x" }), false},
+		{"other version", with(func(v *preview.Values) { v.Dependencies[0].Chart.Version = "1" }), false},
+		{"other chart name", with(func(v *preview.Values) { v.Dependencies[1].Chart.Name = "x" }), false},
+		{"other host", with(func(v *preview.Values) { v.Dependencies[1].Host = "x" }), false},
+		{"other hostParam", with(func(v *preview.Values) { v.Dependencies[1].HostParam = "x" }), false},
+		{"other valueFiles", with(func(v *preview.Values) { v.Dependencies[0].ValueFiles = nil }), false},
 		{
 			"other values",
-			with(func(v *preview.PreviewValues) { v.Dependencies[0].Values = map[string]any{"a": 1} }),
+			with(func(v *preview.Values) { v.Dependencies[0].Values = map[string]any{"a": 1} }),
 			false,
 		},
-		{"no values", with(func(v *preview.PreviewValues) { v.Dependencies[0].Values = nil }), false},
-		{"reordered", with(func(v *preview.PreviewValues) {
+		{"no values", with(func(v *preview.Values) { v.Dependencies[0].Values = nil }), false},
+		{"reordered", with(func(v *preview.Values) {
 			v.Dependencies[0], v.Dependencies[1] = v.Dependencies[1], v.Dependencies[0]
 		}), false},
-		{"removed", with(func(v *preview.PreviewValues) { v.Dependencies = v.Dependencies[:1] }), false},
+		{"removed", with(func(v *preview.Values) { v.Dependencies = v.Dependencies[:1] }), false},
 		{
 			"empty and nil values",
-			with(func(v *preview.PreviewValues) { v.Dependencies[1].Values = map[string]any{} }),
+			with(func(v *preview.Values) { v.Dependencies[1].Values = map[string]any{} }),
 			true,
 		},
 	}
@@ -156,9 +156,9 @@ func TestEqual_Dependencies(t *testing.T) {
 func TestEqual_DependencyValuesReadBack(t *testing.T) {
 	deps := sampleDependencies()
 	deps[0].Values = map[string]any{"replicas": 1.0, "ratio": 0.5, "on": "yes", "list": []any{1, "2"}}
-	vals := preview.PreviewValues{APIVersion: preview.APIVersion, Dependencies: deps}
+	vals := preview.Values{APIVersion: preview.APIVersion, Dependencies: deps}
 
-	var back preview.PreviewValues
+	var back preview.Values
 	if err := yaml.Unmarshal(encodeValues(t, vals), &back); err != nil {
 		t.Fatalf("decode: %v", err)
 	}

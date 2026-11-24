@@ -1,6 +1,6 @@
 // Command schemagen writes the JSON Schema of the preview-apps chart's values,
 // generated from internal/chartvalues.Values, and the JSON Schema of the
-// preview values contract, generated from internal/preview.PreviewValues.
+// preview values contract, generated from internal/preview.Values.
 package main
 
 //go:generate go run . -out ../../charts/preview-apps/values.schema.json -contract-out ../../schema/preview.v1beta1.schema.json
@@ -69,10 +69,10 @@ func generate() ([]byte, error) {
 	return marshal(newReflector().Reflect(&chartvalues.Values{}))
 }
 
-// generateContract returns the schema of preview.PreviewValues, the preview
+// generateContract returns the schema of preview.Values, the preview
 // values contract, as indented JSON with a trailing newline.
 func generateContract() ([]byte, error) {
-	return marshal(newReflector().Reflect(&preview.PreviewValues{}))
+	return marshal(newReflector().Reflect(&preview.Values{}))
 }
 
 // marshal returns s as indented JSON with a trailing newline.

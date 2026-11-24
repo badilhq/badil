@@ -65,7 +65,7 @@ type fakeGitops struct {
 	prErr   error
 	prCalls int
 
-	previews map[string]*preview.PreviewValues
+	previews map[string]*preview.Values
 	stale    map[string]bool
 	raw      map[string]string
 
@@ -201,7 +201,7 @@ func (f *fakeGitops) record(c storetest.Commit) {
 // captureInputs sets capturedInputs from the entry of service in the preview
 // slug of c.
 func (f *fakeGitops) captureInputs(c storetest.Commit, slug, service string) {
-	var vals preview.PreviewValues
+	var vals preview.Values
 	if err := yaml.Unmarshal([]byte(c.Tree["previews/"+slug+"/values.yaml"]), &vals); err != nil {
 		f.t.Errorf("parse %s: %v", slug, err)
 		return
@@ -218,7 +218,7 @@ func (f *fakeGitops) captureInputs(c storetest.Commit, slug, service string) {
 	}
 }
 
-func (f *fakeGitops) FanOutPRComments(_ context.Context, _ preview.PreviewValues, body string) error {
+func (f *fakeGitops) FanOutPRComments(_ context.Context, _ preview.Values, body string) error {
 	f.fanOutBodyCalled = true
 	f.capturedSummary = body
 	return f.fanOutErr
@@ -271,7 +271,7 @@ func (f *fakeGitops) FullName() string { return f.st.FullName() }
 
 // GetPreview reads the preview from the fake's store, or fails with
 // getPreviewErr when set, then runs afterGetPreview when set.
-func (f *fakeGitops) GetPreview(ctx context.Context, slug string) (*preview.PreviewValues, string, error) {
+func (f *fakeGitops) GetPreview(ctx context.Context, slug string) (*preview.Values, string, error) {
 	if f.afterGetPreview != nil {
 		defer f.afterGetPreview()
 	}
@@ -303,7 +303,7 @@ func (f *fakeGitops) invalidated() (int, int) {
 // withFanOut plugs f's FanOutPRComments in as the server's fan-out.
 func withFanOut(f *fakeGitops) Option {
 	return func(s *Server) {
-		s.fanOut = func(ctx context.Context, _ forge.Forge, vals preview.PreviewValues, body string) error {
+		s.fanOut = func(ctx context.Context, _ forge.Forge, vals preview.Values, body string) error {
 			return f.FanOutPRComments(ctx, vals, body)
 		}
 	}

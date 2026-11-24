@@ -170,7 +170,7 @@ func (s *Server) previewGone(ctx context.Context, slug string) bool {
 
 // findService reports whether vals has a service or a dependency named name,
 // and returns its service entry when it is a service.
-func findService(vals *preview.PreviewValues, name string) (*preview.ServiceEntry, bool) {
+func findService(vals *preview.Values, name string) (*preview.ServiceEntry, bool) {
 	for i := range vals.Services {
 		if vals.Services[i].Name == name {
 			return &vals.Services[i], true

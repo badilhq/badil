@@ -55,7 +55,7 @@ func (Metadata) JSONSchemaExtend(s *jsonschema.Schema) {
 // dependencies, rejects other root keys, fixes apiVersion to APIVersion and
 // makes gitopsRepoURL non-empty: the published contract of a preview values
 // file.
-func (PreviewValues) JSONSchemaExtend(s *jsonschema.Schema) {
+func (Values) JSONSchemaExtend(s *jsonschema.Schema) {
 	s.Required = []string{"apiVersion", "gitopsRepoURL", "services", "dependencies"}
 	s.AdditionalProperties = jsonschema.FalseSchema
 	if p, ok := s.Properties.Get("apiVersion"); ok {

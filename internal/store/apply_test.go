@@ -61,7 +61,7 @@ func TestApply_OneCommitOnFetchedHead(t *testing.T) {
 			t.Errorf("GetPreview(b) = %+v, %v; want the fetched b2", vals, getErr)
 		}
 		tree.DeletePreview("zz-last")
-		if putErr := store.PutPreview(tree, "new", preview.PreviewValues{
+		if putErr := store.PutPreview(tree, "new", preview.Values{
 			Services: []preview.ServiceEntry{{Name: "new"}},
 		}); putErr != nil {
 			return store.Summary{}, putErr

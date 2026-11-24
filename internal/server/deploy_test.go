@@ -308,10 +308,10 @@ func TestDeploy_PreviewLimitRefusesNewSlug(t *testing.T) {
 
 // capPreviews returns a preview, pinned by acme/backend-1#42, for each of
 // slugs.
-func capPreviews(slugs ...string) map[string]*preview.PreviewValues {
-	out := map[string]*preview.PreviewValues{}
+func capPreviews(slugs ...string) map[string]*preview.Values {
+	out := map[string]*preview.Values{}
 	for _, slug := range slugs {
-		out[slug] = &preview.PreviewValues{Services: []preview.ServiceEntry{pinnedBy42()}}
+		out[slug] = &preview.Values{Services: []preview.ServiceEntry{pinnedBy42()}}
 	}
 	return out
 }
@@ -320,7 +320,7 @@ func TestDeploy_PreviewLimitDeploys(t *testing.T) {
 	cases := []struct {
 		name     string
 		yaml     string
-		previews map[string]*preview.PreviewValues
+		previews map[string]*preview.Values
 	}{
 		{
 			name:     "existing slug at the cap",
@@ -387,7 +387,7 @@ func TestDeploy_PushUnauthorized(t *testing.T) {
 // previewWriteResult is the write of backend-1 in a three-service preview.
 func previewWriteResult() *store.WriteResult {
 	return &store.WriteResult{
-		Values: preview.PreviewValues{Services: []preview.ServiceEntry{
+		Values: preview.Values{Services: []preview.ServiceEntry{
 			{Name: "backend-1", Branch: "main", CommitSha: "abc1234567890"},
 			{Name: "backend-2", Branch: "main"},
 			{Name: "front", Branch: "main"},

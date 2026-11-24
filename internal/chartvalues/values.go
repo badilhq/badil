@@ -14,17 +14,17 @@ const NamespacePattern = `^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`
 // Values is the input of the preview-apps chart: a preview values file and
 // the ApplicationSet's argocdNamespace. No other root key is allowed.
 type Values struct {
-	preview.PreviewValues `yaml:",inline"`
+	preview.Values `yaml:",inline"`
 
 	ArgocdNamespace string `yaml:"argocdNamespace"`
 }
 
 // JSONSchemaExtend applies the preview values file's root constraints
-// (preview.PreviewValues.JSONSchemaExtend), requires argocdNamespace (a null
+// (preview.Values.JSONSchemaExtend), requires argocdNamespace (a null
 // argocdNamespace in a values file removes the chart default before
 // validation, so it must fail as missing) and makes it a namespace name.
 func (Values) JSONSchemaExtend(s *jsonschema.Schema) {
-	preview.PreviewValues{}.JSONSchemaExtend(s)
+	preview.Values{}.JSONSchemaExtend(s)
 	s.Required = append(s.Required, "argocdNamespace")
 	if p, ok := s.Properties.Get("argocdNamespace"); ok {
 		p.Pattern = NamespacePattern

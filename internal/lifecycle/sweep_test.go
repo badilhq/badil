@@ -39,7 +39,7 @@ const sweepBadil = `services:
 
 // fanOut is one comment posted on the open PRs of a preview.
 type fanOut struct {
-	vals preview.PreviewValues
+	vals preview.Values
 	body string
 }
 
@@ -56,7 +56,7 @@ type fakeAPI struct {
 
 	noCatalog  bool
 	argocdURL  string
-	previews   map[string]*preview.PreviewValues
+	previews   map[string]*preview.Values
 	raw        map[string]string
 	listErr    error
 	prOpen     map[string]bool
@@ -80,7 +80,7 @@ func (f *fakeAPI) ListPreviews(ctx context.Context) ([]string, error) {
 	return f.g.st.ListPreviews(ctx)
 }
 
-func (f *fakeAPI) GetPreview(ctx context.Context, slug string) (*preview.PreviewValues, string, error) {
+func (f *fakeAPI) GetPreview(ctx context.Context, slug string) (*preview.Values, string, error) {
 	return f.g.st.GetPreview(ctx, slug)
 }
 
@@ -136,7 +136,7 @@ func (f *fakeAPI) api(t *testing.T) lifecycle.SweepAPI {
 		Store:    f,
 		Forge:    f,
 		Recorder: f,
-		FanOut: func(_ context.Context, _ forge.Forge, vals preview.PreviewValues, body string) error {
+		FanOut: func(_ context.Context, _ forge.Forge, vals preview.Values, body string) error {
 			f.fanOuts = append(f.fanOuts, fanOut{vals: vals, body: body})
 			return f.fanErr
 		},
@@ -165,8 +165,8 @@ func pin(name, prURL, updatedAt string) preview.ServiceEntry {
 	}
 }
 
-func values(entries ...preview.ServiceEntry) *preview.PreviewValues {
-	return &preview.PreviewValues{Services: entries}
+func values(entries ...preview.ServiceEntry) *preview.Values {
+	return &preview.Values{Services: entries}
 }
 
 const (
@@ -179,7 +179,7 @@ const (
 func TestSweep_NoPinsDeletes(t *testing.T) {
 	capture := captureLogs(t)
 	f := &fakeAPI{
-		previews: map[string]*preview.PreviewValues{"feature-x": values(preview.ServiceEntry{Name: "backend-1"})},
+		previews: map[string]*preview.Values{"feature-x": values(preview.ServiceEntry{Name: "backend-1"})},
 	}
 	if err := f.sweep(t, ttl); err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -202,7 +202,7 @@ func TestSweep_NoPinsDeletes(t *testing.T) {
 func TestSweep_ExpiredDeletesAndComments(t *testing.T) {
 	capture := captureLogs(t)
 	f := &fakeAPI{
-		previews: map[string]*preview.PreviewValues{"feature-x": values(
+		previews: map[string]*preview.Values{"feature-x": values(
 			pin("backend-1", pr42, stale),
 			preview.ServiceEntry{Name: "front"},
 		)},
@@ -232,7 +232,7 @@ func TestSweep_ExpiredDeletesAndComments(t *testing.T) {
 func TestSweep_ExpiryCommentFailure(t *testing.T) {
 	capture := captureLogs(t)
 	f := &fakeAPI{
-		previews: map[string]*preview.PreviewValues{"feature-x": values(pin("backend-1", pr42, stale))},
+		previews: map[string]*preview.Values{"feature-x": values(pin("backend-1", pr42, stale))},
 		fanErr:   errors.New("comment boom"),
 	}
 	if err := f.sweep(t, ttl); err != nil {
@@ -248,7 +248,7 @@ func TestSweep_NeverExpires(t *testing.T) {
 	cases := []struct {
 		name string
 		ttl  time.Duration
-		vals *preview.PreviewValues
+		vals *preview.Values
 	}{
 		{name: "ttl off", ttl: 0, vals: values(pin("backend-1", pr42, stale))},
 		{name: "unparseable updated-at", ttl: ttl, vals: values(pin("backend-1", pr42, "2026-05-26"))},
@@ -258,7 +258,7 @@ func TestSweep_NeverExpires(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			capture := captureLogs(t)
 			f := &fakeAPI{
-				previews: map[string]*preview.PreviewValues{"feature-x": tc.vals},
+				previews: map[string]*preview.Values{"feature-x": tc.vals},
 				prOpen:   map[string]bool{"acme/backend-1#42": true, "acme/backend-2#7": true},
 				// Both are open at their branch preview: rule 3 leaves them.
 				prHeadRef: map[string]string{"acme/backend-1#42": "feature/x", "acme/backend-2#7": "feature/x"},
@@ -277,7 +277,7 @@ func TestSweep_NeverExpires(t *testing.T) {
 func TestSweep_ClosedPRTearsDown(t *testing.T) {
 	capture := captureLogs(t)
 	f := &fakeAPI{
-		previews: map[string]*preview.PreviewValues{"feature-x": values(
+		previews: map[string]*preview.Values{"feature-x": values(
 			pin("backend-1", pr42, recent),
 			pin("backend-2", pr7, recent),
 		)},
@@ -319,7 +319,7 @@ func TestSweep_PRStateUnknownKeepsPin(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			capture := captureLogs(t)
 			f := &fakeAPI{
-				previews: map[string]*preview.PreviewValues{"feature-x": values(pin("backend-1", pr42, recent))},
+				previews: map[string]*preview.Values{"feature-x": values(pin("backend-1", pr42, recent))},
 				prErr:    map[string]error{"acme/backend-1#42": tc.err},
 			}
 			if err := f.sweep(t, ttl); err != nil {
@@ -342,7 +342,7 @@ func TestSweep_PRStateUnknownKeepsPin(t *testing.T) {
 func TestSweep_OnePRPinningTwoServicesCheckedOnce(t *testing.T) {
 	capture := captureLogs(t)
 	f := &fakeAPI{
-		previews: map[string]*preview.PreviewValues{
+		previews: map[string]*preview.Values{
 			"feature-x": values(
 				pin("backend-1", pr42, recent),
 				pin("worker", "https://github.com/ACME/Backend-1/pull/42/files", recent),
@@ -369,8 +369,8 @@ func TestSweep_OnePRPinningTwoServicesCheckedOnce(t *testing.T) {
 func TestSweep_RulesOnRetriedTree(t *testing.T) {
 	cases := []struct {
 		name  string
-		file  *preview.PreviewValues
-		fresh *preview.PreviewValues
+		file  *preview.Values
+		fresh *preview.Values
 	}{
 		{
 			name:  "rule 1: a new pin",
@@ -387,7 +387,7 @@ func TestSweep_RulesOnRetriedTree(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			capture := captureLogs(t)
 			f := &fakeAPI{
-				previews:  map[string]*preview.PreviewValues{"feature-x": tc.file},
+				previews:  map[string]*preview.Values{"feature-x": tc.file},
 				prOpen:    map[string]bool{"acme/backend-1#42": true},
 				prHeadRef: map[string]string{"acme/backend-1#42": "feature/x"},
 			}
@@ -432,7 +432,7 @@ func sweepCatalog(t *testing.T) *store.ServiceCatalog {
 func TestSweep_PRPinnedAfterThePreRead(t *testing.T) {
 	capture := captureLogs(t)
 	f := &fakeAPI{
-		previews: map[string]*preview.PreviewValues{
+		previews: map[string]*preview.Values{
 			"feature-x": values(pin("backend-1", pr42, recent)),
 			"unpinned":  values(preview.ServiceEntry{Name: "backend-1"}),
 		},
@@ -471,7 +471,7 @@ func TestSweep_FailuresCountedAndSweepContinues(t *testing.T) {
 	capture := captureLogs(t)
 	unpinned := values(preview.ServiceEntry{Name: "backend-1"})
 	f := &fakeAPI{
-		previews: map[string]*preview.PreviewValues{"a": unpinned, "c": unpinned, "d": unpinned},
+		previews: map[string]*preview.Values{"a": unpinned, "c": unpinned, "d": unpinned},
 		raw: map[string]string{
 			"previews/b/values.yaml":  "services: [\n",
 			"previews/gone/README.md": "no values file\n",
@@ -505,7 +505,7 @@ func TestSweep_OneCommit(t *testing.T) {
 	kept := pin("backend-2", "not-a-pr-url", recent)
 	unsynced := marshal(t, *values(kept))
 	f := &fakeAPI{
-		previews: map[string]*preview.PreviewValues{
+		previews: map[string]*preview.Values{
 			"a-unpinned": values(preview.ServiceEntry{Name: "backend-1"}),
 			"b-closed":   values(pin("backend-1", pr42, recent), kept),
 			"c-closed":   values(pin("backend-1", pr42, recent), kept),
@@ -528,7 +528,7 @@ func TestSweep_PushFailure(t *testing.T) {
 	capture := captureLogs(t)
 	f := &fakeAPI{
 		Metrics: metrics.New(),
-		previews: map[string]*preview.PreviewValues{
+		previews: map[string]*preview.Values{
 			"a":         values(preview.ServiceEntry{Name: "backend-1"}),
 			"feature-x": values(pin("backend-1", pr42, recent), pin("backend-2", pr7, recent)),
 		},
@@ -567,7 +567,7 @@ func TestSweep_OneSummaryPerPreview(t *testing.T) {
 	captureLogs(t)
 	const front9 = "https://github.com/acme/front/pull/9"
 	f := &fakeAPI{
-		previews: map[string]*preview.PreviewValues{"feature-x": values(
+		previews: map[string]*preview.Values{"feature-x": values(
 			pin("backend-1", pr42, recent),
 			pin("backend-2", pr7, recent),
 			pin("front", front9, recent),

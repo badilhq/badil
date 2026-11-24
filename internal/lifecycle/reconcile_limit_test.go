@@ -20,8 +20,8 @@ const limitBody = "## ⚠️ Preview: `pricing`\n\n" +
 
 // listedPreviews returns a preview, pinned by acme/front#7, for each of
 // slugs.
-func listedPreviews(slugs ...string) map[string]*preview.PreviewValues {
-	out := map[string]*preview.PreviewValues{}
+func listedPreviews(slugs ...string) map[string]*preview.Values {
+	out := map[string]*preview.Values{}
 	for _, slug := range slugs {
 		out[slug] = values(pinnedBy("front", "https://github.com/acme/front/pull/7"))
 	}
@@ -66,7 +66,7 @@ func TestReconcile_PreviewLimitDeploys(t *testing.T) {
 	cases := []struct {
 		name     string
 		max      int
-		previews map[string]*preview.PreviewValues
+		previews map[string]*preview.Values
 	}{
 		{name: "existing preview at the cap", max: 2, previews: existing},
 		{name: "new preview below the cap", max: 3, previews: listedPreviews("checkout", "search")},

@@ -80,7 +80,7 @@ func pinnedEntry(service, prURL string) preview.ServiceEntry {
 func readFake(badil string, pinned preview.ServiceEntry) *fakeGitops {
 	return &fakeGitops{
 		badilYAML: badil,
-		previews: map[string]*preview.PreviewValues{
+		previews: map[string]*preview.Values{
 			"feature-x": {Services: []preview.ServiceEntry{pinned}},
 			"bare":      {},
 		},

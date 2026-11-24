@@ -90,7 +90,7 @@ func (f *loopFake) counts() (int, int) {
 	return f.calls, f.maxActive
 }
 
-func (f *loopFake) GetPreview(context.Context, string) (*preview.PreviewValues, string, error) {
+func (f *loopFake) GetPreview(context.Context, string) (*preview.Values, string, error) {
 	return nil, "", store.ErrNotFound
 }
 
@@ -106,7 +106,7 @@ func (f *loopFake) UpsertComment(context.Context, string, string, int, string) e
 	return errUnexpected
 }
 
-func (f *loopFake) FanOutPRComments(context.Context, preview.PreviewValues, string) error {
+func (f *loopFake) FanOutPRComments(context.Context, preview.Values, string) error {
 	return errUnexpected
 }
 
@@ -132,7 +132,7 @@ func (f *loopFake) api() lifecycle.SweepAPI {
 		Store:    f,
 		Forge:    f,
 		Recorder: f,
-		FanOut: func(ctx context.Context, _ forge.Forge, vals preview.PreviewValues, body string) error {
+		FanOut: func(ctx context.Context, _ forge.Forge, vals preview.Values, body string) error {
 			return f.FanOutPRComments(ctx, vals, body)
 		},
 	}

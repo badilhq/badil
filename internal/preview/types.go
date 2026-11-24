@@ -29,7 +29,7 @@ type DeployInputs struct {
 	WorkflowRunURL string
 }
 
-// ServiceEntry is one item in PreviewValues.Services. RepoURL and Branch are
+// ServiceEntry is one item in Values.Services. RepoURL and Branch are
 // the service's git URL and the branch it tracks when not pinned. CommitSha
 // and Metadata are set together, only on a pinned entry: the service is then
 // deployed at CommitSha. ImageTag is the image tag of the service, its
@@ -47,12 +47,12 @@ type ServiceEntry struct {
 	Metadata  *Metadata     `yaml:"metadata,omitempty"`
 }
 
-// PreviewValues is the root document persisted at previews/<slug>/values.yaml.
+// Values is the root document persisted at previews/<slug>/values.yaml.
 // GitopsRepoURL is the git URL of the gitops repo, from which a dependency
 // reads its valueFiles. Namespace is the extra metadata of the preview
 // Namespace, nil when badil.yaml sets none. Dependencies are the upstream
 // charts of badil.yaml, in its order.
-type PreviewValues struct {
+type Values struct {
 	APIVersion    string             `yaml:"apiVersion"`
 	GitopsRepoURL string             `yaml:"gitopsRepoURL"`
 	Namespace     *NamespaceMetadata `yaml:"namespace,omitempty"`
@@ -60,7 +60,7 @@ type PreviewValues struct {
 	Dependencies  []DependencyEntry  `yaml:"dependencies"`
 }
 
-// DependencyEntry is one item in PreviewValues.Dependencies: an upstream chart
+// DependencyEntry is one item in Values.Dependencies: an upstream chart
 // deployed in every preview, never pinned and without an image tag. Values
 // are passed to the chart as an object and ValueFiles are paths in the gitops
 // repo. HostParam is the Helm parameter set to Host, the ingress host badil

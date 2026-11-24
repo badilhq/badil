@@ -17,7 +17,7 @@ import (
 func TestSweep_SyncsKeptPreviews(t *testing.T) {
 	capture := captureLogs(t)
 	f := &fakeAPI{
-		previews: map[string]*preview.PreviewValues{
+		previews: map[string]*preview.Values{
 			"unpinned": values(preview.ServiceEntry{Name: "backend-1"}),
 			"expired":  values(pin("backend-1", pr42, stale)),
 		},

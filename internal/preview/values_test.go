@@ -169,7 +169,7 @@ func TestEqualExceptUpdatedAt(t *testing.T) {
 		CommitSha: "f00", ImageTag: "f00", Chart: valueFilesChart(), Host: "front.example.com",
 		Metadata: &preview.Metadata{PRURL: "https://github.com/acme/front/pull/7", UpdatedAt: "2026-05-26T09:00:00Z"},
 	}
-	clone := func() preview.PreviewValues {
+	clone := func() preview.Values {
 		out := base
 		out.Services = slices.Clone(base.Services)
 		for i := range out.Services {
@@ -183,35 +183,35 @@ func TestEqualExceptUpdatedAt(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		change func(*preview.PreviewValues)
+		change func(*preview.Values)
 		want   bool
 	}{
-		{name: "identical", change: func(*preview.PreviewValues) {}, want: true},
+		{name: "identical", change: func(*preview.Values) {}, want: true},
 		{
 			name:   "triggering updated-at",
-			change: func(v *preview.PreviewValues) { v.Services[0].Metadata.UpdatedAt = "2026-05-26T11:00:00Z" },
+			change: func(v *preview.Values) { v.Services[0].Metadata.UpdatedAt = "2026-05-26T11:00:00Z" },
 			want:   true,
 		},
 		{
 			name:   "other service updated-at",
-			change: func(v *preview.PreviewValues) { v.Services[1].Metadata.UpdatedAt = "2026-05-26T11:00:00Z" },
+			change: func(v *preview.Values) { v.Services[1].Metadata.UpdatedAt = "2026-05-26T11:00:00Z" },
 		},
-		{name: "commit sha", change: func(v *preview.PreviewValues) { v.Services[0].CommitSha = "new" }},
-		{name: "host", change: func(v *preview.PreviewValues) { v.Services[1].Host = "" }},
-		{name: "pr author", change: func(v *preview.PreviewValues) { v.Services[0].Metadata.PRAuthor = "x" }},
-		{name: "head ref", change: func(v *preview.PreviewValues) { v.Services[0].Metadata.VCSRefName = "x" }},
-		{name: "created-at", change: func(v *preview.PreviewValues) { v.Services[0].Metadata.CreatedAt = "x" }},
-		{name: "api version", change: func(v *preview.PreviewValues) { v.APIVersion = "" }},
-		{name: "repo url", change: func(v *preview.PreviewValues) { v.Services[1].RepoURL = "https://example.com/x" }},
-		{name: "branch", change: func(v *preview.PreviewValues) { v.Services[0].Branch = "develop" }},
+		{name: "commit sha", change: func(v *preview.Values) { v.Services[0].CommitSha = "new" }},
+		{name: "host", change: func(v *preview.Values) { v.Services[1].Host = "" }},
+		{name: "pr author", change: func(v *preview.Values) { v.Services[0].Metadata.PRAuthor = "x" }},
+		{name: "head ref", change: func(v *preview.Values) { v.Services[0].Metadata.VCSRefName = "x" }},
+		{name: "created-at", change: func(v *preview.Values) { v.Services[0].Metadata.CreatedAt = "x" }},
+		{name: "api version", change: func(v *preview.Values) { v.APIVersion = "" }},
+		{name: "repo url", change: func(v *preview.Values) { v.Services[1].RepoURL = "https://example.com/x" }},
+		{name: "branch", change: func(v *preview.Values) { v.Services[0].Branch = "develop" }},
 		{
 			name:   "pipeline run url",
-			change: func(v *preview.PreviewValues) { v.Services[0].Metadata.PipelineRunURL = "x" },
+			change: func(v *preview.Values) { v.Services[0].Metadata.PipelineRunURL = "x" },
 		},
-		{name: "metadata removed", change: func(v *preview.PreviewValues) { v.Services[0].Metadata = nil }},
+		{name: "metadata removed", change: func(v *preview.Values) { v.Services[0].Metadata = nil }},
 		{
 			name: "entry appended",
-			change: func(v *preview.PreviewValues) {
+			change: func(v *preview.Values) {
 				v.Services = append(v.Services, preview.ServiceEntry{Name: "extra"})
 			},
 		},
@@ -228,8 +228,8 @@ func TestEqualExceptUpdatedAt(t *testing.T) {
 }
 
 func TestEqual(t *testing.T) {
-	base := func() preview.PreviewValues {
-		return preview.PreviewValues{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{
+	base := func() preview.Values {
+		return preview.Values{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{
 			{
 				Name: "backend-1", RepoURL: "https://github.com/acme/backend-1.git", Branch: "main",
 				CommitSha: "abc", ImageTag: "abc", Chart: valueFilesChart(),
@@ -244,42 +244,42 @@ func TestEqual(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		change func(*preview.PreviewValues)
+		change func(*preview.Values)
 		want   bool
 	}{
-		{name: "identical", change: func(*preview.PreviewValues) {}, want: true},
-		{name: "updated-at", change: func(v *preview.PreviewValues) { v.Services[0].Metadata.UpdatedAt = "x" }},
-		{name: "api version", change: func(v *preview.PreviewValues) { v.APIVersion = "" }},
-		{name: "host", change: func(v *preview.PreviewValues) { v.Services[1].Host = "" }},
-		{name: "branch", change: func(v *preview.PreviewValues) { v.Services[1].Branch = "develop" }},
-		{name: "repo url", change: func(v *preview.PreviewValues) { v.Services[1].RepoURL = "x" }},
-		{name: "commit sha", change: func(v *preview.PreviewValues) { v.Services[0].CommitSha = "x" }},
-		{name: "image tag", change: func(v *preview.PreviewValues) { v.Services[1].ImageTag = "x" }},
-		{name: "chart path", change: func(v *preview.PreviewValues) { v.Services[1].Chart.Path = "x" }},
+		{name: "identical", change: func(*preview.Values) {}, want: true},
+		{name: "updated-at", change: func(v *preview.Values) { v.Services[0].Metadata.UpdatedAt = "x" }},
+		{name: "api version", change: func(v *preview.Values) { v.APIVersion = "" }},
+		{name: "host", change: func(v *preview.Values) { v.Services[1].Host = "" }},
+		{name: "branch", change: func(v *preview.Values) { v.Services[1].Branch = "develop" }},
+		{name: "repo url", change: func(v *preview.Values) { v.Services[1].RepoURL = "x" }},
+		{name: "commit sha", change: func(v *preview.Values) { v.Services[0].CommitSha = "x" }},
+		{name: "image tag", change: func(v *preview.Values) { v.Services[1].ImageTag = "x" }},
+		{name: "chart path", change: func(v *preview.Values) { v.Services[1].Chart.Path = "x" }},
 		{
 			name:   "chart image tag param",
-			change: func(v *preview.PreviewValues) { v.Services[1].Chart.ImageTagParam = "x" },
+			change: func(v *preview.Values) { v.Services[1].Chart.ImageTagParam = "x" },
 		},
-		{name: "chart host param", change: func(v *preview.PreviewValues) { v.Services[1].Chart.HostParam = "x" }},
-		{name: "chart value files", change: func(v *preview.PreviewValues) { v.Services[0].Chart.ValueFiles = nil }},
+		{name: "chart host param", change: func(v *preview.Values) { v.Services[1].Chart.HostParam = "x" }},
+		{name: "chart value files", change: func(v *preview.Values) { v.Services[0].Chart.ValueFiles = nil }},
 		{
 			name:   "chart value files empty",
-			change: func(v *preview.PreviewValues) { v.Services[1].Chart.ValueFiles = []string{} },
+			change: func(v *preview.Values) { v.Services[1].Chart.ValueFiles = []string{} },
 			want:   true,
 		},
-		{name: "namespace removed", change: func(v *preview.PreviewValues) { v.Namespace = nil }},
-		{name: "namespace annotation", change: func(v *preview.PreviewValues) { v.Namespace.Annotations = nil }},
+		{name: "namespace removed", change: func(v *preview.Values) { v.Namespace = nil }},
+		{name: "namespace annotation", change: func(v *preview.Values) { v.Namespace.Annotations = nil }},
 		{
 			name:   "namespace copy",
-			change: func(v *preview.PreviewValues) { v.Namespace = sampleNamespace() },
+			change: func(v *preview.Values) { v.Namespace = sampleNamespace() },
 			want:   true,
 		},
-		{name: "metadata removed", change: func(v *preview.PreviewValues) { v.Services[0].Metadata = nil }},
+		{name: "metadata removed", change: func(v *preview.Values) { v.Services[0].Metadata = nil }},
 		{
 			name:   "order",
-			change: func(v *preview.PreviewValues) { v.Services[0], v.Services[1] = v.Services[1], v.Services[0] },
+			change: func(v *preview.Values) { v.Services[0], v.Services[1] = v.Services[1], v.Services[0] },
 		},
-		{name: "entry removed", change: func(v *preview.PreviewValues) { v.Services = v.Services[:1] }},
+		{name: "entry removed", change: func(v *preview.Values) { v.Services = v.Services[:1] }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -381,7 +381,7 @@ func TestUnpinPR(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			in := preview.PreviewValues{Services: tc.services}
+			in := preview.Values{Services: tc.services}
 			got, removed, stillPinned := preview.UnpinPR(in, parsePR(t), tc.owner, tc.repo, tc.number)
 			if !slices.Equal(removed, tc.wantRemoved) {
 				t.Errorf("removed = %v, want %v", removed, tc.wantRemoved)
@@ -396,7 +396,7 @@ func TestUnpinPR(t *testing.T) {
 
 // assertUnpinned checks that got keeps every entry of orig in order and that
 // the removed services are bare main-tracking entries.
-func assertUnpinned(t *testing.T, got preview.PreviewValues, orig []preview.ServiceEntry, removed []string) {
+func assertUnpinned(t *testing.T, got preview.Values, orig []preview.ServiceEntry, removed []string) {
 	t.Helper()
 	if len(got.Services) != len(orig) {
 		t.Fatalf("len(Services) = %d, want %d (entries are kept)", len(got.Services), len(orig))
@@ -413,7 +413,7 @@ func assertUnpinned(t *testing.T, got preview.PreviewValues, orig []preview.Serv
 
 func TestUnpinPR_DoesNotMutateInput(t *testing.T) {
 	const prURL = "https://github.com/acme/backend-1/pull/42"
-	in := preview.PreviewValues{Services: []preview.ServiceEntry{
+	in := preview.Values{Services: []preview.ServiceEntry{
 		pinned("backend-1", "abc", prURL),
 		{Name: "front"},
 	}}
@@ -432,13 +432,13 @@ func TestLastDeploy(t *testing.T) {
 	}
 	cases := []struct {
 		name   string
-		vals   preview.PreviewValues
+		vals   preview.Values
 		want   string
 		wantOK bool
 	}{
 		{
 			name: "max over pins",
-			vals: preview.PreviewValues{Services: []preview.ServiceEntry{
+			vals: preview.Values{Services: []preview.ServiceEntry{
 				pinned("backend-1", "2026-05-26T10:00:00Z"),
 				pinned("backend-2", "2026-05-27T09:00:00Z"),
 				pinned("front", "2026-05-25T12:00:00Z"),
@@ -448,7 +448,7 @@ func TestLastDeploy(t *testing.T) {
 		},
 		{
 			name: "pinless entries ignored",
-			vals: preview.PreviewValues{Services: []preview.ServiceEntry{
+			vals: preview.Values{Services: []preview.ServiceEntry{
 				pinned("backend-1", "2026-05-26T10:00:00Z"),
 				{Name: "backend-2", Metadata: &preview.Metadata{UpdatedAt: "2026-06-01T00:00:00Z"}},
 				{Name: "front"},
@@ -458,7 +458,7 @@ func TestLastDeploy(t *testing.T) {
 		},
 		{
 			name: "unparseable updated-at ignored",
-			vals: preview.PreviewValues{Services: []preview.ServiceEntry{
+			vals: preview.Values{Services: []preview.ServiceEntry{
 				pinned("backend-1", "not-a-time"),
 				pinned("backend-2", "2026-05-26T10:00:00Z"),
 				{Name: "front", CommitSha: "def"},
@@ -468,7 +468,7 @@ func TestLastDeploy(t *testing.T) {
 		},
 		{
 			name: "none parseable",
-			vals: preview.PreviewValues{Services: []preview.ServiceEntry{
+			vals: preview.Values{Services: []preview.ServiceEntry{
 				pinned("backend-1", "2026-05-26"),
 				{Name: "backend-2", CommitSha: "def"},
 				{Name: "front"},
@@ -500,7 +500,7 @@ func hostURLs() preview.URLConfig {
 }
 
 func TestApplyHosts(t *testing.T) {
-	in := preview.PreviewValues{Services: []preview.ServiceEntry{
+	in := preview.Values{Services: []preview.ServiceEntry{
 		{Name: "backend-1", CommitSha: "abc"},
 		{Name: "backend-2", Host: "stale.example.com"},
 		{Name: "front"},
@@ -527,7 +527,7 @@ func TestApplyHosts(t *testing.T) {
 }
 
 func TestApplyHosts_FeatureOff(t *testing.T) {
-	in := preview.PreviewValues{Services: []preview.ServiceEntry{
+	in := preview.Values{Services: []preview.ServiceEntry{
 		{Name: "backend-1", Host: "backend-1-feature-pricing.127.0.0.1.nip.io"},
 		{Name: "front"},
 	}}
@@ -544,7 +544,7 @@ func TestApplyHosts_FeatureOff(t *testing.T) {
 }
 
 func TestApplyHosts_DoesNotMutateInput(t *testing.T) {
-	in := preview.PreviewValues{Services: []preview.ServiceEntry{
+	in := preview.Values{Services: []preview.ServiceEntry{
 		{Name: "backend-2", Host: "stale.example.com"},
 		{Name: "front"},
 	}}
@@ -563,7 +563,7 @@ func TestUnpinPR_KeepsHost(t *testing.T) {
 	const host = "backend-1-feature-pricing.127.0.0.1.nip.io"
 	entry := pinned("backend-1", "abc", "https://github.com/acme/backend-1/pull/42")
 	entry.Host = host
-	in := preview.PreviewValues{Services: []preview.ServiceEntry{entry}}
+	in := preview.Values{Services: []preview.ServiceEntry{entry}}
 
 	got, removed, _ := preview.UnpinPR(in, parsePR(t), "acme", "backend-1", 42)
 
@@ -576,7 +576,7 @@ func TestUnpinPR_KeepsHost(t *testing.T) {
 }
 
 func TestApplyHosts_YAML(t *testing.T) {
-	in := preview.PreviewValues{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{
+	in := preview.Values{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{
 		{
 			Name: "backend-1", RepoURL: "https://github.com/acme/backend-1.git", Branch: "main",
 			CommitSha: "abc", ImageTag: "abc", Chart: defaultChart(), Metadata: &preview.Metadata{PRAuthor: "octocat"},
@@ -705,7 +705,7 @@ func TestBuildPreviewValues_SetsAPIVersion(t *testing.T) {
 
 func TestUpdatePreviewValues_KeepsAPIVersion(t *testing.T) {
 	in := sampleInputs()
-	existing := preview.PreviewValues{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{
+	existing := preview.Values{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{
 		{Name: "backend-1", RepoURL: "https://github.com/acme/backend-1.git", Branch: "main"},
 	}}
 	for _, svc := range []string{"backend-1", "extra-svc"} {
@@ -725,7 +725,7 @@ func TestUnpinPR_KeepsAPIVersionAndFacts(t *testing.T) {
 	b1.RepoURL, b1.Branch = "https://github.com/acme/backend-1.git", "main"
 	b2 := pinned("backend-2", "b", "https://github.com/acme/backend-2/pull/7")
 	b2.RepoURL, b2.Branch = "https://github.com/acme/backend-2.git", "develop"
-	in := preview.PreviewValues{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{b1, b2}}
+	in := preview.Values{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{b1, b2}}
 
 	got, removed, stillPinned := preview.UnpinPR(in, parsePR(t), "acme", "backend-1", 42)
 
@@ -746,7 +746,7 @@ func TestUnpinPR_KeepsAPIVersionAndFacts(t *testing.T) {
 }
 
 func TestApplyHosts_KeepsAPIVersion(t *testing.T) {
-	in := preview.PreviewValues{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{{Name: "front"}}}
+	in := preview.Values{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{{Name: "front"}}}
 	got := preview.ApplyHosts(in, "feature-pricing", hostURLs())
 	if got.APIVersion != preview.APIVersion {
 		t.Errorf("APIVersion = %q, want %q", got.APIVersion, preview.APIVersion)
@@ -779,8 +779,8 @@ func TestEqual_NamespaceNilAndEmpty(t *testing.T) {
 		"empty maps": {Labels: map[string]string{}, Annotations: map[string]string{}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			a := preview.PreviewValues{APIVersion: preview.APIVersion}
-			b := preview.PreviewValues{APIVersion: preview.APIVersion, Namespace: ns}
+			a := preview.Values{APIVersion: preview.APIVersion}
+			b := preview.Values{APIVersion: preview.APIVersion, Namespace: ns}
 			if !preview.Equal(a, b) || !preview.Equal(b, a) {
 				t.Errorf("Equal(nil, %+v) = false, want true", ns)
 			}
@@ -839,7 +839,7 @@ func TestApplyCatalog(t *testing.T) {
 	md := &preview.Metadata{PRURL: "https://github.com/acme/backend-1/pull/42"}
 	goneMD := &preview.Metadata{PRURL: "https://github.com/acme/gone/pull/9", UpdatedAt: "2026-05-26T09:00:00Z"}
 	goneChart := preview.ChartSettings{Path: "old/", ImageTagParam: "old.tag", HostParam: "old.host"}
-	in := preview.PreviewValues{Services: []preview.ServiceEntry{
+	in := preview.Values{Services: []preview.ServiceEntry{
 		{
 			Name: "gone-pinned", RepoURL: "https://github.com/acme/gone-pinned", Branch: "release",
 			CommitSha: "x", ImageTag: "old-x", Chart: goneChart, Metadata: goneMD,
@@ -906,7 +906,7 @@ func TestApplyCatalog(t *testing.T) {
 }
 
 func TestApplyCatalog_Defaults(t *testing.T) {
-	in := preview.PreviewValues{Namespace: sampleNamespace(), Services: []preview.ServiceEntry{
+	in := preview.Values{Namespace: sampleNamespace(), Services: []preview.ServiceEntry{
 		{Name: "backend-1", CommitSha: "abc1234567890"},
 	}}
 
@@ -932,7 +932,7 @@ func TestApplyCatalog_Defaults(t *testing.T) {
 }
 
 func TestApplyCatalog_AddsMissingServicesInCatalogOrder(t *testing.T) {
-	in := preview.PreviewValues{Services: []preview.ServiceEntry{{Name: "front"}}}
+	in := preview.Values{Services: []preview.ServiceEntry{{Name: "front"}}}
 
 	got := preview.ApplyCatalog(in, preview.Catalog{Services: catalogServices(), Repos: catalogRepos()}).Values
 
@@ -962,7 +962,7 @@ func TestApplyCatalog_KeepsFirstEntryOfDuplicates(t *testing.T) {
 		Branch:    "main",
 		CommitSha: "aaa",
 	}
-	in := preview.PreviewValues{Services: []preview.ServiceEntry{
+	in := preview.Values{Services: []preview.ServiceEntry{
 		{Name: "front", CommitSha: "f1"},
 		{Name: "front", CommitSha: "f2"},
 		first,
@@ -987,7 +987,7 @@ func TestApplyCatalog_KeepsFirstEntryOfDuplicates(t *testing.T) {
 }
 
 func TestApplyCatalog_KeepsAPIVersion(t *testing.T) {
-	in := preview.PreviewValues{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{{Name: "front"}}}
+	in := preview.Values{APIVersion: preview.APIVersion, Services: []preview.ServiceEntry{{Name: "front"}}}
 	got := preview.ApplyCatalog(in, preview.Catalog{Services: catalogServices(), Repos: catalogRepos()}).Values
 	if got.APIVersion != preview.APIVersion {
 		t.Errorf("APIVersion = %q, want %q", got.APIVersion, preview.APIVersion)
@@ -1000,7 +1000,7 @@ func TestUnpinPRServices(t *testing.T) {
 		pr7  = "https://github.com/acme/platform/pull/7"
 		dep  = "https://github.com/acme/other/pull/42"
 	)
-	in := preview.PreviewValues{Services: []preview.ServiceEntry{
+	in := preview.Values{Services: []preview.ServiceEntry{
 		pinned("api", "a", pr42),
 		pinned("web", "b", pr42),
 		pinned("worker", "c", pr7),

@@ -28,7 +28,7 @@ type gitops struct {
 // parses so that a sync leaves it alone, and raw files (path to content), as
 // storetest.Gitops makes it.
 func newGitops(
-	t *testing.T, badil string, previews map[string]*preview.PreviewValues, raw map[string]string,
+	t *testing.T, badil string, previews map[string]*preview.Values, raw map[string]string,
 ) *gitops {
 	t.Helper()
 	remote, st := storetest.Gitops(t, badil, previews, nil, raw)
@@ -36,7 +36,7 @@ func newGitops(
 }
 
 // marshal returns vals as a preview file.
-func marshal(t *testing.T, vals preview.PreviewValues) string {
+func marshal(t *testing.T, vals preview.Values) string {
 	t.Helper()
 	out, err := yaml.Marshal(vals)
 	if err != nil {
@@ -82,13 +82,13 @@ func (g *gitops) subjects() []string {
 }
 
 // file returns the preview slug on the remote, nil when it has none.
-func (g *gitops) file(slug string) *preview.PreviewValues {
+func (g *gitops) file(slug string) *preview.Values {
 	g.t.Helper()
 	content, ok := g.remote.Files()["previews/"+slug+"/values.yaml"]
 	if !ok {
 		return nil
 	}
-	var vals preview.PreviewValues
+	var vals preview.Values
 	if err := yaml.Unmarshal([]byte(content), &vals); err != nil {
 		g.t.Fatalf("parse %s: %v", slug, err)
 	}

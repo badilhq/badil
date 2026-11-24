@@ -12,7 +12,7 @@ import (
 // acme/backend-1#42 on branch feature/x with labels.
 func openPRAt(slug string, labels ...string) *fakeAPI {
 	return &fakeAPI{
-		previews:  map[string]*preview.PreviewValues{slug: values(pin("backend-1", pr42, recent))},
+		previews:  map[string]*preview.Values{slug: values(pin("backend-1", pr42, recent))},
 		prOpen:    map[string]bool{"acme/backend-1#42": true},
 		prLabels:  map[string][]string{"acme/backend-1#42": labels},
 		prHeadRef: map[string]string{"acme/backend-1#42": "feature/x"},

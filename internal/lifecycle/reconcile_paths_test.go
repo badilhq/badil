@@ -235,7 +235,7 @@ func TestReconcile_PathsHolderCheckOnTouchedServices(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			capture := captureLogs(t)
 			f := platformFake(tc.files...)
-			f.previews = map[string]*preview.PreviewValues{
+			f.previews = map[string]*preview.Values{
 				"feature-pricing": values(pin("api", platformPR7, recent), preview.ServiceEntry{Name: "web"}),
 			}
 			lifecycle.ReconcilePR(context.Background(), f.api(t), labeledPlatform())
@@ -258,7 +258,7 @@ func TestReconcile_PathsUnpinUntouchedBeforeDeploy(t *testing.T) {
 	f := platformFake(changed("web/src/app.tsx")...)
 	// billing was pinned by the PR through /v1/deploy: it is not a service of
 	// the PR's repo and stays pinned.
-	f.previews = map[string]*preview.PreviewValues{
+	f.previews = map[string]*preview.Values{
 		"feature-pricing": values(
 			pin("api", platformPR42, recent),
 			preview.ServiceEntry{Name: "web"},
@@ -293,7 +293,7 @@ func TestReconcile_PathsUnpinUntouchedBeforeDeploy(t *testing.T) {
 func TestReconcile_PathsUnpinKeepsLastPinFile(t *testing.T) {
 	capture := captureLogs(t)
 	f := platformFake(changed("web/src/app.tsx")...)
-	f.previews = map[string]*preview.PreviewValues{
+	f.previews = map[string]*preview.Values{
 		"feature-pricing": values(pin("api", platformPR42, recent), preview.ServiceEntry{Name: "web"}),
 	}
 	lifecycle.ReconcilePR(context.Background(), f.api(t), labeledPlatform())
@@ -310,12 +310,12 @@ func TestReconcile_PathsUnpinKeepsLastPinFile(t *testing.T) {
 func TestReconcile_PathsNoUnpin(t *testing.T) {
 	cases := []struct {
 		name     string
-		previews map[string]*preview.PreviewValues
+		previews map[string]*preview.Values
 	}{
 		{name: "preview does not exist"},
 		{
 			name: "no untouched service pinned by the PR",
-			previews: map[string]*preview.PreviewValues{
+			previews: map[string]*preview.Values{
 				"feature-pricing": values(
 					pin("api", platformPR7, recent), pin("web", platformPR42, recent),
 					pin("billing", platformPR42, recent),
@@ -344,7 +344,7 @@ func TestReconcile_PathsNoUnpin(t *testing.T) {
 func TestReconcile_PathsUnpinFails(t *testing.T) {
 	capture := captureLogs(t)
 	f := platformFake(changed("web/src/app.tsx")...)
-	f.previews = map[string]*preview.PreviewValues{
+	f.previews = map[string]*preview.Values{
 		"feature-pricing": values(pin("api", platformPR42, recent), preview.ServiceEntry{Name: "web"}),
 	}
 	f.beforePush = func(*storetest.Remote) error { return errors.New("push boom") }
@@ -370,7 +370,7 @@ func TestReconcile_PathsUnpinFails(t *testing.T) {
 func TestReconcile_PathsNoServiceChanged(t *testing.T) {
 	cases := []struct {
 		name     string
-		previews map[string]*preview.PreviewValues
+		previews map[string]*preview.Values
 		push     error
 		result   string
 		calls    []string
@@ -382,7 +382,7 @@ func TestReconcile_PathsNoServiceChanged(t *testing.T) {
 		},
 		{
 			name: "PR pinned in the preview",
-			previews: map[string]*preview.PreviewValues{
+			previews: map[string]*preview.Values{
 				"feature-pricing": values(pin("api", platformPR7, recent), pin("web", platformPR42, recent)),
 			},
 			result: "unpinned",
@@ -390,7 +390,7 @@ func TestReconcile_PathsNoServiceChanged(t *testing.T) {
 		},
 		{
 			name: "teardown fails",
-			previews: map[string]*preview.PreviewValues{
+			previews: map[string]*preview.Values{
 				"feature-pricing": values(pin("api", platformPR7, recent), pin("web", platformPR42, recent)),
 			},
 			push:   errors.New("push boom"),
@@ -459,7 +459,7 @@ func TestReconcile_PathsListingFailsKeepsCleanup(t *testing.T) {
 	capture := captureLogs(t)
 	f := platformFake()
 	f.filesErr = errors.New("files boom")
-	f.previews = map[string]*preview.PreviewValues{"old": values(pinnedBy("api", platformPR42))}
+	f.previews = map[string]*preview.Values{"old": values(pinnedBy("api", platformPR42))}
 	lifecycle.ReconcilePR(context.Background(), f.api(t), event("unlabeled", "platform", "preview:old", "preview"))
 
 	f.assertOneCommit(t, "chore(preview): unpin acme/platform#42 from old", "old: delete")

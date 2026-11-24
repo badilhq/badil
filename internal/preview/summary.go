@@ -43,7 +43,7 @@ const pinnedImageNote = "> ⏳ A pinned service starts once CI has pushed the im
 // application list filtered on the preview (ArgoCDAppsURL). The trailing line
 // links to the gitops commit that recorded the change.
 func BuildSummary(
-	parse PRURLParser, slug string, values PreviewValues, urls URLConfig, argocdURL string, excluded []string,
+	parse PRURLParser, slug string, values Values, urls URLConfig, argocdURL string, excluded []string,
 	commitMessage, commitURL string,
 ) string {
 	var b strings.Builder

@@ -19,8 +19,8 @@ const teardownSlug = "feature-add-pricing"
 const teardownSubject = "chore(preview): unpin acme/backend-1#42 from " + teardownSlug
 
 // pinnedAt returns the previews slug pinned by acme/backend-1#42 alone.
-func pinnedAt(slug string) map[string]*preview.PreviewValues {
-	return map[string]*preview.PreviewValues{slug: {Services: []preview.ServiceEntry{pinnedBy42()}}}
+func pinnedAt(slug string) map[string]*preview.Values {
+	return map[string]*preview.Values{slug: {Services: []preview.ServiceEntry{pinnedBy42()}}}
 }
 
 // newTeardownServer returns a server backed by fg and configured by opts,
@@ -161,7 +161,7 @@ func TestTeardown_UpdateComments(t *testing.T) {
 	fg := &fakeGitops{
 		pr:      closedPR(),
 		catalog: []string{"backend-1", "backend-2", "front"},
-		previews: map[string]*preview.PreviewValues{teardownSlug: {Services: []preview.ServiceEntry{
+		previews: map[string]*preview.Values{teardownSlug: {Services: []preview.ServiceEntry{
 			pinnedBy42(),
 			{Name: "backend-2", CommitSha: "bbbbbbbbbb", Metadata: &preview.Metadata{
 				PRURL: "https://github.com/acme/backend-2/pull/7", PRNumber: "7",
@@ -225,7 +225,7 @@ func TestTeardown_UpdateCommentsLinkArgoCD(t *testing.T) {
 			"  backend-1: {repo: https://github.com/acme/backend-1.git}\n" +
 			"  front: {repo: https://github.com/acme/front.git}\n" +
 			"preview:\n  argocdURL: https://argocd.example.com\n",
-		previews: map[string]*preview.PreviewValues{teardownSlug: {Services: []preview.ServiceEntry{
+		previews: map[string]*preview.Values{teardownSlug: {Services: []preview.ServiceEntry{
 			pinnedBy42(),
 			{Name: "front", CommitSha: "cccccccccc", Metadata: &preview.Metadata{
 				PRURL: "https://github.com/acme/front/pull/9",

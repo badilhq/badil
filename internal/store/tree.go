@@ -164,7 +164,7 @@ func previewSlug(path string) (string, bool) {
 
 // GetPreview returns the parsed previews/<slug>/values.yaml, ErrNotFound when
 // it does not exist.
-func (t *Tree) GetPreview(slug string) (*preview.PreviewValues, error) {
+func (t *Tree) GetPreview(slug string) (*preview.Values, error) {
 	raw, err := t.read(previewPath(slug))
 	if err != nil {
 		return nil, err
@@ -173,7 +173,7 @@ func (t *Tree) GetPreview(slug string) (*preview.PreviewValues, error) {
 }
 
 // putPreview puts vals at previews/<slug>/values.yaml.
-func (t *Tree) putPreview(slug string, vals preview.PreviewValues) error {
+func (t *Tree) putPreview(slug string, vals preview.Values) error {
 	body, err := marshalPreview(vals)
 	if err != nil {
 		return fmt.Errorf("marshal %s: %w", previewPath(slug), err)
@@ -192,7 +192,7 @@ func (t *Tree) DeletePreview(slug string) {
 // applyCatalog returns vals projected on catalog (preview.ApplyCatalog) with
 // its hosts (preview.ApplyHosts), and logs a dependency left out because a
 // kept pinned entry has its name.
-func (t *Tree) applyCatalog(vals preview.PreviewValues, slug string, catalog *ServiceCatalog) preview.Projection {
+func (t *Tree) applyCatalog(vals preview.Values, slug string, catalog *ServiceCatalog) preview.Projection {
 	cat := catalog.Catalog
 	cat.GitopsRepoURL = t.repoURL
 	projected := preview.ApplyCatalog(vals, cat)
@@ -211,7 +211,7 @@ func (t *Tree) applyCatalog(vals preview.PreviewValues, slug string, catalog *Se
 // Created is true when the deploy created the file. Excluded is the
 // projection's (preview.Projection.Excluded).
 type WriteResult struct {
-	Values    preview.PreviewValues
+	Values    preview.Values
 	Excluded  []string
 	Unchanged bool
 	Created   bool
@@ -261,7 +261,7 @@ func (t *Tree) Deploy(
 // Catalog, the badil.yaml the file was projected on, are set only when
 // Deleted is false.
 type TeardownResult struct {
-	Values   preview.PreviewValues
+	Values   preview.Values
 	Excluded []string
 	Catalog  *ServiceCatalog
 	Removed  []string
@@ -278,7 +278,7 @@ type TeardownResult struct {
 // an error. A missing file or a PR that pinned nothing is a no-op: an empty
 // TeardownResult and a nil error.
 func (t *Tree) Teardown(slug, owner, repo string, prNumber int) (*TeardownResult, error) {
-	return t.unpin("teardown", slug, func(vals preview.PreviewValues) (preview.PreviewValues, []string, bool) {
+	return t.unpin("teardown", slug, func(vals preview.Values) (preview.Values, []string, bool) {
 		return preview.UnpinPR(vals, t.parsePR, owner, repo, prNumber)
 	}, false)
 }
@@ -289,7 +289,7 @@ func (t *Tree) Teardown(slug, owner, repo string, prNumber int) (*TeardownResult
 // Teardown except that the file is never deleted: it is put, projected on
 // badil.yaml, even when no pin remains, so Deleted is always false.
 func (t *Tree) UnpinServices(slug, owner, repo string, prNumber int, services []string) (*TeardownResult, error) {
-	return t.unpin("unpin", slug, func(vals preview.PreviewValues) (preview.PreviewValues, []string, bool) {
+	return t.unpin("unpin", slug, func(vals preview.Values) (preview.Values, []string, bool) {
 		return preview.UnpinPRServices(vals, t.parsePR, owner, repo, prNumber, services)
 	}, true)
 }
@@ -299,7 +299,7 @@ func (t *Tree) UnpinServices(slug, owner, repo string, prNumber int, services []
 // prefixes its errors.
 func (t *Tree) unpin(
 	op, slug string,
-	unpin func(preview.PreviewValues) (preview.PreviewValues, []string, bool),
+	unpin func(preview.Values) (preview.Values, []string, bool),
 	keepFile bool,
 ) (*TeardownResult, error) {
 	existing, err := t.GetPreview(slug)
@@ -339,7 +339,7 @@ func (t *Tree) unpin(
 // dependency names, or any entry's host, differs from the file it replaced.
 // NotFound is true when the file does not exist.
 type SyncResult struct {
-	Values   preview.PreviewValues
+	Values   preview.Values
 	Excluded []string
 	Changed  bool
 	Notify   bool
@@ -377,7 +377,7 @@ func (t *Tree) Sync(slug string, catalog *ServiceCatalog) (*SyncResult, error) {
 // summaryChanged reports whether the ordered list of service names, the
 // ordered list of dependency names or any entry's host differs between a and
 // b: the parts of the PR comment a sync can change.
-func summaryChanged(a, b preview.PreviewValues) bool {
+func summaryChanged(a, b preview.Values) bool {
 	return !slices.EqualFunc(a.Services, b.Services, func(x, y preview.ServiceEntry) bool {
 		return x.Name == y.Name && x.Host == y.Host
 	}) || !slices.EqualFunc(a.Dependencies, b.Dependencies, func(x, y preview.DependencyEntry) bool {

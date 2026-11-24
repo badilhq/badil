@@ -10,7 +10,7 @@ import (
 
 // onMain returns vals with every entry tracking main, as ApplyCatalog writes
 // an entry whose service sets no branch.
-func onMain(vals preview.PreviewValues) preview.PreviewValues {
+func onMain(vals preview.Values) preview.Values {
 	for i := range vals.Services {
 		vals.Services[i].Branch = preview.DefaultBranch
 	}
@@ -51,7 +51,7 @@ func TestBuildSummary_PinnedAndMainTracking(t *testing.T) {
 // a PR URL on another host.
 func TestBuildSummary_CustomHostCommitLink(t *testing.T) {
 	parse := githubForge(t, "http://gitea.local:3000").ParsePRURL
-	vals := preview.PreviewValues{Services: []preview.ServiceEntry{
+	vals := preview.Values{Services: []preview.ServiceEntry{
 		{
 			Name: "front", Branch: "main", CommitSha: "abc1234567890",
 			Metadata: &preview.Metadata{PRURL: "http://gitea.local:3000/acme/front/pull/7", PRNumber: "7"},
@@ -76,7 +76,7 @@ func TestBuildSummary_CustomHostCommitLink(t *testing.T) {
 }
 
 func TestBuildSummary_BranchBadge(t *testing.T) {
-	vals := preview.PreviewValues{Services: []preview.ServiceEntry{
+	vals := preview.Values{Services: []preview.ServiceEntry{
 		{Name: "backend-1", Branch: "master"},
 		{Name: "backend-2", Branch: "release", CommitSha: "abc1234567890"},
 		{Name: "front", Branch: "main"},
@@ -122,7 +122,7 @@ func TestBuildSummary_ExactOutput(t *testing.T) {
 // TestBuildSummary_NoPinNoNote pins the output when no entry is pinned: no
 // pinned-image note, byte for byte the list then the separator.
 func TestBuildSummary_NoPinNoNote(t *testing.T) {
-	vals := preview.PreviewValues{Services: []preview.ServiceEntry{
+	vals := preview.Values{Services: []preview.ServiceEntry{
 		{Name: "backend-1", Branch: "main"},
 		{Name: "front", Branch: "main"},
 	}}
@@ -174,7 +174,7 @@ func TestBuildSummary_ArgoCDLink(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			vals := preview.PreviewValues{Services: tt.services}
+			vals := preview.Values{Services: tt.services}
 			got := preview.BuildSummary(
 				parsePR(t), "feature-x", vals, preview.URLConfig{}, "https://argocd.example.com", tt.excluded, "m", "u",
 			)
@@ -307,7 +307,7 @@ func TestBuildSummary_PreviewURLPathEscaping(t *testing.T) {
 }
 
 func TestBuildSummary_LinksWrittenHosts(t *testing.T) {
-	vals := preview.PreviewValues{Services: []preview.ServiceEntry{
+	vals := preview.Values{Services: []preview.ServiceEntry{
 		{Name: "front", Branch: "main"},
 		{Name: "backend-2", Branch: "main", Host: "backend-2-feature-pricing.127.0.0.1.nip.io"},
 	}}
@@ -460,7 +460,7 @@ func TestBuildNamespaceInUseSummary(t *testing.T) {
 func TestBuildSummary_Dependencies(t *testing.T) {
 	urls := sharedURLFixture()
 	urls.Expose["mailpit"] = "/ui"
-	vals := preview.PreviewValues{Services: []preview.ServiceEntry{{Name: "front", Branch: "main"}}}
+	vals := preview.Values{Services: []preview.ServiceEntry{{Name: "front", Branch: "main"}}}
 	vals.Dependencies = []preview.DependencyEntry{
 		{
 			Name: "postgres",
