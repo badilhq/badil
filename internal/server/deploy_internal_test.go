@@ -11,6 +11,7 @@ import (
 
 	"github.com/badilhq/badil/internal/api"
 	"github.com/badilhq/badil/internal/app"
+	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
@@ -390,8 +391,8 @@ func TestDeploy_PushUnauthorized(t *testing.T) {
 }
 
 // previewWriteResult is the write of backend-1 in a three-service preview.
-func previewWriteResult() *store.WriteResult {
-	return &store.WriteResult{
+func previewWriteResult() *lifecycle.WriteResult {
+	return &lifecycle.WriteResult{
 		Values: preview.Values{Services: []preview.ServiceEntry{
 			{Name: "backend-1", Branch: "main", CommitSha: "abc1234567890"},
 			{Name: "backend-2", Branch: "main"},
@@ -415,7 +416,7 @@ func TestDeploy_PreviewLimitReadErrors(t *testing.T) {
 		},
 		{
 			name:   "list previews",
-			fg:     &fakeGitops{listErr: errors.Join(store.ErrUnauthorized, errors.New("list boom"))},
+			fg:     &fakeGitops{listErr: errors.Join(lifecycle.ErrUnauthorized, errors.New("list boom"))},
 			status: http.StatusBadGateway,
 			op:     "list previews: ",
 		},

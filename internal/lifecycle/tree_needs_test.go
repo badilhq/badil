@@ -4,9 +4,9 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
-	"github.com/badilhq/badil/internal/store"
 )
 
 // partNames returns the service names then the dependency names of vals.
@@ -25,7 +25,7 @@ func partNames(vals preview.Values) []string {
 // writes front and what it needs, and that a deploy of payments to the same
 // preview adds payments and kafka.
 func TestDeploy_Needs(t *testing.T) {
-	catalog, err := store.ParseCatalog([]byte(needsBadil))
+	cat, err := catalog.Parse([]byte(needsBadil))
 	if err != nil {
 		t.Fatalf("ParseCatalog: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestDeploy_Needs(t *testing.T) {
 		s := &writeServer{files: files}
 		in := sampleInputs()
 		in.ServiceName = service
-		res, _, writeErr := deploy(s.start(t), "slug", catalog, service, "abc1234567890", in, false)
+		res, _, writeErr := deploy(s.start(t), "slug", cat, service, "abc1234567890", in, false)
 		if writeErr != nil {
 			t.Fatalf("Apply %s: %v", service, writeErr)
 		}

@@ -11,7 +11,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/forge"
+	"github.com/badilhq/badil/internal/forge/github/githubtest"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
@@ -36,7 +38,7 @@ import (
 // read back from the pushed file), the last preview a PR left (teardownSlug,
 // teardownOwner, teardownRepo, teardownNumber) and the previews synced.
 type fakeGitops struct {
-	storetest.GitHubURLs
+	githubtest.URLs
 
 	t          *testing.T
 	catalog    []string
@@ -88,7 +90,7 @@ type fakeGitops struct {
 
 	// writeResult is not read: Apply writes the remote. Tests written for
 	// the contents API store still set it.
-	writeResult *store.WriteResult
+	writeResult *lifecycle.WriteResult
 
 	capturedInputs   preview.DeployInputs
 	capturedService  string
@@ -133,20 +135,20 @@ func (f *fakeGitops) open(t *testing.T) {
 	f.remote, f.st = storetest.Gitops(t, f.badil(), f.previews, f.stale, f.raw, f.storeOpts...)
 }
 
-func (f *fakeGitops) FetchServiceCatalog(_ context.Context) (*store.ServiceCatalog, error) {
+func (f *fakeGitops) FetchServiceCatalog(_ context.Context) (*catalog.Catalog, error) {
 	if f.started != nil {
 		f.started <- "catalog"
 	}
 	if f.catalogErr != nil {
 		return nil, f.catalogErr
 	}
-	return store.ParseCatalog([]byte(f.badil()))
+	return catalog.Parse([]byte(f.badil()))
 }
 
 // prRef matches the owner/repo#number a commit subject names.
 var prRef = regexp.MustCompile(`([^\s/]+)/([^\s/#]+)#(\d+)`)
 
-func (f *fakeGitops) Apply(ctx context.Context, op store.Op) (store.Result, error) {
+func (f *fakeGitops) Apply(ctx context.Context, op lifecycle.Op) (lifecycle.Result, error) {
 	if f.started != nil {
 		f.started <- "apply"
 	}
@@ -157,13 +159,13 @@ func (f *fakeGitops) Apply(ctx context.Context, op store.Op) (store.Result, erro
 		panic("fake apply panic")
 	}
 	if f.applyErr != nil {
-		return store.Result{}, f.applyErr
+		return lifecycle.Result{}, f.applyErr
 	}
-	if op.Kind == store.OpDeploy && f.previewErr != nil {
-		return store.Result{}, &lifecycle.CapCheckError{Op: "read preview", Err: f.previewErr}
+	if op.Kind == lifecycle.OpDeploy && f.previewErr != nil {
+		return lifecycle.Result{}, &lifecycle.CapCheckError{Op: "read preview", Err: f.previewErr}
 	}
-	if op.Kind == store.OpDeploy && f.listErr != nil {
-		return store.Result{}, &lifecycle.CapCheckError{Op: "list previews", Err: f.listErr}
+	if op.Kind == lifecycle.OpDeploy && f.listErr != nil {
+		return lifecycle.Result{}, &lifecycle.CapCheckError{Op: "list previews", Err: f.listErr}
 	}
 	res, err := f.st.Apply(ctx, op)
 	if err != nil || res.NoOp {
@@ -250,7 +252,7 @@ func (f *fakeGitops) ListOpenPullRequests(_ context.Context, owner, repo string)
 	return f.openPRs[owner+"/"+repo], nil
 }
 
-func (f *fakeGitops) FetchServiceCatalogSHA(ctx context.Context) (*store.ServiceCatalog, string, error) {
+func (f *fakeGitops) FetchServiceCatalogSHA(ctx context.Context) (*catalog.Catalog, string, error) {
 	f.syncMu.Lock()
 	f.catalogInvalidations = f.invalidations
 	f.syncMu.Unlock()

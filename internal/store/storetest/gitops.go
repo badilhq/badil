@@ -8,37 +8,10 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	forgegithub "github.com/badilhq/badil/internal/forge/github"
+	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
 )
-
-// GitHubForge is the GitHub forge on the default GITHUB_URL,
-// https://github.com, without a client: its ParsePRURL and ParseRepoURL are
-// the default repo and pull request URL rules.
-var GitHubForge = newGitHubForge() //nolint:gochecknoglobals // test fixture
-
-func newGitHubForge() *forgegithub.Forge {
-	f, err := forgegithub.New(nil, nil, 0, "https://github.com")
-	if err != nil {
-		panic(err)
-	}
-	return f
-}
-
-// GitHubURLs gives a forge fake the default repo and pull request URL rules:
-// its ParseRepoURL and ParsePRURL are those of GitHubForge. Embed it.
-type GitHubURLs struct{}
-
-// ParseRepoURL is GitHubForge's ParseRepoURL.
-func (GitHubURLs) ParseRepoURL(u string) (string, string, bool) {
-	return GitHubForge.ParseRepoURL(u)
-}
-
-// ParsePRURL is GitHubForge's ParsePRURL.
-func (GitHubURLs) ParsePRURL(u string) (string, string, int, bool) {
-	return GitHubForge.ParsePRURL(u)
-}
 
 // GitopsURL is the git URL of the gitops repo of the stores Gitops opens,
 // acme/gitops: their full name, commit links and preview files' gitopsRepoURL
@@ -53,7 +26,7 @@ var Identity = store.CommitIdentity{ //nolint:gochecknoglobals // test fixture
 
 // Project returns vals projected on catalog, as a sync of the acme/gitops
 // store writes it. The projection's logs are discarded.
-func Project(slug string, vals preview.Values, catalog *store.ServiceCatalog) preview.Values {
+func Project(slug string, vals preview.Values, catalog *catalog.Catalog) preview.Values {
 	cat := catalog.Catalog
 	cat.GitopsRepoURL = GitopsURL
 	prev := slog.Default()
@@ -77,15 +50,15 @@ func Gitops(
 ) (*Remote, *store.GitHubStore) {
 	t.Helper()
 	files := map[string]string{}
-	var catalog *store.ServiceCatalog
+	var cat *catalog.Catalog
 	if badil != "" {
 		files["badil.yaml"] = badil
-		catalog, _ = store.ParseCatalog([]byte(badil))
+		cat, _ = catalog.Parse([]byte(badil))
 	}
 	for slug, vals := range previews {
 		v := *vals
-		if catalog != nil && !stale[slug] {
-			v = Project(slug, v, catalog)
+		if cat != nil && !stale[slug] {
+			v = Project(slug, v, cat)
 		}
 		out, err := yaml.Marshal(v)
 		if err != nil {

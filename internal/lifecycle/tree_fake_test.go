@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
@@ -119,9 +120,9 @@ func openStore(t *testing.T, remoteURL string, opts ...store.Option) *store.GitH
 
 // apply runs change on c as one operation of kind.
 func apply(
-	c *store.GitHubStore, kind string, change func(lifecycle.Tree) (store.Summary, error),
-) (store.Result, error) {
-	return c.Apply(context.Background(), store.Op{Kind: kind, Change: change})
+	c *store.GitHubStore, kind string, change func(lifecycle.Tree) (lifecycle.Summary, error),
+) (lifecycle.Result, error) {
+	return c.Apply(context.Background(), lifecycle.Op{Kind: kind, Change: change})
 }
 
 // deploy pins service at sha in the preview slug (Tree.Deploy) as one deploy
@@ -129,16 +130,16 @@ func apply(
 func deploy(
 	c *store.GitHubStore,
 	slug string,
-	catalog *store.ServiceCatalog,
+	catalog *catalog.Catalog,
 	service, sha string,
 	in preview.DeployInputs,
 	skipUnchanged bool,
-) (*lifecycle.WriteResult, store.Result, error) {
+) (*lifecycle.WriteResult, lifecycle.Result, error) {
 	var res *lifecycle.WriteResult
-	out, err := apply(c, store.OpDeploy, func(tree lifecycle.Tree) (store.Summary, error) {
+	out, err := apply(c, lifecycle.OpDeploy, func(tree lifecycle.Tree) (lifecycle.Summary, error) {
 		var deployErr error
 		res, deployErr = lifecycle.DeployPreview(tree, slug, catalog, service, sha, in, skipUnchanged)
-		return store.Summary{Subject: "deploy " + service + " to " + slug}, deployErr
+		return lifecycle.Summary{Subject: "deploy " + service + " to " + slug}, deployErr
 	})
 	return res, out, err
 }

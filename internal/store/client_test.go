@@ -8,6 +8,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/store"
 	"github.com/badilhq/badil/internal/store/storetest"
 )
@@ -56,7 +57,7 @@ func TestFetchServiceCatalogSHA(t *testing.T) {
 			wantSvcs: []string{"front"},
 		},
 		{name: "unparsable keeps the sha", content: "services: [", wantSHA: true},
-		{name: "missing has no sha", wantErr: store.ErrNotFound},
+		{name: "missing has no sha", wantErr: lifecycle.ErrNotFound},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -181,7 +182,7 @@ func TestGetPreview_NotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !errors.Is(err, store.ErrNotFound) {
+	if !errors.Is(err, lifecycle.ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }

@@ -621,7 +621,7 @@ func touchedServices(
 }
 
 // touches reports whether a file of files, or the path it was renamed from,
-// matches one of patterns. The patterns are valid: ParseCatalog checked them.
+// matches one of patterns. The patterns are valid: catalog.Parse checked them.
 func touches(patterns []string, files []forge.ChangedFile) bool {
 	match := func(name string) bool {
 		return name != "" && slices.ContainsFunc(patterns, func(p string) bool {

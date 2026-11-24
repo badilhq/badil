@@ -18,18 +18,6 @@ import (
 	"github.com/badilhq/badil/internal/lifecycle"
 )
 
-// OpDeploy is lifecycle.OpDeploy.
-const OpDeploy = lifecycle.OpDeploy
-
-// OpTeardown is lifecycle.OpTeardown.
-const OpTeardown = lifecycle.OpTeardown
-
-// OpSweep is lifecycle.OpSweep.
-const OpSweep = lifecycle.OpSweep
-
-// OpSync is lifecycle.OpSync.
-const OpSync = lifecycle.OpSync
-
 // maxAttempts is how many times Apply runs an operation and pushes it before
 // it gives up on conflicts.
 const maxAttempts = 5
@@ -47,15 +35,6 @@ type CommitIdentity struct {
 	Name, Email string
 }
 
-// Summary is lifecycle.Summary.
-type Summary = lifecycle.Summary
-
-// Op is lifecycle.Op.
-type Op = lifecycle.Op
-
-// Result is lifecycle.Result.
-type Result = lifecycle.Result
-
 // Apply runs op on the gitops repo as one commit. Operations are serialised
 // in the process. Each attempt fetches the default branch, runs op.Change on
 // the tree of the fetched head and, unless it changed nothing, commits the
@@ -63,17 +42,17 @@ type Result = lifecycle.Result
 // without force. A push that fails while the remote head moved since the
 // fetch is a conflict: it is counted, and the next attempt starts again from
 // a new fetch, after a backoff, up to maxAttempts attempts. Any other push
-// failure is returned, as ErrUnauthorized when the remote refused the
+// failure is returned, as lifecycle.ErrUnauthorized when the remote refused the
 // credentials. Its duration, retries included, is observed as op.Kind. Once
 // a push landed, Apply calls the store's WithApplied callback with its
 // result.
 //
 // An Apply waiting for the one before it gives up when ctx is done, with
 // ctx's error and nothing run, observed as a failed op.Kind.
-func (c *GitHubStore) Apply(ctx context.Context, op Op) (Result, error) {
+func (c *GitHubStore) Apply(ctx context.Context, op lifecycle.Op) (lifecycle.Result, error) {
 	if err := c.acquire(ctx); err != nil {
 		c.observe(op.Kind, time.Now(), err)
-		return Result{}, err
+		return lifecycle.Result{}, err
 	}
 	defer func() { <-c.applySlot }()
 	start := time.Now()
@@ -102,11 +81,11 @@ func (c *GitHubStore) acquire(ctx context.Context) error {
 }
 
 // apply is Apply, unserialised and untimed.
-func (c *GitHubStore) apply(ctx context.Context, op Op) (Result, error) {
+func (c *GitHubStore) apply(ctx context.Context, op lifecycle.Op) (lifecycle.Result, error) {
 	for attempt := 1; ; attempt++ {
 		if attempt > 1 {
 			if err := c.sleep(ctx, backoff(attempt-1)); err != nil {
-				return Result{}, err
+				return lifecycle.Result{}, err
 			}
 		}
 		res, parent, err := c.attempt(ctx, op)
@@ -115,22 +94,22 @@ func (c *GitHubStore) apply(ctx context.Context, op Op) (Result, error) {
 			return res, err
 		}
 		pushErr := failed.err
-		if errors.Is(pushErr, ErrUnauthorized) {
-			return Result{}, pushErr
+		if errors.Is(pushErr, lifecycle.ErrUnauthorized) {
+			return lifecycle.Result{}, pushErr
 		}
 		if err = c.clone.fetch(ctx); err != nil {
-			return Result{}, err
+			return lifecycle.Result{}, err
 		}
 		head, err := c.clone.lockedRemoteHead()
 		if err != nil {
-			return Result{}, err
+			return lifecycle.Result{}, err
 		}
 		if head == parent {
-			return Result{}, pushErr
+			return lifecycle.Result{}, pushErr
 		}
 		c.metrics.PushConflict(op.Kind)
 		if attempt == maxAttempts {
-			return Result{}, fmt.Errorf("push gitops repo: %d attempts conflicted: %w", attempt, pushErr)
+			return lifecycle.Result{}, fmt.Errorf("push gitops repo: %d attempts conflicted: %w", attempt, pushErr)
 		}
 	}
 }
@@ -146,56 +125,61 @@ func (p *pushError) Unwrap() error { return p.err }
 // attempt is one attempt of apply: fetch, Change, commit and push. It
 // returns the result and the parent commit. A failed push is a
 // *pushError.
-func (c *GitHubStore) attempt(ctx context.Context, op Op) (Result, plumbing.Hash, error) {
+func (c *GitHubStore) attempt(ctx context.Context, op lifecycle.Op) (lifecycle.Result, plumbing.Hash, error) {
 	if err := c.clone.fetch(ctx); err != nil {
-		return Result{}, plumbing.ZeroHash, err
+		return lifecycle.Result{}, plumbing.ZeroHash, err
 	}
 	parent, tree, summary, err := c.change(op)
 	if err != nil {
-		return Result{}, parent, err
+		return lifecycle.Result{}, parent, err
 	}
 	if !tree.staged() {
 		return c.noop(parent)
 	}
 	commit, err := c.clone.commit(parent, tree, c.message(summary, tree), c.identity)
 	if err != nil {
-		return Result{}, parent, err
+		return lifecycle.Result{}, parent, err
 	}
 	if commit.IsZero() {
 		return c.noop(parent)
 	}
 	if err = c.clone.push(ctx, commit); err != nil {
-		return Result{}, parent, &pushError{err: err}
+		return lifecycle.Result{}, parent, &pushError{err: err}
 	}
 	if err = c.clone.advance(parent, commit); err != nil {
-		return Result{}, parent, err
+		return lifecycle.Result{}, parent, err
 	}
-	return Result{
+	return lifecycle.Result{
 		Commit: commit.String(), Subject: summary.Subject, URL: c.commitURL(commit), Deleted: tree.deleted(),
 	}, parent, nil
 }
 
 // noop returns the result of an attempt that changed nothing on parent.
-func (c *GitHubStore) noop(parent plumbing.Hash) (Result, plumbing.Hash, error) {
+func (c *GitHubStore) noop(parent plumbing.Hash) (lifecycle.Result, plumbing.Hash, error) {
 	subject, err := c.clone.subject(parent)
 	if err != nil {
-		return Result{}, parent, err
+		return lifecycle.Result{}, parent, err
 	}
-	return Result{NoOp: true, Commit: parent.String(), Subject: subject, URL: c.commitURL(parent)}, parent, nil
+	return lifecycle.Result{
+		NoOp:    true,
+		Commit:  parent.String(),
+		Subject: subject,
+		URL:     c.commitURL(parent),
+	}, parent, nil
 }
 
 // change runs op.Change on the tree of the remote-tracking ref, holding the
 // clone's read lock, and returns that ref's commit, the tree and the summary.
-func (c *GitHubStore) change(op Op) (plumbing.Hash, *Tree, Summary, error) {
+func (c *GitHubStore) change(op lifecycle.Op) (plumbing.Hash, *Tree, lifecycle.Summary, error) {
 	c.clone.mu.RLock()
 	defer c.clone.mu.RUnlock()
 	parent, err := c.clone.remoteHead()
 	if err != nil {
-		return parent, nil, Summary{}, err
+		return parent, nil, lifecycle.Summary{}, err
 	}
 	root, err := c.clone.tree()
 	if err != nil {
-		return parent, nil, Summary{}, err
+		return parent, nil, lifecycle.Summary{}, err
 	}
 	tree := newTree(root, c.gitopsRepoURL())
 	summary, err := op.Change(tree)
@@ -204,7 +188,7 @@ func (c *GitHubStore) change(op Op) (plumbing.Hash, *Tree, Summary, error) {
 
 // message returns the commit message of summary: its subject and, after a
 // blank line, tree's body lines.
-func (c *GitHubStore) message(summary Summary, tree *Tree) string {
+func (c *GitHubStore) message(summary lifecycle.Summary, tree *Tree) string {
 	msg := summary.Subject + "\n"
 	if lines := tree.body(); len(lines) > 0 {
 		msg += "\n" + strings.Join(lines, "\n") + "\n"
@@ -410,7 +394,7 @@ func (c *gitClone) writeBlob(content []byte) (plumbing.Hash, error) {
 
 // push pushes commit to the remote branch without force, holding the read
 // lock. The remote-tracking ref is left alone. A refusal of the credentials
-// is ErrUnauthorized.
+// is lifecycle.ErrUnauthorized.
 func (c *gitClone) push(ctx context.Context, commit plumbing.Hash) error {
 	auth, err := c.auth(ctx)
 	if err != nil {

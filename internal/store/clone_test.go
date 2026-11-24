@@ -304,13 +304,13 @@ func TestFreshness_ApplyReadsBackAtOnce(t *testing.T) {
 	clock := &fakeClock{t: time.Now()}
 	store.SetNow(st, clock.now)
 
-	_, err := apply(st, store.OpDeploy, func(tree lifecycle.Tree) (store.Summary, error) {
+	_, err := apply(st, lifecycle.OpDeploy, func(tree lifecycle.Tree) (lifecycle.Summary, error) {
 		vals, getErr := tree.GetPreview("a")
 		if getErr != nil {
-			return store.Summary{}, getErr
+			return lifecycle.Summary{}, getErr
 		}
 		vals.Services[0].Name = "second"
-		return store.Summary{Subject: "rename"}, tree.PutPreview("a", *vals)
+		return lifecycle.Summary{Subject: "rename"}, tree.PutPreview("a", *vals)
 	})
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -360,7 +360,7 @@ func TestOpen_RemoteRefusesCredentials(t *testing.T) {
 				store.CloneConfig{URL: srv.URL + "/acme/gitops.git", Credentials: creds},
 				storetest.Identity,
 			)
-			if !errors.Is(err, store.ErrUnauthorized) {
+			if !errors.Is(err, lifecycle.ErrUnauthorized) {
 				t.Errorf("Open = %v, want ErrUnauthorized", err)
 			}
 		})
@@ -491,14 +491,14 @@ func TestCredentials_BasicAuth(t *testing.T) {
 			if got := serviceName(t, st); got != "second" {
 				t.Fatalf("service = %q, want the fetched second", got)
 			}
-			_, err = st.Apply(context.Background(), store.Op{
-				Kind: store.OpDeploy,
-				Change: func(tree lifecycle.Tree) (store.Summary, error) {
+			_, err = st.Apply(context.Background(), lifecycle.Op{
+				Kind: lifecycle.OpDeploy,
+				Change: func(tree lifecycle.Tree) (lifecycle.Summary, error) {
 					tree.DeletePreview("a")
-					return store.Summary{Subject: "chore(preview): delete a"}, nil
+					return lifecycle.Summary{Subject: "chore(preview): delete a"}, nil
 				},
 			})
-			if !errors.Is(err, store.ErrUnauthorized) {
+			if !errors.Is(err, lifecycle.ErrUnauthorized) {
 				t.Fatalf("Apply = %v, want the push refused with 403", err)
 			}
 
@@ -525,7 +525,7 @@ func TestCredentials_WrongToken(t *testing.T) {
 	if err == nil {
 		_ = st.Close()
 	}
-	if !errors.Is(err, store.ErrUnauthorized) || strings.Contains(err.Error(), token) {
+	if !errors.Is(err, lifecycle.ErrUnauthorized) || strings.Contains(err.Error(), token) {
 		t.Fatalf("Open = %v, want ErrUnauthorized without the token", err)
 	}
 	if reqs := a.requests(); len(reqs) == 0 || reqs[0] != "git-upload-pack x-access-token:"+token {
@@ -546,7 +546,7 @@ func TestOpen_CredentialProviderError(t *testing.T) {
 		store.CloneConfig{URL: srv.URL + "/acme/gitops.git", Credentials: creds},
 		storetest.Identity,
 	)
-	if !errors.Is(err, store.ErrUnauthorized) || !strings.Contains(err.Error(), "token mint failed") {
+	if !errors.Is(err, lifecycle.ErrUnauthorized) || !strings.Contains(err.Error(), "token mint failed") {
 		t.Errorf("Open = %v, want ErrUnauthorized with the provider's error", err)
 	}
 	if n := requests.Load(); n != 0 {
@@ -595,7 +595,7 @@ func TestCredentials_BeforeEachGitCall(t *testing.T) {
 
 	failing.Store(true)
 	st.Invalidate()
-	if _, _, readErr := st.GetPreview(context.Background(), "a"); !errors.Is(readErr, store.ErrUnauthorized) {
+	if _, _, readErr := st.GetPreview(context.Background(), "a"); !errors.Is(readErr, lifecycle.ErrUnauthorized) {
 		t.Errorf("GetPreview = %v, want ErrUnauthorized", readErr)
 	}
 }

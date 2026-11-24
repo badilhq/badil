@@ -10,7 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/forge"
+	"github.com/badilhq/badil/internal/forge/github/githubtest"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
@@ -41,7 +43,7 @@ const fetchedSHA = "fe7c4ed0000000000000000000000000000000ff"
 // whose error fails the push. calls logs, in order, "files", "apply",
 // "upsert" and "fanout". Metrics records the outcomes; nil records nothing.
 type reconcileFake struct {
-	storetest.GitHubURLs
+	githubtest.URLs
 	*metrics.Metrics
 
 	badil       string
@@ -67,7 +69,7 @@ type reconcileFake struct {
 	calls   []string
 }
 
-func (f *reconcileFake) FetchServiceCatalog(ctx context.Context) (*store.ServiceCatalog, error) {
+func (f *reconcileFake) FetchServiceCatalog(ctx context.Context) (*catalog.Catalog, error) {
 	if f.catalogErr != nil {
 		return nil, f.catalogErr
 	}
@@ -78,7 +80,7 @@ func (f *reconcileFake) GetPreview(ctx context.Context, slug string) (*preview.V
 	return f.g.st.GetPreview(ctx, slug)
 }
 
-func (f *reconcileFake) Apply(ctx context.Context, op store.Op) (store.Result, error) {
+func (f *reconcileFake) Apply(ctx context.Context, op lifecycle.Op) (lifecycle.Result, error) {
 	f.calls = append(f.calls, "apply")
 	return f.g.st.Apply(ctx, op)
 }

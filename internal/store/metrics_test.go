@@ -19,18 +19,18 @@ func TestClientMetrics_TimesApplyByKind(t *testing.T) {
 	// The clone made when the store opened is timed too.
 	want := map[string]uint64{"clone/ok": 1}
 
-	fail := func(lifecycle.Tree) (store.Summary, error) { return store.Summary{}, errors.New("boom") }
-	noop := func(lifecycle.Tree) (store.Summary, error) { return store.Summary{Subject: "noop"}, nil }
+	fail := func(lifecycle.Tree) (lifecycle.Summary, error) { return lifecycle.Summary{}, errors.New("boom") }
+	noop := func(lifecycle.Tree) (lifecycle.Summary, error) { return lifecycle.Summary{Subject: "noop"}, nil }
 	for _, op := range []struct {
 		kind   string
-		change func(lifecycle.Tree) (store.Summary, error)
+		change func(lifecycle.Tree) (lifecycle.Summary, error)
 	}{
-		{store.OpDeploy, rename("a", "deployed", "deploy")},
-		{store.OpTeardown, fail},
-		{store.OpTeardown, noop},
-		{store.OpSweep, rename("a", "swept", "sweep")},
-		{store.OpSync, fail},
-		{store.OpSync, noop},
+		{lifecycle.OpDeploy, rename("a", "deployed", "deploy")},
+		{lifecycle.OpTeardown, fail},
+		{lifecycle.OpTeardown, noop},
+		{lifecycle.OpSweep, rename("a", "swept", "sweep")},
+		{lifecycle.OpSync, fail},
+		{lifecycle.OpSync, noop},
 	} {
 		_, _ = apply(c, op.kind, op.change)
 	}
@@ -61,7 +61,7 @@ func TestWithMetrics_NilRecordsNothing(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			f := newGitopsFake(t, map[string]string{"previews/a/values.yaml": previewFile("a")})
 			c := f.open(t, opt)
-			if _, err := apply(c, store.OpDeploy, rename("a", "deployed", "deploy")); err != nil {
+			if _, err := apply(c, lifecycle.OpDeploy, rename("a", "deployed", "deploy")); err != nil {
 				t.Fatalf("deploy Apply: %v", err)
 			}
 		})

@@ -9,6 +9,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
@@ -34,12 +35,12 @@ func hostURLs() preview.URLConfig {
 
 // testCatalog is a catalog of services, each at https://github.com/acme/<name>.git
 // and tracking main, with the hosts of hostURLs.
-func testCatalog(services ...string) *store.ServiceCatalog {
+func testCatalog(services ...string) *catalog.Catalog {
 	repos := make(map[string]string, len(services))
 	for _, name := range services {
 		repos[name] = "https://github.com/acme/" + name + ".git"
 	}
-	return &store.ServiceCatalog{Catalog: preview.Catalog{Services: services, Repos: repos}, URLs: hostURLs()}
+	return &catalog.Catalog{Catalog: preview.Catalog{Services: services, Repos: repos}, URLs: hostURLs()}
 }
 
 // assertCatalogFacts checks that vals has the apiVersion and gitops repo of
@@ -213,7 +214,7 @@ func TestDeploy_SkipUnchanged(t *testing.T) {
 		name          string
 		files         []string
 		conflicts     int
-		catalog       func(*store.ServiceCatalog)
+		catalog       func(*catalog.Catalog)
 		skipUnchanged bool
 		wantUnchanged bool
 		wantPuts      int
@@ -248,17 +249,17 @@ func TestDeploy_SkipUnchanged(t *testing.T) {
 		{
 			name:  "catalog branch change",
 			files: []string{pinnedFile()}, skipUnchanged: true, wantPuts: 1,
-			catalog: func(c *store.ServiceCatalog) { c.Branches = map[string]string{"backend-2": "develop"} },
+			catalog: func(c *catalog.Catalog) { c.Branches = map[string]string{"backend-2": "develop"} },
 		},
 		{
 			name:  "catalog repo url change",
 			files: []string{pinnedFile()}, skipUnchanged: true, wantPuts: 1,
-			catalog: func(c *store.ServiceCatalog) { c.Catalog.Repos["backend-2"] = "https://github.com/acme/b2.git" },
+			catalog: func(c *catalog.Catalog) { c.Catalog.Repos["backend-2"] = "https://github.com/acme/b2.git" },
 		},
 		{
 			name:  "service removed from the catalog",
 			files: []string{pinnedFile()}, skipUnchanged: true, wantPuts: 1,
-			catalog: func(c *store.ServiceCatalog) {
+			catalog: func(c *catalog.Catalog) {
 				delete(c.Catalog.Repos, "backend-2")
 				c.Services = c.Services[:1]
 			},
@@ -310,7 +311,7 @@ func TestDeploy_SkipUnchanged(t *testing.T) {
 
 // assertSkipResult checks result is an update pushed as one commit, or, when
 // unchanged, the fetched file with no commit.
-func assertSkipResult(t *testing.T, result *lifecycle.WriteResult, out store.Result, unchanged bool) {
+func assertSkipResult(t *testing.T, result *lifecycle.WriteResult, out lifecycle.Result, unchanged bool) {
 	t.Helper()
 	if result.Unchanged != unchanged || result.Created {
 		t.Errorf("Unchanged, Created = %v, %v; want %v, false", result.Unchanged, result.Created, unchanged)

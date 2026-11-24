@@ -11,7 +11,6 @@ import (
 	"github.com/badilhq/badil/internal/api"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
-	"github.com/badilhq/badil/internal/store"
 )
 
 // handleSync syncs every preview, or the one the body names, with badil.yaml,
@@ -44,7 +43,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			status, msg = http.StatusNotFound, fmt.Sprintf("preview %s not found", slug)
 		case errors.Is(err, lifecycle.ErrConfigUnavailable):
 			status = http.StatusServiceUnavailable
-		case errors.Is(err, store.ErrUnauthorized):
+		case errors.Is(err, lifecycle.ErrUnauthorized):
 			status = http.StatusBadGateway
 		}
 		slog.WarnContext(ctx, "sync failed",

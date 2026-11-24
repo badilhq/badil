@@ -15,12 +15,12 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
+	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/forge"
+	"github.com/badilhq/badil/internal/forge/github/githubtest"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
-	"github.com/badilhq/badil/internal/store"
-	"github.com/badilhq/badil/internal/store/storetest"
 )
 
 var errUnexpected = errors.New("unexpected call")
@@ -33,7 +33,7 @@ var errUnexpected = errors.New("unexpected call")
 // front, on acme/front, whose open PRs are openPRs, or openErr. Run counts
 // the catch-ups of a sweep loop.
 type loopFake struct {
-	storetest.GitHubURLs
+	githubtest.URLs
 	*metrics.Metrics
 
 	slugs   []string
@@ -57,8 +57,8 @@ func (f *loopFake) Run(context.Context) {
 	f.sweepsAtCatchUp = append(f.sweepsAtCatchUp, f.calls)
 }
 
-func (f *loopFake) FetchServiceCatalog(context.Context) (*store.ServiceCatalog, error) {
-	return store.ParseCatalog([]byte("services:\n  front: {repo: https://github.com/acme/front.git}\n"))
+func (f *loopFake) FetchServiceCatalog(context.Context) (*catalog.Catalog, error) {
+	return catalog.Parse([]byte("services:\n  front: {repo: https://github.com/acme/front.git}\n"))
 }
 
 func (f *loopFake) ListPreviews(ctx context.Context) ([]string, error) {
@@ -89,15 +89,15 @@ func (f *loopFake) counts() (int, int) {
 }
 
 func (f *loopFake) GetPreview(context.Context, string) (*preview.Values, string, error) {
-	return nil, "", store.ErrNotFound
+	return nil, "", lifecycle.ErrNotFound
 }
 
 func (f *loopFake) GetPullRequest(context.Context, string, string, int) (*forge.PullRequest, error) {
 	return nil, errUnexpected
 }
 
-func (f *loopFake) Apply(context.Context, store.Op) (store.Result, error) {
-	return store.Result{NoOp: true}, nil
+func (f *loopFake) Apply(context.Context, lifecycle.Op) (lifecycle.Result, error) {
+	return lifecycle.Result{NoOp: true}, nil
 }
 
 func (f *loopFake) UpsertComment(context.Context, string, string, int, string) error {

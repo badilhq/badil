@@ -6,6 +6,7 @@ import (
 	"maps"
 	"testing"
 
+	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store"
@@ -14,7 +15,7 @@ import (
 // withDependencies sets on c the dependencies postgres (an OCI chart with
 // values and a values file) and mailpit (a chart of a Helm repository,
 // exposed), in that order.
-func withDependencies(c *store.ServiceCatalog) {
+func withDependencies(c *catalog.Catalog) {
 	c.Dependencies = []preview.DependencyEntry{
 		{
 			Name: "postgres",
@@ -165,12 +166,12 @@ func TestSync_ShadowedDependency(t *testing.T) {
 
 // syncSlug syncs the preview slug with catalog (Tree.Sync) as one sync
 // operation.
-func syncSlug(c *store.GitHubStore, catalog *store.ServiceCatalog) (*lifecycle.SyncResult, error) {
+func syncSlug(c *store.GitHubStore, catalog *catalog.Catalog) (*lifecycle.SyncResult, error) {
 	var res *lifecycle.SyncResult
-	_, err := apply(c, store.OpSync, func(tree lifecycle.Tree) (store.Summary, error) {
+	_, err := apply(c, lifecycle.OpSync, func(tree lifecycle.Tree) (lifecycle.Summary, error) {
 		var syncErr error
 		res, syncErr = lifecycle.SyncPreview(tree, "slug", catalog)
-		return store.Summary{Subject: "sync"}, syncErr
+		return lifecycle.Summary{Subject: "sync"}, syncErr
 	})
 	return res, err
 }

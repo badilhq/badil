@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/badilhq/badil/internal/forge/github/githubtest"
 	"github.com/badilhq/badil/internal/preview"
 	"github.com/badilhq/badil/internal/store/storetest"
 )
@@ -142,7 +143,7 @@ func TestSweep_SyncComments(t *testing.T) {
 				c := f.g.pushed()[0]
 				written := *f.g.file("feature-x")
 				want := preview.BuildSummary(
-					storetest.GitHubForge.ParsePRURL,
+					githubtest.Forge.ParsePRURL,
 					"feature-x",
 					written,
 					preview.URLConfig{},

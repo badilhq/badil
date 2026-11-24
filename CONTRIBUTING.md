@@ -26,6 +26,7 @@ Run `make lint` before pushing; the `golangci-lint` check runs the same linters.
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/): `type(scope): description`.
 - Add or update tests with behaviour changes.
 - A change to the preview contract ([`docs/CONTRACT.md`](docs/CONTRACT.md)) regenerates the schemas (`make schema`) and the goldens (`make contract-golden`). Adding, removing or changing a field means a new `apiVersion` (`v1beta2`, or `v1`, under `badil.dev/`): the contract rejects unknown fields, so a v1beta1 renderer refuses the file.
+- A new Go package goes into a layer of [Code layers](docs/ARCHITECTURE.md#code-layers): add it to the table there, to a depguard rule in `.golangci.yml` and to the map in `internal/archtest`.
 
 ## Releases
 

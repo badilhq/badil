@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/forge"
+	"github.com/badilhq/badil/internal/forge/github/githubtest"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
-	"github.com/badilhq/badil/internal/store"
-	"github.com/badilhq/badil/internal/store/storetest"
 )
 
 // quiet is how long a test waits to conclude that nothing happens.
@@ -84,7 +84,7 @@ func (f *syncFake) applied() int {
 	return f.applies
 }
 
-func (f *syncFake) FetchServiceCatalogSHA(ctx context.Context) (*store.ServiceCatalog, string, error) {
+func (f *syncFake) FetchServiceCatalogSHA(ctx context.Context) (*catalog.Catalog, string, error) {
 	f.mu.Lock()
 	f.catalogReads++
 	sha, catalogErr := f.sha, f.catalogErr
@@ -96,7 +96,7 @@ func (f *syncFake) FetchServiceCatalogSHA(ctx context.Context) (*store.ServiceCa
 	return catalog, sha, err
 }
 
-func (f *syncFake) Apply(ctx context.Context, op store.Op) (store.Result, error) {
+func (f *syncFake) Apply(ctx context.Context, op lifecycle.Op) (lifecycle.Result, error) {
 	if f.gate != nil {
 		f.entered <- struct{}{}
 		<-f.gate
@@ -106,18 +106,18 @@ func (f *syncFake) Apply(ctx context.Context, op store.Op) (store.Result, error)
 	applyErr := f.applyErr
 	f.mu.Unlock()
 	if applyErr != nil {
-		return store.Result{}, applyErr
+		return lifecycle.Result{}, applyErr
 	}
 	return f.g.st.Apply(ctx, op)
 }
 
 // api is the lifecycle.SyncAPI over f: its store and recorder, with a
 // fan-out that posts nothing. Its forge is only the default GitHub URL rules
-// (storetest.GitHubForge): it has no client.
+// (githubtest.Forge): it has no client.
 func (f *syncFake) api() lifecycle.SyncAPI {
 	return lifecycle.SyncAPI{
 		Store:    f,
-		Forge:    storetest.GitHubForge,
+		Forge:    githubtest.Forge,
 		Recorder: f,
 		FanOut: func(context.Context, forge.Forge, preview.Values, string) error {
 			return nil
@@ -220,7 +220,7 @@ func TestSyncer_SyncErrors(t *testing.T) {
 		wantApply  int
 	}{
 		{name: "badil.yaml unavailable", catalogErr: errors.New("parse boom"), wantConfig: true},
-		{name: "operation failure", applyErr: store.ErrUnauthorized, wantApply: 1},
+		{name: "operation failure", applyErr: lifecycle.ErrUnauthorized, wantApply: 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
