@@ -45,7 +45,8 @@ func (f *Forge) ParseWebhook(r *http.Request) (forge.Event, error) {
 	if err != nil {
 		// A rejected delivery means a misconfigured secret or someone probing
 		// the public endpoint with forged requests — worth surfacing. Log the
-		// source and event type only; never the (untrusted) payload.
+		// event type and the TCP peer only (behind an Ingress, the ingress
+		// controller's address); never the (untrusted) payload.
 		slog.WarnContext(ctx, "webhook signature rejected",
 			slog.String("event", eventType),
 			slog.String("remote_addr", r.RemoteAddr),
