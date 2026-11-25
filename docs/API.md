@@ -212,7 +212,9 @@ badil wait --server https://badil.example.com --token "$BADIL_READ_TOKEN" --repo
 badil wait --slug feature-pricing   # with BADIL_SERVER and BADIL_TOKEN set
 ```
 
-It asks the wait route again until a final state or `--timeout` (a Go duration, default `15m`), and prints one line per state change, then the final state with its reason and the URLs; with `--json`, only the final response body. Connection errors and 5xx answers are retried every 2s until the timeout. It exits:
+Reaching `/v1` through the chart's Ingress needs `ingress.api: true`.
+
+`badil wait` asks the wait route again until a final state or `--timeout` (a Go duration, default `15m`), and prints one line per state change, then the final state with its reason and the URLs; with `--json`, only the final response body. Connection errors and 5xx answers are retried every 2s until the timeout. It exits:
 
 | Code | When |
 |---|---|
@@ -247,7 +249,7 @@ Each event is handled as follows:
 
 Receives the renderer's status callback: the status of one service or dependency of a preview. Its body is part of the renderer contract ([Status callback](CONTRACT.md#status-callback)); Argo CD notifications is the reference sender ([`examples/argocd/notifications-values.yaml`](../examples/argocd/notifications-values.yaml)).
 
-- **Availability:** only when `BADIL_STATUS_TOKEN` is set; 404 otherwise. In the chart, it is the optional `status-token` key of `existingSecret`. The public Ingress exposes the route too.
+- **Availability:** only when `BADIL_STATUS_TOKEN` is set; 404 otherwise. In the chart, it is the optional `status-token` key of `existingSecret`. The chart's Ingress never routes it; Argo CD reaches it through the Service.
 - **Auth:** `Authorization: Bearer $BADIL_STATUS_TOKEN`, compared in constant time. A missing or wrong token gets 401.
 - **Request:** `{ "apiVersion": "badil.dev/v1beta1", "preview", "service", "revision", "status", "at" }`, at most 64 KiB. Unknown fields are ignored.
 - **Response:** 204 for every valid, authorized event, recorded or ignored.
