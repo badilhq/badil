@@ -453,6 +453,33 @@ jobs:
             exit 1
           fi
 
+      - name: Render badil gitops commit identity and signing key
+        run: |
+          # Prints "<kind>:" then GITOPS_COMMIT_NAME and GITOPS_COMMIT_EMAIL as "<name>=<value>" and the Secret key of
+          # GITOPS_SIGNING_KEY as "<secret> <key> optional:<optional>", for the Deployment then the CronJob.
+          commit_env() {
+            vars='[.[] | select(.name == "GITOPS_COMMIT_NAME" or .name == "GITOPS_COMMIT_EMAIL") | .name + "=" + .value] | join(",")'
+            key='[.[] | select(.name == "GITOPS_SIGNING_KEY") | .valueFrom.secretKeyRef | .name + " " + .key + " optional:" + (.optional | to_string)] | join(",")'
+            helm template t charts/badil -f charts/badil/ci/test-values.yaml --set cleanup.enabled=true "$@" \
+              | yq -N "(select(.kind == \"Deployment\") | .kind + \":\" + (.spec.template.spec.containers[0].env | $vars) + \";\" + (.spec.template.spec.containers[0].env | $key)), (select(.kind == \"CronJob\") | .kind + \":\" + (.spec.jobTemplate.spec.template.spec.containers[0].env | $vars) + \";\" + (.spec.jobTemplate.spec.template.spec.containers[0].env | $key))"
+          }
+          got=$(commit_env)
+          want='Deployment:;badil gitops-signing-key optional:true
+          CronJob:;badil gitops-signing-key optional:true'
+          if [ "$got" != "$want" ]; then
+            echo '::error::expected no GITOPS_COMMIT_NAME or GITOPS_COMMIT_EMAIL by default, and GITOPS_SIGNING_KEY from optional key gitops-signing-key of Secret badil, on the Deployment and the CronJob'
+            printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
+            exit 1
+          fi
+          got=$(commit_env --set config.gitopsCommitName=badil-gitops,config.gitopsCommitEmail=badil-gitops@users.noreply.github.com)
+          want='Deployment:GITOPS_COMMIT_NAME=badil-gitops,GITOPS_COMMIT_EMAIL=badil-gitops@users.noreply.github.com;badil gitops-signing-key optional:true
+          CronJob:GITOPS_COMMIT_NAME=badil-gitops,GITOPS_COMMIT_EMAIL=badil-gitops@users.noreply.github.com;badil gitops-signing-key optional:true'
+          if [ "$got" != "$want" ]; then
+            echo '::error::expected GITOPS_COMMIT_NAME and GITOPS_COMMIT_EMAIL on the Deployment and the CronJob when config.gitopsCommitName and config.gitopsCommitEmail are set'
+            printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
+            exit 1
+          fi
+
       - name: Render badil GitHub host
         run: |
           # Prints "<kind>:" then GITHUB_URL and GITHUB_API_URL as "<name>=<value>", for the Deployment then the CronJob.

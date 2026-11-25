@@ -168,6 +168,8 @@ type Commit struct {
 	Signed    bool
 	// Tree is the commit's files (path to content).
 	Tree map[string]string
+	// Object is the decoded commit, to verify its signature.
+	Object *object.Commit
 }
 
 // Subject returns the first line of the commit's message.
@@ -207,7 +209,7 @@ func (r *Remote) Commits() []Commit {
 		}
 		out = append(out, Commit{
 			Hash: h.String(), Message: c.Message, Author: c.Author, Committer: c.Committer,
-			Parents: parents, Signed: c.PGPSignature != "", Tree: filesAt(r.t, repo, h),
+			Parents: parents, Signed: c.PGPSignature != "", Tree: filesAt(r.t, repo, h), Object: c,
 		})
 		h = plumbing.ZeroHash
 		if len(c.ParentHashes) > 0 {

@@ -6,6 +6,10 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
+	"time"
+
+	"github.com/ProtonMail/go-crypto/openpgp"
 
 	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/github"
@@ -27,7 +31,15 @@ type Config struct {
 	GitOpsRepoUsername string
 	// GitOpsRepoToken authenticates the git calls to the gitops repo.
 	GitOpsRepoToken string
-	ListenAddr      string
+	// GitOpsCommitName and GitOpsCommitEmail are the author and committer of
+	// the gitops commits, both "" for the GitHub App's bot.
+	GitOpsCommitName  string
+	GitOpsCommitEmail string
+	// GitOpsSigningKey signs the gitops commits, nil when they are unsigned.
+	// It holds one unencrypted private key that can sign, with an identity
+	// of GitOpsCommitEmail.
+	GitOpsSigningKey *openpgp.Entity
+	ListenAddr       string
 	// DeployToken authenticates POST /v1/deploy and POST /v1/sync, "" when
 	// they are disabled.
 	DeployToken string
@@ -85,6 +97,11 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	commitName, commitEmail, signingKey, err := loadCommitSigning()
+	if err != nil {
+		return nil, err
+	}
+
 	listenAddr := os.Getenv("LISTEN_ADDR")
 	if listenAddr == "" {
 		listenAddr = ":8080"
@@ -108,6 +125,9 @@ func Load() (*Config, error) {
 		GitOpsRepoURL:      gitOpsRepoURL,
 		GitOpsRepoUsername: os.Getenv("GITOPS_REPO_USERNAME"),
 		GitOpsRepoToken:    token,
+		GitOpsCommitName:   commitName,
+		GitOpsCommitEmail:  commitEmail,
+		GitOpsSigningKey:   signingKey,
 		ListenAddr:         listenAddr,
 		DeployToken:        os.Getenv("BADIL_DEPLOY_TOKEN"),
 		ReadToken:          os.Getenv("BADIL_READ_TOKEN"),
@@ -117,6 +137,65 @@ func Load() (*Config, error) {
 		GitHubURL:          githubURL,
 		GitHubAPIURL:       githubAPIURL,
 	}, nil
+}
+
+// loadCommitSigning reads GITOPS_COMMIT_NAME and GITOPS_COMMIT_EMAIL, set
+// together or not at all, and GITOPS_SIGNING_KEY, which requires them
+// (parseSigningKey). Unset or empty means unset.
+func loadCommitSigning() (string, string, *openpgp.Entity, error) {
+	name, email := os.Getenv("GITOPS_COMMIT_NAME"), os.Getenv("GITOPS_COMMIT_EMAIL")
+	if (name == "") != (email == "") {
+		return "", "", nil, errors.New("GITOPS_COMMIT_NAME and GITOPS_COMMIT_EMAIL must be set together")
+	}
+	armored := os.Getenv("GITOPS_SIGNING_KEY")
+	if armored == "" {
+		return name, email, nil, nil
+	}
+	if name == "" {
+		return "", "", nil, errors.New("GITOPS_SIGNING_KEY requires GITOPS_COMMIT_NAME and GITOPS_COMMIT_EMAIL")
+	}
+	key, err := parseSigningKey(armored, email)
+	if err != nil {
+		return "", "", nil, err
+	}
+	return name, email, key, nil
+}
+
+// parseSigningKey returns the one entity of the ASCII-armored OpenPGP key
+// ring armored that holds a private key that can sign. That key must not be
+// passphrase-protected, and an identity of the entity must have email as its
+// email. Its errors name GITOPS_SIGNING_KEY.
+func parseSigningKey(armored, email string) (*openpgp.Entity, error) {
+	ring, err := openpgp.ReadArmoredKeyRing(strings.NewReader(armored))
+	if err != nil {
+		return nil, fmt.Errorf("GITOPS_SIGNING_KEY: %w", err)
+	}
+	now := time.Now()
+	var signers []*openpgp.Entity
+	var encrypted bool
+	for _, e := range ring {
+		k, ok := e.SigningKey(now)
+		if !ok || k.PrivateKey == nil || k.PrivateKey.Dummy() {
+			continue
+		}
+		signers = append(signers, e)
+		encrypted = k.PrivateKey.Encrypted
+	}
+	switch {
+	case len(signers) == 0:
+		return nil, errors.New("GITOPS_SIGNING_KEY: no private key that can sign")
+	case len(signers) > 1:
+		return nil, fmt.Errorf("GITOPS_SIGNING_KEY: %d private keys that can sign, want exactly one", len(signers))
+	case encrypted:
+		return nil, errors.New("GITOPS_SIGNING_KEY is passphrase-protected: badil needs a key without passphrase")
+	}
+	key := signers[0]
+	for _, id := range key.Identities {
+		if id.UserId != nil && id.UserId.Email == email {
+			return key, nil
+		}
+	}
+	return nil, fmt.Errorf("GITOPS_COMMIT_EMAIL %s is not an identity of GITOPS_SIGNING_KEY", email)
 }
 
 // LoadGitHubURLs reads and validates GITHUB_URL (github.ParseWebURL, default

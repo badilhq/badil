@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ProtonMail/go-crypto/openpgp"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -38,7 +39,8 @@ type CommitIdentity struct {
 // Apply runs op on the gitops repo as one commit. Operations are serialised
 // in the process. Each attempt fetches the default branch, runs op.Change on
 // the tree of the fetched head and, unless it changed nothing, commits the
-// change on that head as the store's identity, unsigned, and pushes it
+// change on that head as the store's identity, signed with the store's
+// signing key when it has one (WithSigningKey), and pushes it
 // without force. A push that fails while the remote head moved since the
 // fetch is a conflict: it is counted, and the next attempt starts again from
 // a new fetch, after a backoff, up to maxAttempts attempts. Any other push
@@ -136,7 +138,7 @@ func (c *GitHubStore) attempt(ctx context.Context, op lifecycle.Op) (lifecycle.R
 	if !tree.staged() {
 		return c.noop(parent)
 	}
-	commit, err := c.clone.commit(parent, tree, c.message(summary, tree), c.identity)
+	commit, err := c.clone.commit(parent, tree, c.message(summary, tree), c.identity, c.signingKey)
 	if err != nil {
 		return lifecycle.Result{}, parent, err
 	}
@@ -242,9 +244,12 @@ func (c *gitClone) subject(h plumbing.Hash) (string, error) {
 }
 
 // commit stores, holding the write lock, a commit of tree's files on parent
-// with message, authored and committed by id. It returns the zero hash when
-// the files leave parent's tree as it was.
-func (c *gitClone) commit(parent plumbing.Hash, tree *Tree, message string, id CommitIdentity) (plumbing.Hash, error) {
+// with message, authored and committed by id, signed with key unless it is
+// nil. It returns the zero hash when the files leave parent's tree as it
+// was.
+func (c *gitClone) commit(
+	parent plumbing.Hash, tree *Tree, message string, id CommitIdentity, key *openpgp.Entity,
+) (plumbing.Hash, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	treeHash, err := c.writeTree(tree.root, tree.files)
@@ -272,11 +277,34 @@ func (c *gitClone) commit(parent plumbing.Hash, tree *Tree, message string, id C
 		TreeHash:     treeHash,
 		ParentHashes: []plumbing.Hash{parent},
 	}
+	if key != nil {
+		if commit.PGPSignature, err = signCommit(commit, key); err != nil {
+			return plumbing.ZeroHash, err
+		}
+	}
 	obj := c.repo.Storer.NewEncodedObject()
 	if err = commit.Encode(obj); err != nil {
 		return plumbing.ZeroHash, fmt.Errorf("encode commit: %w", err)
 	}
 	return c.repo.Storer.SetEncodedObject(obj)
+}
+
+// signCommit returns the ASCII-armored detached OpenPGP signature by key of
+// commit's encoding without signature, as git signs a commit.
+func signCommit(commit *object.Commit, key *openpgp.Entity) (string, error) {
+	payload := &plumbing.MemoryObject{}
+	if err := commit.EncodeWithoutSignature(payload); err != nil {
+		return "", fmt.Errorf("encode commit: %w", err)
+	}
+	r, err := payload.Reader()
+	if err != nil {
+		return "", fmt.Errorf("encode commit: %w", err)
+	}
+	var sig strings.Builder
+	if err = openpgp.ArmoredDetachSign(&sig, key, r, nil); err != nil {
+		return "", fmt.Errorf("sign commit: %w", err)
+	}
+	return sig.String(), nil
 }
 
 // writeTree stores the tree base (nil for none) with changes applied and

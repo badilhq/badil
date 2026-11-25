@@ -157,11 +157,11 @@ func statusHooks(s *status.Store, wake *app.Wake) []store.Option {
 }
 
 // newStoreAndForge builds the gitops repo store and the GitHub forge from
-// cfg (newForge). The store commits as the App's bot
-// (github.CommitIdentity), matches pr-urls with the forge's rule, clones the
-// gitops repo cfg.GitOpsRepoURL into cfg.GitOpsCloneDir with the credentials
-// of github.GitopsCredentials and is configured by opts; an identity that
-// can't be resolved or a failed clone is an error.
+// cfg (newForge). The store commits as newForge's identity, signed with
+// cfg.GitOpsSigningKey when set, matches pr-urls with the forge's rule,
+// clones the gitops repo cfg.GitOpsRepoURL into cfg.GitOpsCloneDir with the
+// credentials of github.GitopsCredentials and is configured by opts; an
+// identity that can't be resolved or a failed clone is an error.
 func newStoreAndForge(
 	ctx context.Context, app *github.App, cfg *config.Config, opts ...store.Option,
 ) (*store.GitHubStore, *forgegithub.Forge, error) {
@@ -173,7 +173,7 @@ func newStoreAndForge(
 		URL:         cfg.GitOpsRepoURL,
 		Dir:         cfg.GitOpsCloneDir,
 		Credentials: github.GitopsCredentials(cfg.GitOpsRepoUsername, cfg.GitOpsRepoToken),
-	}, identity, opts...)
+	}, identity, append(opts, store.WithSigningKey(cfg.GitOpsSigningKey))...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -181,22 +181,27 @@ func newStoreAndForge(
 }
 
 // newForge returns the GitHub forge of cfg.GitHubURL over a client on the
-// transport of the installation cfg.InstallationID of app, and the App's bot
-// as the gitops commit identity (github.CommitIdentity). Every client is on
-// app's API base (github.App.Client).
+// transport of the installation cfg.InstallationID of app, and the gitops
+// commit identity: cfg.GitOpsCommitName and cfg.GitOpsCommitEmail when set,
+// else the App's bot (github.CommitIdentity). Every client is on app's API
+// base (github.App.Client).
 func newForge(
 	ctx context.Context, app *github.App, cfg *config.Config,
 ) (*forgegithub.Forge, store.CommitIdentity, error) {
 	client := app.Client(app.InstallationTransport(cfg.InstallationID))
-	id, err := github.CommitIdentity(ctx, app.Client(app.AppsTransport()), client, cfg.GitHubURL)
-	if err != nil {
-		return nil, store.CommitIdentity{}, fmt.Errorf("gitops commit identity: %w", err)
+	id := store.CommitIdentity{Name: cfg.GitOpsCommitName, Email: cfg.GitOpsCommitEmail}
+	if id.Name == "" {
+		bot, err := github.CommitIdentity(ctx, app.Client(app.AppsTransport()), client, cfg.GitHubURL)
+		if err != nil {
+			return nil, store.CommitIdentity{}, fmt.Errorf("gitops commit identity: %w", err)
+		}
+		id = store.CommitIdentity(bot)
 	}
 	f, err := forgegithub.New(client, app, cfg.InstallationID, cfg.GitHubURL)
 	if err != nil {
 		return nil, store.CommitIdentity{}, err
 	}
-	return f, store.CommitIdentity(id), nil
+	return f, id, nil
 }
 
 // closeStore removes the store's clone directory when it made one, logging a

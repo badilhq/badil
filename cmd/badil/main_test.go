@@ -106,3 +106,28 @@ func TestNewForge_CustomAPIURL(t *testing.T) {
 		})
 	}
 }
+
+// TestNewForge_ConfiguredIdentity checks that with GITOPS_COMMIT_NAME and
+// GITOPS_COMMIT_EMAIL set, they are the gitops commit identity and the App's
+// bot is not looked up.
+func TestNewForge_ConfiguredIdentity(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pemKey := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	srv, requests := fakeGitHubAPI(t)
+	cfg := &config.Config{
+		AppID: 12345, PrivateKey: pemKey, InstallationID: 67890,
+		GitHubURL: "https://github.com", GitHubAPIURL: srv.URL + "/api/v3/",
+		GitOpsCommitName: "badil-gitops", GitOpsCommitEmail: "badil-gitops@users.noreply.github.com",
+	}
+	_, identity := mustNewForge(t, cfg)
+	want := store.CommitIdentity{Name: "badil-gitops", Email: "badil-gitops@users.noreply.github.com"}
+	if identity != want {
+		t.Errorf("identity = %+v, want %+v", identity, want)
+	}
+	if len(*requests) != 0 {
+		t.Errorf("requests = %q, want none", *requests)
+	}
+}
