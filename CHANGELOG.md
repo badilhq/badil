@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.1](https://github.com/badilhq/badil/compare/v0.30.0...v0.30.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* **forge:** name the forge's not found and unauthorized errors after the forge ([#157](https://github.com/badilhq/badil/issues/157)) ([ebe14e5](https://github.com/badilhq/badil/commit/ebe14e54d5fe420100d2fe7be99f9c740479e227))
+
 ## [0.30.0](https://github.com/badilhq/badil/compare/v0.29.0...v0.30.0) (2026-11-25)
 
 
