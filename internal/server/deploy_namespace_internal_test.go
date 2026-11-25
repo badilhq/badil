@@ -42,11 +42,11 @@ func TestDeploy_NamespaceRefusals(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			fg := &fakeGitops{catalog: []string{"backend-1"}}
+			fg := &fakeGitops{pr: pricingPR(), catalog: []string{"backend-1"}}
 			fg.open(t)
 			a := app.New(app.Config{Store: fg, Forge: fg, FanOut: fakeFanOut(fg), Namespaces: tc.c})
 			srv := NewServer(a, fg, nil, "test-token")
-			rec := postDeploy(t, srv, previewBody(), "test-token")
+			rec := postDeploy(t, srv, validBody(), "test-token")
 
 			if rec.Code != tc.status {
 				t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.status, rec.Body.String())

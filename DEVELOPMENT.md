@@ -63,11 +63,19 @@ GITOPS_REPO_URL=https://github.com/myorg/my-gitops.git make dev-bootstrap
 
 ## Smoke the deploy endpoint
 
-With the server running, paste this verbatim — `$ORG` resolves to your GitHub login via `gh`:
+badil reads the PR from GitHub, so the deploy needs a real PR on the service's repository, `$ORG/backend-1` (its `repo` in `badil.yaml`). With the server running, paste this verbatim — `$ORG` resolves to your GitHub login via `gh`. It opens a PR from `feature/smoke-test`, then deploys it:
 
 ```bash
 source .env
 ORG=$(gh api /user --jq .login)
+
+SMOKE=$(mktemp -d)
+gh repo clone "$ORG/backend-1" "$SMOKE"
+git -C "$SMOKE" switch -c feature/smoke-test
+git -C "$SMOKE" commit --allow-empty -m "smoke test"
+git -C "$SMOKE" push -u origin feature/smoke-test
+gh pr create --repo "$ORG/backend-1" --head feature/smoke-test --title "smoke test" --body ""
+PR=$(gh pr view feature/smoke-test --repo "$ORG/backend-1" --json number --jq .number)
 
 curl -s -X POST http://localhost:8080/v1/deploy \
   -H "Authorization: Bearer $BADIL_DEPLOY_TOKEN" \
@@ -75,27 +83,23 @@ curl -s -X POST http://localhost:8080/v1/deploy \
   -d @- <<EOF | jq
 {
   "service": "backend-1",
-  "head_ref": "feature/smoke-test",
+  "pr_number": "$PR",
   "commit_sha": "0000000000000000000000000000000000000001",
-  "pr_author": "$ORG",
-  "pr_url": "https://github.com/$ORG/backend-1/pull/1",
-  "pr_number": "1",
   "workflow_run_url": "https://github.com/$ORG/backend-1/actions/runs/1"
 }
 EOF
 ```
 
-A successful response means the gitops commit landed. Expect a `warnings` entry: the smoke uses a fake `pull/1` URL, so the PR comment POST gets a 404. Comments are best effort; the gitops write is not.
+A successful response means the gitops commit landed. The slug is the PR's head branch, slugified, and the preview summary is commented on the PR:
 
 ```json
 {
   "preview_slug": "feature-smoke-test",
-  "gitops_commit_url": "https://github.com/.../commit/...",
-  "warnings": ["service backend-1 ...: 404 Not Found"]
+  "gitops_commit_url": "https://github.com/.../commit/..."
 }
 ```
 
-Open the gitops repo on GitHub to confirm the commit landed on `main`.
+Open the gitops repo on GitHub to confirm the commit landed on `main`, with `pr-author: $ORG` and the PR's `pr-url` in `previews/feature-smoke-test/values.yaml`. Close the PR when done.
 
 ## Verify webhook plumbing
 

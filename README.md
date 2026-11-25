@@ -47,8 +47,8 @@ Manual trigger:
 POST /v1/deploy
 Authorization: Bearer $BADIL_DEPLOY_TOKEN
 
-{ "service": "backend-1", "head_ref": "feature/pricing", "commit_sha": "<sha>",
-  "pr_url": "...", "pr_number": "42", "pr_author": "...", "workflow_run_url": "..." }
+{ "service": "backend-1", "pr_number": "42", "commit_sha": "<sha>",
+  "workflow_run_url": "..." }
 ```
 
 Sync every preview, or one, with `badil.yaml` now, instead of waiting for the push webhook or the next sweep:
@@ -61,7 +61,7 @@ Authorization: Bearer $BADIL_DEPLOY_TOKEN
 → { "synced": ["feature-pricing"], "unchanged": 3, "failed": [] }
 ```
 
-A manual deploy always targets the slug of `head_ref`, and skips the one-PR-per-service check. The cleanup sweep keeps its pin only at the PR's target preview (the slug of its single `preview:<name>` label, or its branch slug when it has only the plain `preview` label), or at its branch slug when the PR has no preview label. A PR with conflicting `preview:<name>` labels keeps no pin. A webhook reconcile of the PR also unpins it from its branch slug and its named-label slugs other than its target.
+badil reads PR 42 of the service's repository from GitHub and takes its head branch, author and URL from there. A manual deploy always targets the slug of the PR's head branch, and skips the one-PR-per-service check. The cleanup sweep keeps its pin only at the PR's target preview (the slug of its single `preview:<name>` label, or its branch slug when it has only the plain `preview` label), or at its branch slug when the PR has no preview label. A PR with conflicting `preview:<name>` labels keeps no pin. A webhook reconcile of the PR also unpins it from its branch slug and its named-label slugs other than its target.
 
 ## Install
 

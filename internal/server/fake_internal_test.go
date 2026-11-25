@@ -60,10 +60,14 @@ type fakeGitops struct {
 	// afterList, when set, runs after each ListOpenPullRequests.
 	afterList func()
 
-	// pr is what GetPullRequest returns, unless prErr is set.
-	pr      *forge.PullRequest
-	prErr   error
-	prCalls int
+	// pr is what GetPullRequest returns, unless prErr is set. prOwner,
+	// prRepo and prNumber are the arguments of its last call.
+	pr       *forge.PullRequest
+	prErr    error
+	prCalls  int
+	prOwner  string
+	prRepo   string
+	prNumber int
 
 	previews map[string]*preview.Values
 	stale    map[string]bool
@@ -233,8 +237,9 @@ func (f *fakeGitops) UpsertComment(_ context.Context, owner, repo string, prNumb
 	return nil
 }
 
-func (f *fakeGitops) GetPullRequest(_ context.Context, _, _ string, _ int) (*forge.PullRequest, error) {
+func (f *fakeGitops) GetPullRequest(_ context.Context, owner, repo string, number int) (*forge.PullRequest, error) {
 	f.prCalls++
+	f.prOwner, f.prRepo, f.prNumber = owner, repo, number
 	if f.prErr != nil {
 		return nil, f.prErr
 	}

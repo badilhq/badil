@@ -39,18 +39,23 @@ The manual trigger: it pins one service of a preview at a commit.
 
 - **Availability:** only when `BADIL_DEPLOY_TOKEN` is set; 404 otherwise.
 - **Auth:** `Authorization: Bearer $BADIL_DEPLOY_TOKEN`.
-- **Request:** a JSON object with `service`, `head_ref`, `commit_sha`, `pr_author`, `pr_url`, `pr_number` and `workflow_run_url`.
+- **Request:** a JSON object with `service`, `pr_number`, `commit_sha` and `workflow_run_url`, all required. Any other field gets `400 {"error": "invalid body: json: unknown field \"<field>\""}`.
 - **Response:** `{ "preview_slug", "gitops_commit_url", "warnings": [...] }`. `warnings` holds the PR comment fan-out failures.
-- **Errors:** `409 {"error": "preview limit (<max>) reached"}` when `preview.maxPreviews` is reached and `previews/<slug>/` does not exist. `409 {"error": "namespace <slug> exists and is not a preview"}` when `previews/<slug>/` does not exist and the namespace `<slug>` exists without the preview label; `502 {"error": "namespace check failed: <error>"}` when that namespace cannot be read. A write the gitops remote refused for badil's credentials answers 502.
+- **Errors:**
+  - `400 {"error": "invalid pr_number: <value>"}`: `pr_number` is not a positive integer, checked with the body before the service.
+  - `400 {"error": "service <service> repo is not a repository of the forge"}`: the service's `repo` in `badil.yaml` is not a repository URL of the forge.
+  - `404 {"error": "pull request <owner>/<repo>#<n> not found"}`: the service's repository has no PR `pr_number`.
+  - `502 {"error": "read pull request: <error>"}`: the PR cannot be read; logged `deploy failed` with `op` `read pull request`.
+  - `409 {"error": "preview limit (<max>) reached"}` when `preview.maxPreviews` is reached and `previews/<slug>/` does not exist. `409 {"error": "namespace <slug> exists and is not a preview"}` when `previews/<slug>/` does not exist and the namespace `<slug>` exists without the preview label; `502 {"error": "namespace check failed: <error>"}` when that namespace cannot be read. A write the gitops remote refused for badil's credentials answers 502.
 
-`service` must be a service of `badil.yaml`. `commit_sha` accepts any value: send the full SHA, or a `{sha7}`/`{sha8}` image tag will not match the one CI pushed (see [`imageTag`](CONFIGURATION.md#imagetag)).
+`service` must be a service of `badil.yaml`. `pr_number` is a PR of the service's repository (its `repo` in `badil.yaml`): badil reads it from GitHub and takes its head branch, author and URL from there, never from the caller. `commit_sha` accepts any value: send the full SHA, or a `{sha7}`/`{sha8}` image tag will not match the one CI pushed (see [`imageTag`](CONFIGURATION.md#imagetag)).
 
 ### Flow
 
 A deploy runs these steps:
 
 1. Validate `service` against the `services` of `badil.yaml`.
-2. Slugify `head_ref`.
+2. Read PR `pr_number` of the service's repository from GitHub and slugify its head branch; its author and URL are written as `pr-author` and `pr-url`.
 3. Refuse a new preview past the preview cap with 409 (see [Preview cap check](#preview-cap-check)).
 4. Refuse a new preview whose namespace is in use with 409 (see [Namespace check](#namespace-check)).
 5. Read or bootstrap `previews/<slug>/values.yaml`.
