@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.30.0](https://github.com/badilhq/badil/compare/v0.29.0...v0.30.0) (2026-11-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* **chart:** expose only the github webhook through the ingress by default ([#153](https://github.com/badilhq/badil/issues/153))
+
+### Features
+
+* **chart:** expose only the github webhook through the ingress by default ([#153](https://github.com/badilhq/badil/issues/153)) ([21ab484](https://github.com/badilhq/badil/commit/21ab4848c1a508dbb64a029af05293847d27a823))
+
+
+### Bug Fixes
+
+* **deps:** build with go 1.27.4 and update vulnerable dependencies ([#155](https://github.com/badilhq/badil/issues/155)) ([1e45830](https://github.com/badilhq/badil/commit/1e458302b96e4da9c89f76c3e3b05904c4f599e6))
+
 ## [0.29.0](https://github.com/badilhq/badil/compare/v0.28.0...v0.29.0) (2026-11-24)
 
 
