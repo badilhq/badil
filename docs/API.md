@@ -171,7 +171,7 @@ The state of a PR is decided in this order:
 
 1. `refused`, reason `repo not in catalog`, when `badil.yaml` has no service of `repo`, whatever the PR's labels.
 2. The PR's latest reconcile outcome, when its head SHA matches `sha` (or for any SHA without `sha`):
-   - `refused` with the skip reason `service held by another pr`, `preview limit reached`, `namespace in use`, `conflicting preview labels`, `fork pr` or `repo not in catalog`;
+   - `refused` with the skip reason `service held by another pr`, `preview limit reached`, `namespace in use`, `labeller without write access` (see [Labeller check](EVENTS.md#labeller-check)), `conflicting preview labels`, `fork pr` or `repo not in catalog`;
    - `refused`, reason `torn down`, after a teardown;
    - `skipped`, with the skip reason `no service changed` or `not labeled`;
    - `failed`, reason `reconcile failed`, after a failed reconcile: nothing retries it before the next event or [catch-up](EVENTS.md#catch-up) run, so re-run the CI job or push to reconcile again.

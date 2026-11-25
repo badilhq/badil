@@ -41,6 +41,7 @@ An open PR with a target deploys, at the PR's head SHA, in catalog order, to the
 
 It writes the services as the manual flow does (see [`POST /v1/deploy`](API.md#post-v1deploy)), in the reconcile's commit, then posts the preview's summary once on its open PRs. It deploys nothing when one of these holds:
 
+- the user who added the label that picked the target has no write access to the PR's repo, or can't be found (see [Labeller check](#labeller-check));
 - another PR holds one of its services there (see [One PR per service](#one-pr-per-service));
 - the target does not exist and the preview cap is reached (see [Preview cap](#preview-cap));
 - the target does not exist and its namespace exists and is not a preview namespace (see [Namespace in use](#namespace-in-use)).
@@ -160,11 +161,44 @@ A refused PR is retried as one over the preview cap: by catch-up, once per head 
 
 The check runs on every push attempt, and `/v1/deploy` runs it too (see [`POST /v1/deploy`](API.md#post-v1deploy)). A namespace created after the check and before Argo CD syncs the new preview, at most one ApplicationSet poll later, is still adopted. Outside a cluster, badil logs `namespace check disabled` at start and checks nothing.
 
+## Labeller check
+
+GitHub lets a user with the Triage role add labels, and a preview runs the PR's code in the cluster. So the label flow deploys a PR only when the user who added the label that picked its target has write access to its repo. The check gates every deploy of the label flow, into a new or an existing preview, on every event that deploys (`labeled`, but also `opened`, `reopened`, `synchronize` and [catch-up](#catch-up)). `POST /v1/deploy` is token-authenticated and is not checked.
+
+The labels that picked the target are, for a named target, every current named label of the PR whose slug is the target, and for a branch target, the plain label: the plain label is ignored when a named label sets the target. The labeller is the `actor` of the newest `labeled` event of the PR whose label name equals one of them, exactly as GitHub returns the PR's labels. It is read from GitHub on every reconcile that would deploy, not from the delivery's `sender`, so a push or a catch-up checks whoever added the label in force.
+
+The check runs once per reconcile, when the PR is open with a target, after the fork and catalog checks and before the reconcile's commit. It makes two GitHub calls, with permissions the App already has:
+
+- `GET /repos/{owner}/{repo}/issues/{number}/events?per_page=100`, every page (Pull requests read);
+- `GET /repos/{owner}/{repo}/collaborators/{username}/permission` for the labeller (Metadata read). Write access is its `user.permissions.push`, true for the write, maintain and admin roles. A bot, `github-actions[bot]` or any App, has `push: false`, so a label added by a bot is refused: automation deploys through `POST /v1/deploy`. A 404, a deleted or renamed account, is no write access.
+
+A refused PR is refused like a held one: its teardowns from its other previews are still committed, and nothing is deployed nor unpinned in the target. Its existing pins there stay at their old SHA until it is unlabelled, closed or swept. Its comment is replaced with:
+
+```
+## ⚠️ Preview: `<slug>`
+
+`<login>` added the `<label>` label but does not have write access to `<owner>/<repo>`, so badil does not deploy this PR. Someone with write access must add the label again.
+```
+
+or, when no `labeled` event of the target's labels is found, `<label>` then naming the target's labels joined with `, `:
+
+```
+## ⚠️ Preview: `<slug>`
+
+badil could not find who added the `<label>` label, so it does not deploy this PR. Someone with write access must add the label again.
+```
+
+It logs `preview reconcile skipped` with reason `labeller without write access` and a `labeller` attribute, the labeller's login, empty when none was found.
+
+Any other failed events or permission read fails the reconcile: it logs `preview reconcile failed` with `labeller check failed: <error>` and writes nothing, not even the PR's teardowns from its other previews. [Catch-up](#catch-up) or the PR's next event retries it.
+
+A refused PR is retried as one over the preview cap: by catch-up, once per head SHA in `badil serve` and on every `badil cleanup` run. A user with write access who removes the label and adds it again becomes the newest labeller, and the next reconcile deploys.
+
 ## Reconcile queue
 
 Background reconciles run one at a time, in no guaranteed order. A reconcile reads the PR only once it runs.
 
-A reconcile has a 20s budget, counted from when it starts running. It covers the PR and files reads of [path filters](SERVICES.md#path-filters), then its commit, including the wait for an operation already writing (a cleanup sweep, a manual deploy) and every push attempt, then its comments. The commit holds, in this order, its cleanup teardowns, the holder check, the preview cap check, the namespace check, the unpin of untouched services and its services. A reconcile that deploys fails when its commit is not pushed in time. One that only tears down records each of its teardowns as an error and keeps the `torn_down` outcome.
+A reconcile has a 20s budget, counted from when it starts running. It covers the PR read, the [labeller check](#labeller-check)'s reads and the files reads of [path filters](SERVICES.md#path-filters), then its commit, including the wait for an operation already writing (a cleanup sweep, a manual deploy) and every push attempt, then its comments. The commit holds, in this order, its cleanup teardowns, the holder check, the preview cap check, the namespace check, the unpin of untouched services and its services. A reconcile that deploys fails when its commit is not pushed in time. One that only tears down records each of its teardowns as an error and keeps the `torn_down` outcome.
 
 Shutdown waits up to 25s for queued and running jobs. Jobs still queued then are dropped: the cleanup sweeper catches missed teardowns of closed PRs, and [catch-up](#catch-up) the missed deploys of open ones.
 
@@ -194,7 +228,7 @@ Each listed PR is decided in this order:
 6. A PR is skipped when it is in the seen map at its head SHA, or when a catch-up reconcile of it is still queued or running.
 7. Any other PR is reconciled.
 
-The seen map holds, per PR, the head SHA its last catch-up reconcile was started at, once that reconcile completed with an outcome other than `failed`. A reconcile that fails, or never completes (dropped at shutdown, or panicked), leaves the PR out of it, so the next run reconciles it again at the same head SHA. A PR that never gets a pin (no service changed, held by another PR, preview cap reached, namespace in use, conflicting labels) is therefore reconciled once per head SHA. `badil serve` keeps the seen map for the life of the process; each `badil cleanup` run starts with an empty one.
+The seen map holds, per PR, the head SHA its last catch-up reconcile was started at, once that reconcile completed with an outcome other than `failed`. A reconcile that fails, or never completes (dropped at shutdown, or panicked), leaves the PR out of it, so the next run reconciles it again at the same head SHA. A PR that never gets a pin (no service changed, held by another PR, preview cap reached, namespace in use, labeller without write access, conflicting labels) is therefore reconciled once per head SHA. `badil serve` keeps the seen map for the life of the process; each `badil cleanup` run starts with an empty one.
 
 ### How
 
