@@ -4,7 +4,7 @@ This project follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Setup
 
-Go 1.25+. Local GitHub App and server: [DEVELOPMENT.md](DEVELOPMENT.md).
+Go 1.27+. Local GitHub App and server: [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ```bash
 make build
