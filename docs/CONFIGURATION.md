@@ -326,9 +326,12 @@ badil reads these environment variables:
 | `GITHUB_WEBHOOK_SECRET` | yes | | GitHub App webhook secret |
 | `GITHUB_INSTALLATION_ID` | yes | | the only installation badil accepts webhooks from |
 | `GITOPS_REPO_URL` | yes | | the gitops repo's http(s) clone URL, e.g. `https://github.com/acme/gitops.git`: no credentials, query or fragment, and a repository path of at least two segments. Its path without the leading `/`, a trailing `/` and a trailing `.git` is the repo's full name (`acme/gitops`) |
-| `GITOPS_REPO_TOKEN` | no | unset: the GitHub App installation token | token of badil's git calls to the gitops repo (clone, ls-remote, fetch, push), sent as HTTP basic auth. In the chart, it is the optional `gitops-repo-token` key of `existingSecret`. See [Gitops repo credentials](#gitops-repo-credentials) |
-| `GITOPS_REPO_USERNAME` | no | `x-access-token` | basic-auth username sent with `GITOPS_REPO_TOKEN`; set without the token, badil fails at start. In the chart, `config.gitopsRepoUsername` |
-| `GITHUB_URL` | no | `https://github.com` | web base of the GitHub host: an http(s) URL with no path, credentials, query or fragment (its scheme and host are lowercased, and a default port and a trailing `/` are dropped). Service repos match a PR's repo as `<GITHUB_URL>/<owner>/<repo>`, PR URLs are read as `<GITHUB_URL>/<owner>/<repo>/pull/<n>`, and the gitops commits' bot email is `<id>+<slug>[bot]@users.noreply.<GITHUB_URL host>`. `verify-app` and `bootstrap-app` read it too; `bootstrap-app` creates the App at `<GITHUB_URL>/settings/apps/new`. In the chart, `config.githubURL` |
+| `GITOPS_REPO_TOKEN` | yes | | token of badil's git calls to the gitops repo (clone, ls-remote, fetch, push), sent as HTTP basic auth: a token with Contents write on the gitops repo. Unset or empty, badil fails at start with `GITOPS_REPO_TOKEN is required`. In the chart, it is the required `gitops-repo-token` key of `existingSecret`. See [Gitops repo credentials](#gitops-repo-credentials) |
+| `GITOPS_REPO_USERNAME` | no | `x-access-token` | basic-auth username sent with `GITOPS_REPO_TOKEN`. In the chart, `config.gitopsRepoUsername` |
+| `GITOPS_COMMIT_NAME` | no | unset: the GitHub App's bot, `<slug>[bot]` | name of the author and committer of the gitops commits. Set with `GITOPS_COMMIT_EMAIL` or not at all: one without the other fails at start. Required with `GITOPS_SIGNING_KEY`. In the chart, `config.gitopsCommitName` |
+| `GITOPS_COMMIT_EMAIL` | no | unset: the GitHub App's bot, `<id>+<slug>[bot]@users.noreply.<GITHUB_URL host>` | email of the author and committer of the gitops commits, set with `GITOPS_COMMIT_NAME`. Required with `GITOPS_SIGNING_KEY`, and then an identity of that key. In the chart, `config.gitopsCommitEmail` |
+| `GITOPS_SIGNING_KEY` | no | unset: unsigned commits | an ASCII-armored OpenPGP private key without passphrase that signs every gitops commit badil creates. In the chart, it is the optional `gitops-signing-key` key of `existingSecret`. See [Signed commits](#signed-commits) |
+| `GITHUB_URL` | no | `https://github.com` | web base of the GitHub host: an http(s) URL with no path, credentials, query or fragment (its scheme and host are lowercased, and a default port and a trailing `/` are dropped). Service repos match a PR's repo as `<GITHUB_URL>/<owner>/<repo>`, PR URLs are read as `<GITHUB_URL>/<owner>/<repo>/pull/<n>`, and the gitops commits' bot email, without `GITOPS_COMMIT_EMAIL`, is `<id>+<slug>[bot]@users.noreply.<GITHUB_URL host>`. `verify-app` and `bootstrap-app` read it too; `bootstrap-app` creates the App at `<GITHUB_URL>/settings/apps/new`. In the chart, `config.githubURL` |
 | `GITHUB_API_URL` | no | `https://api.github.com/` | API base of the GitHub host, used by every GitHub API call and installation token request: an http(s) URL with no credentials, query or fragment. `api/v3/` is appended to a base whose path does not end with `/api/v3/` and whose host neither starts with `api.` nor contains `.api.`: `https://ghe.example.com` and `https://ghe.example.com/api/v3/` both call `https://ghe.example.com/api/v3/`. `verify-app` and `bootstrap-app` read it too. In the chart, `config.githubAPIURL` |
 | `GITOPS_CLONE_DIR` | no | unset: a temporary directory per process, removed on exit | directory of the gitops repo's git clone, removed and cloned again on start; the chart sets `/var/lib/badil/gitops`, on an `emptyDir` |
 | `BADIL_DEPLOY_TOKEN` | no | unset | bearer token for `/v1/deploy` and `/v1/sync`, which answer 404 when it is unset; also grants the `GET /v1` routes |
@@ -342,7 +345,7 @@ badil reads these environment variables:
 
 ### Gitops repo credentials
 
-Without `GITOPS_REPO_TOKEN`, badil's git calls to the gitops repo authenticate as the GitHub App installation, username `x-access-token`. With it, they send `GITOPS_REPO_USERNAME` (default `x-access-token`) and the token instead. The username each host accepts with a token:
+badil's git calls to the gitops repo (clone, ls-remote, fetch, push) authenticate with `GITOPS_REPO_TOKEN`, sent as HTTP basic auth with `GITOPS_REPO_USERNAME` (default `x-access-token`). The GitHub App never writes to the gitops repo. The token needs Contents write on the gitops repo. On GitHub, use a fine-grained personal access token of a machine user, a GitHub account for badil alone, with access to the gitops repo only and Contents read and write. The username each host accepts with a token:
 
 | Host | Token | Username |
 |---|---|---|
@@ -351,10 +354,24 @@ Without `GITOPS_REPO_TOKEN`, badil's git calls to the gitops repo authenticate a
 | GitLab | deploy token | the deploy token's own username |
 | Gitea | access token or deploy token | any, `x-access-token` included |
 
-A push runs as the token's owner. A branch rule on the gitops repo that only the badil App may bypass rejects badil's pushes made with `GITOPS_REPO_TOKEN`. The commits' author and committer stay the App's bot whatever the token.
+A push runs as the token's owner: a branch rule on the gitops repo that badil must bypass has to name that user (the machine user on GitHub). badil reads the token once at start: to rotate it, update the Secret and restart badil.
+
+Without `GITOPS_COMMIT_NAME` and `GITOPS_COMMIT_EMAIL`, the commits' author and committer are the App's bot whatever the token. Set both to commit as another identity, the machine user's for signed commits.
+
+### Signed commits
+
+With `GITOPS_SIGNING_KEY`, badil signs every gitops commit it creates with that OpenPGP key, for a gitops branch that requires signed commits. Only GPG keys are supported, without passphrase. badil checks at start, and does not start, when the key does not parse, holds not exactly one private key that can sign, is passphrase-protected, or has no identity whose email is `GITOPS_COMMIT_EMAIL`.
+
+GitHub marks a commit pushed with git Verified only when its committer email is both an identity of the signing key and a verified email of the GitHub account that holds the key: an email on no account shows `no_user`, an email of the account that is not verified shows `bad_email`. A bot's pushed commits are never Verified, so on GitHub:
+
+1. Generate a GPG key without passphrase whose identity email is a verified email of the machine user, for example its `<login>@users.noreply.github.com`.
+2. Add the key's public part to the machine user's GitHub account as a GPG key, and check that GitHub's key list shows that email as verified.
+3. Set `GITOPS_COMMIT_NAME` to the machine user's name, `GITOPS_COMMIT_EMAIL` to that email, and `GITOPS_SIGNING_KEY` to the armored private key (`gpg --armor --export-secret-keys <key-id>`).
+
+badil accepts a key whose email is not verified on GitHub: its commits then show `bad_email`, and a branch that requires signed commits rejects the push, whose error badil logs.
 
 ### GitHub App
 
-The GitHub App needs these permissions: Contents R/W, Pull requests W, Metadata R.
+The GitHub App needs these permissions: Contents R, Pull requests W, Metadata R. Contents read is only for the `push` event, which GitHub delivers to an App with at least Contents read; badil writes to the gitops repo with `GITOPS_REPO_TOKEN`, not as the App.
 
 It subscribes to the events `pull_request` and `push`. Installation events are delivered automatically.
