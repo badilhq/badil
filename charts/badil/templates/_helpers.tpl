@@ -79,7 +79,6 @@ Server environment.
     secretKeyRef:
       name: {{ $secret }}
       key: gitops-repo-token
-      optional: true
 {{- end -}}
 
 {{/*

@@ -99,14 +99,10 @@ func Run(ctx context.Context, stdin io.Reader, stdout io.Writer, opts Options) e
 			"url":    webhookURL,
 			"active": true,
 		},
-		"redirect_url": redirectURL,
-		"public":       false,
-		"default_permissions": map[string]string{
-			"contents":      "write",
-			"pull_requests": "write",
-			"metadata":      "read",
-		},
-		"default_events": appEvents(),
+		"redirect_url":        redirectURL,
+		"public":              false,
+		"default_permissions": appPermissions(),
+		"default_events":      appEvents(),
 	}
 	manifestJSON, err := json.Marshal(manifest)
 	if err != nil {
@@ -181,11 +177,30 @@ func completeApp(ctx context.Context, stdout io.Writer, opts Options, code strin
 	fmt.Fprintf(stdout, "  env:   %s\n", opts.EnvPath)
 
 	installURL := conv.GetHTMLURL() + "/installations/new"
-	fmt.Fprintf(stdout, "\nNext: install the App on the gitops repo + service repos:\n  %s\n", installURL)
+	printNextSteps(stdout, installURL, opts.EnvPath)
 	_ = openBrowser(installURL)
-	fmt.Fprintln(stdout, "\nAfter install, paste the installation ID into .env (GITHUB_INSTALLATION_ID),")
-	fmt.Fprintln(stdout, "then run `badil verify-app` to confirm.")
 	return nil
+}
+
+// printNextSteps prints what is left to do once the App exists: install it
+// at installURL, then set GITHUB_INSTALLATION_ID and GITOPS_REPO_TOKEN in
+// the .env file at envPath and verify the App.
+func printNextSteps(w io.Writer, installURL, envPath string) {
+	fmt.Fprintf(w, "\nNext: install the App on the gitops repo + service repos:\n  %s\n", installURL)
+	fmt.Fprintf(w, "\nAfter install, paste the installation ID into %s (GITHUB_INSTALLATION_ID),\n", envPath)
+	fmt.Fprintf(w, "set GITOPS_REPO_TOKEN in %s to a token with Contents write on the gitops repo,\n", envPath)
+	fmt.Fprintln(w, "then run `badil verify-app` to confirm.")
+}
+
+// appPermissions returns the repository permissions the App requests:
+// Contents read only so that GitHub delivers the push event, which needs it;
+// badil writes to the gitops repo with GITOPS_REPO_TOKEN, not as the App.
+func appPermissions() map[string]string {
+	return map[string]string{
+		"contents":      "read",
+		"pull_requests": "write",
+		"metadata":      "read",
+	}
 }
 
 // appEvents returns the events the App subscribes to. `installation` and
@@ -212,7 +227,7 @@ func printPlan(w io.Writer, opts Options, webhookURL string) {
 	} else {
 		fmt.Fprintln(w, "       owner:       your personal GitHub account")
 	}
-	fmt.Fprintln(w, "       permissions: contents:write, pull_requests:write, metadata:read")
+	fmt.Fprintln(w, "       permissions: contents:read, pull_requests:write, metadata:read")
 	fmt.Fprintf(w, "       events:      %s (installation events fire automatically)\n", strings.Join(appEvents(), ", "))
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "  2. Open a browser tab to %s/settings/apps/new and submit the manifest\n", webHost(opts.GitHubURL))
@@ -409,6 +424,7 @@ export GITHUB_PRIVATE_KEY_PATH=%s
 export GITHUB_WEBHOOK_SECRET=%s
 export GITHUB_INSTALLATION_ID= # set after installing the App
 export GITOPS_REPO_URL=%s
+export GITOPS_REPO_TOKEN= # set this — a token with Contents write on the gitops repo
 export BADIL_DEPLOY_TOKEN=%s
 export LISTEN_ADDR=:8080
 `, v.AppID, v.PEMPath, v.WebhookSecret, gitops, v.DeployToken)

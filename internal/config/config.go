@@ -25,8 +25,7 @@ type Config struct {
 	// GitOpsRepoUsername is the basic-auth username of GitOpsRepoToken, ""
 	// for the default.
 	GitOpsRepoUsername string
-	// GitOpsRepoToken authenticates the git calls to the gitops repo, ""
-	// for the GitHub App installation token.
+	// GitOpsRepoToken authenticates the git calls to the gitops repo.
 	GitOpsRepoToken string
 	ListenAddr      string
 	// DeployToken authenticates POST /v1/deploy and POST /v1/sync, "" when
@@ -81,9 +80,9 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("GITOPS_REPO_URL %w", err)
 	}
 
-	username, token := os.Getenv("GITOPS_REPO_USERNAME"), os.Getenv("GITOPS_REPO_TOKEN")
-	if username != "" && token == "" {
-		return nil, errors.New("GITOPS_REPO_USERNAME requires GITOPS_REPO_TOKEN")
+	token, err := requireEnv("GITOPS_REPO_TOKEN")
+	if err != nil {
+		return nil, err
 	}
 
 	listenAddr := os.Getenv("LISTEN_ADDR")
@@ -107,7 +106,7 @@ func Load() (*Config, error) {
 		WebhookSecret:      webhookSecret,
 		InstallationID:     installationID,
 		GitOpsRepoURL:      gitOpsRepoURL,
-		GitOpsRepoUsername: username,
+		GitOpsRepoUsername: os.Getenv("GITOPS_REPO_USERNAME"),
 		GitOpsRepoToken:    token,
 		ListenAddr:         listenAddr,
 		DeployToken:        os.Getenv("BADIL_DEPLOY_TOKEN"),

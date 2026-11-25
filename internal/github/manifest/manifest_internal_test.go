@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -99,6 +100,50 @@ func TestRenderEnvGitopsRepoURL(t *testing.T) {
 		if !strings.Contains(env, "\n"+tc.want) {
 			t.Errorf("renderEnv(%q) = %q, want the line %q", tc.value, env, tc.want)
 		}
+	}
+}
+
+// TestRenderEnvGitopsRepoToken checks the .env holds the GITOPS_REPO_TOKEN
+// placeholder line: bootstrap cannot know the token.
+func TestRenderEnvGitopsRepoToken(t *testing.T) {
+	t.Parallel()
+
+	env := renderEnv(envValues{AppID: 1, PEMPath: "dev.private-key.pem"})
+	want := "\nexport GITOPS_REPO_TOKEN= # set this — a token with Contents write on the gitops repo\n"
+	if !strings.Contains(env, want) {
+		t.Errorf("renderEnv = %q, want the line %q", env, want)
+	}
+}
+
+// TestAppPermissions checks the manifest requests Contents read, not write:
+// badil writes to the gitops repo with GITOPS_REPO_TOKEN.
+func TestAppPermissions(t *testing.T) {
+	t.Parallel()
+
+	want := map[string]string{"contents": "read", "pull_requests": "write", "metadata": "read"}
+	if got := appPermissions(); !maps.Equal(got, want) {
+		t.Errorf("appPermissions() = %v, want %v", got, want)
+	}
+	var out bytes.Buffer
+	printPlan(&out, Options{AppName: "badil-dev"}, "https://d.example.com/webhooks/github")
+	if line := "permissions: contents:read, pull_requests:write, metadata:read\n"; !strings.Contains(
+		out.String(),
+		line,
+	) {
+		t.Errorf("plan = %q, want the line %q", out.String(), line)
+	}
+}
+
+// TestPrintNextSteps checks bootstrap's next steps tell the user to set
+// GITOPS_REPO_TOKEN in the .env file.
+func TestPrintNextSteps(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	printNextSteps(&out, "https://github.com/apps/badil-dev/installations/new", ".env")
+	want := "\nset GITOPS_REPO_TOKEN in .env to a token with Contents write on the gitops repo,\n"
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("next steps = %q, want the line %q", out.String(), want)
 	}
 }
 

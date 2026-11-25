@@ -58,7 +58,7 @@ func mustNewForge(t *testing.T, cfg *config.Config) (*forgegithub.Forge, store.C
 	if err != nil {
 		t.Fatalf("newApp: %v", err)
 	}
-	_, f, identity, err := newForge(context.Background(), app, cfg)
+	f, identity, err := newForge(context.Background(), app, cfg)
 	if err != nil {
 		t.Fatalf("newForge: %v", err)
 	}

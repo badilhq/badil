@@ -10,7 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/badilhq/badil/internal/app"
@@ -158,9 +157,7 @@ func statusHooks(s *status.Store, wake *app.Wake) []store.Option {
 }
 
 // newStoreAndForge builds the gitops repo store and the GitHub forge from
-// cfg (newForge). One installation transport of the GitHub App backs both the
-// API client and the store's git credentials, so its cached installation
-// token is shared. The store commits as the App's bot
+// cfg (newForge). The store commits as the App's bot
 // (github.CommitIdentity), matches pr-urls with the forge's rule, clones the
 // gitops repo cfg.GitOpsRepoURL into cfg.GitOpsCloneDir with the credentials
 // of github.GitopsCredentials and is configured by opts; an identity that
@@ -168,14 +165,14 @@ func statusHooks(s *status.Store, wake *app.Wake) []store.Option {
 func newStoreAndForge(
 	ctx context.Context, app *github.App, cfg *config.Config, opts ...store.Option,
 ) (*store.GitHubStore, *forgegithub.Forge, error) {
-	itr, f, identity, err := newForge(ctx, app, cfg)
+	f, identity, err := newForge(ctx, app, cfg)
 	if err != nil {
 		return nil, nil, err
 	}
 	st, err := store.Open(ctx, store.CloneConfig{
 		URL:         cfg.GitOpsRepoURL,
 		Dir:         cfg.GitOpsCloneDir,
-		Credentials: github.GitopsCredentials(cfg.GitOpsRepoUsername, cfg.GitOpsRepoToken, itr),
+		Credentials: github.GitopsCredentials(cfg.GitOpsRepoUsername, cfg.GitOpsRepoToken),
 	}, identity, opts...)
 	if err != nil {
 		return nil, nil, err
@@ -183,24 +180,23 @@ func newStoreAndForge(
 	return st, f, nil
 }
 
-// newForge returns the transport of the installation cfg.InstallationID of
-// app, the GitHub forge of cfg.GitHubURL over a client on that transport, and
-// the App's bot as the gitops commit identity (github.CommitIdentity). Every
-// client is on app's API base (github.App.Client).
+// newForge returns the GitHub forge of cfg.GitHubURL over a client on the
+// transport of the installation cfg.InstallationID of app, and the App's bot
+// as the gitops commit identity (github.CommitIdentity). Every client is on
+// app's API base (github.App.Client).
 func newForge(
 	ctx context.Context, app *github.App, cfg *config.Config,
-) (*ghinstallation.Transport, *forgegithub.Forge, store.CommitIdentity, error) {
-	itr := app.InstallationTransport(cfg.InstallationID)
-	client := app.Client(itr)
+) (*forgegithub.Forge, store.CommitIdentity, error) {
+	client := app.Client(app.InstallationTransport(cfg.InstallationID))
 	id, err := github.CommitIdentity(ctx, app.Client(app.AppsTransport()), client, cfg.GitHubURL)
 	if err != nil {
-		return nil, nil, store.CommitIdentity{}, fmt.Errorf("gitops commit identity: %w", err)
+		return nil, store.CommitIdentity{}, fmt.Errorf("gitops commit identity: %w", err)
 	}
 	f, err := forgegithub.New(client, app, cfg.InstallationID, cfg.GitHubURL)
 	if err != nil {
-		return nil, nil, store.CommitIdentity{}, err
+		return nil, store.CommitIdentity{}, err
 	}
-	return itr, f, store.CommitIdentity(id), nil
+	return f, store.CommitIdentity(id), nil
 }
 
 // closeStore removes the store's clone directory when it made one, logging a
