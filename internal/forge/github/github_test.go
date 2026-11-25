@@ -207,7 +207,7 @@ func TestListPullRequestFiles(t *testing.T) {
 			if !errors.Is(denyErr, forge.ErrUnauthorized) {
 				t.Fatalf("ListChangedFiles = %+v, %v; want %v", files, denyErr, forge.ErrUnauthorized)
 			}
-			if want := "gitops: unauthorized: "; !strings.HasPrefix(denyErr.Error(), want) {
+			if want := "forge: unauthorized: "; !strings.HasPrefix(denyErr.Error(), want) {
 				t.Errorf("err = %q, want it to start with %q", denyErr, want)
 			}
 		})

@@ -23,9 +23,9 @@ var (
 	ErrForbidden = errors.New("forge: installation not allowed")
 	// ErrNotFound is a pull request, or a comment target, that does not
 	// exist.
-	ErrNotFound = errors.New("gitops: not found")
+	ErrNotFound = errors.New("forge: not found")
 	// ErrUnauthorized is a request the forge refused for its credentials.
-	ErrUnauthorized = errors.New("gitops: unauthorized")
+	ErrUnauthorized = errors.New("forge: unauthorized")
 )
 
 // Forge reads pull requests, upserts badil's comment on them and owns the
