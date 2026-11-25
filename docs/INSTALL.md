@@ -389,8 +389,9 @@ Upgrading from a release where `gitops-repo-token` was optional: badil no longer
    kubectl patch secret badil -n badil --type merge \
      -p "{\"stringData\":{\"gitops-repo-token\":\"$GITOPS_REPO_TOKEN\"}}"
    ```
-3. Upgrade badil as below.
-4. Lower the App's Contents permission to read: in the App settings, **Permissions & events** → **Repository permissions** → **Contents**, choose **Read-only** and click **Save changes**. A removed permission takes effect at once: installations approve nothing.
+3. If a branch rule on the gitops repo's default branch lists the App on its bypass list, add the token's owner (the machine user) to that list, as [§2](#2-gitops-repo) says: pushes now run as that user, and the rule rejects them otherwise.
+4. Upgrade badil as below.
+5. Lower the App's Contents permission to read: in the App settings, **Permissions & events** → **Repository permissions** → **Contents**, choose **Read-only** and click **Save changes**. A removed permission takes effect at once: installations approve nothing.
 
 To upgrade badil:
 
