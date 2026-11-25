@@ -4,7 +4,7 @@ Local setup for badil: ngrok tunnel (or a public URL), GitHub App, env, smoke te
 
 ## Prerequisites
 
-- Go 1.26+
+- Go 1.27+
 - `ngrok` (unless badil has a public URL you pass as `BADIL_WEBHOOK_URL`)
 - `gh` CLI, authenticated (`gh auth status`)
 - GitHub account with admin access to the gitops repo

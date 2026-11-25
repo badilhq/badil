@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM golang:1-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine AS builder
 ARG TARGETOS TARGETARCH
 # VERSION is the version badil reports; empty falls back to the build info.
 ARG VERSION=""

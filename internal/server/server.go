@@ -112,7 +112,6 @@ func NewServer(
 	}
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
 	r.Use(accessLog)
 	r.Get(healthzPath, s.handleHealthz)
 	r.Post("/webhooks/github", s.handleWebhook)
