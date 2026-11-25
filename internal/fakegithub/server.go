@@ -60,6 +60,9 @@ type Server struct {
 type repository struct {
 	owner, name string
 	pulls       map[int]*pullRequest
+	// roles are the collaborator roles set by lowercased login; a login
+	// without one has defaultRole.
+	roles map[string]string
 }
 
 // pullRequest is a pull request and its comments.
@@ -76,8 +79,10 @@ type pullRequest struct {
 	labels   []string
 	files    []changedFile
 	comments []*comment
-	created  time.Time
-	updated  time.Time
+	// labeled are the labeled events of the pull request, oldest first.
+	labeled []labeledEvent
+	created time.Time
+	updated time.Time
 }
 
 // changedFile is a file a pull request changes.
@@ -85,6 +90,11 @@ type changedFile struct {
 	Filename         string `json:"filename"`
 	Status           string `json:"status,omitempty"`
 	PreviousFilename string `json:"previous_filename,omitempty"`
+}
+
+// labeledEvent is a label added to a pull request, and who added it.
+type labeledEvent struct {
+	actor, label string
 }
 
 // comment is an issue comment on a pull request.
@@ -119,7 +129,8 @@ func (s *Server) Handler() http.Handler {
 	return s.handler
 }
 
-// resetLocked clears the repositories and the API call counters. Issued
+// resetLocked clears the repositories, with their pull requests, labeled
+// events and collaborator roles, and the API call counters. Issued
 // tokens are kept, so a running badil keeps its cached installation token.
 func (s *Server) resetLocked() {
 	s.repos = map[string]*repository{}
@@ -131,7 +142,7 @@ func (s *Server) repo(owner, name string) *repository {
 	key := strings.ToLower(owner + "/" + name)
 	r, ok := s.repos[key]
 	if !ok {
-		r = &repository{owner: owner, name: name, pulls: map[int]*pullRequest{}}
+		r = &repository{owner: owner, name: name, pulls: map[int]*pullRequest{}, roles: map[string]string{}}
 		s.repos[key] = r
 	}
 	return r

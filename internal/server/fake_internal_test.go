@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"regexp"
 	"strconv"
@@ -40,8 +41,12 @@ import (
 type fakeGitops struct {
 	githubtest.URLs
 
-	t          *testing.T
-	catalog    []string
+	t       *testing.T
+	catalog []string
+	// labeller added every label; "" is octocat. noWrite holds the logins
+	// without write access.
+	labeller   string
+	noWrite    map[string]bool
 	badilYAML  string
 	catalogErr error
 	applyErr   error
@@ -226,6 +231,20 @@ func (f *fakeGitops) FanOutPRComments(_ context.Context, _ preview.Values, body 
 	f.fanOutBodyCalled = true
 	f.capturedSummary = body
 	return f.fanOutErr
+}
+
+// LabelledBy answers that labeller, octocat when empty, added the last of
+// labels.
+func (f *fakeGitops) LabelledBy(_ context.Context, _, _ string, _ int, labels []string) (string, string, bool, error) {
+	if len(labels) == 0 {
+		return "", "", false, nil
+	}
+	return cmp.Or(f.labeller, "octocat"), labels[len(labels)-1], true, nil
+}
+
+// CanWrite answers that every login outside noWrite has write access.
+func (f *fakeGitops) CanWrite(_ context.Context, _, _, login string) (bool, error) {
+	return !f.noWrite[login], nil
 }
 
 func (f *fakeGitops) UpsertComment(_ context.Context, owner, repo string, prNumber int, body string) error {

@@ -41,6 +41,16 @@ type Forge interface {
 	// page. Their ChangedFiles is 0: the listing does not return it. A
 	// failure on any page is returned as an error.
 	ListOpenPullRequests(ctx context.Context, owner, repo string) ([]PullRequest, error)
+	// LabelledBy returns who last added one of labels to owner/repo#number:
+	// the actor's login and the label name of the newest labeled event of the
+	// issue whose label name equals one of labels, reading every page of its
+	// events. The bool is false when no such event exists. A failure on any
+	// page is returned as an error.
+	LabelledBy(ctx context.Context, owner, repo string, number int, labels []string) (string, string, bool, error)
+	// CanWrite reports whether login has write access to owner/repo: the
+	// write, maintain or admin role. A login the forge does not know
+	// (ErrNotFound) has none, and no error is returned.
+	CanWrite(ctx context.Context, owner, repo, login string) (bool, error)
 	// UpsertComment posts body as badil's comment on owner/repo#number: the
 	// existing one is updated, or a new one is created.
 	UpsertComment(ctx context.Context, owner, repo string, number int, body string) error

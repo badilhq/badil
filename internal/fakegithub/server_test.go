@@ -227,3 +227,112 @@ func TestControlErrors(t *testing.T) {
 		}
 	})
 }
+
+func TestLabeledEvents(t *testing.T) {
+	srv := newMock(t, fakegithub.Config{})
+	tok := "token " + issueToken(t, srv)
+	do(t, srv, http.MethodPost, "/_mock/repos/acme/web/pulls", "",
+		`{"number":1,"head_ref":"f","head_sha":"abc","author":"octocat","labels":["bug","preview"]}`)
+	do(
+		t,
+		srv,
+		http.MethodPost,
+		"/_mock/repos/acme/web/pulls/1/labels",
+		"",
+		`{"name":"preview:demo","sender":"triager"}`,
+	)
+	do(t, srv, http.MethodPost, "/_mock/repos/acme/web/pulls/1/labels", "", `{"name":"preview:demo","sender":"other"}`)
+	do(t, srv, http.MethodPost, "/_mock/repos/acme/web/pulls/1/labels", "", `{"name":"docs"}`)
+
+	status, body := do(t, srv, http.MethodGet, "/api/v3/repos/acme/web/issues/1/events", tok, "")
+	want := `[{"actor":{"login":"octocat"},"event":"labeled","label":{"name":"bug"}},` +
+		`{"actor":{"login":"octocat"},"event":"labeled","label":{"name":"preview"}},` +
+		`{"actor":{"login":"triager"},"event":"labeled","label":{"name":"preview:demo"}},` +
+		`{"actor":{"login":"octocat"},"event":"labeled","label":{"name":"docs"}}]`
+	if status != http.StatusOK || strings.TrimSpace(body) != want {
+		t.Errorf("events: status %d, body %s; want 200 %s", status, body, want)
+	}
+	if status, _ = do(
+		t,
+		srv,
+		http.MethodGet,
+		"/api/v3/repos/acme/web/issues/9/events",
+		tok,
+		"",
+	); status != http.StatusNotFound {
+		t.Errorf("events of an unknown PR: status %d, want 404", status)
+	}
+
+	do(t, srv, http.MethodPost, "/_mock/reset", "", "")
+	do(t, srv, http.MethodPost, "/_mock/repos/acme/web/pulls", "", `{"number":1,"head_ref":"f","head_sha":"abc"}`)
+	if status, body = do(
+		t,
+		srv,
+		http.MethodGet,
+		"/api/v3/repos/acme/web/issues/1/events",
+		tok,
+		"",
+	); strings.TrimSpace(
+		body,
+	) != "[]" {
+		t.Errorf("events after reset: status %d, body %s; want []", status, body)
+	}
+}
+
+func TestPermission(t *testing.T) {
+	srv := newMock(t, fakegithub.Config{})
+	tok := "token " + issueToken(t, srv)
+	read := func(login string) (string, string, bool) {
+		t.Helper()
+		status, body := do(t, srv, http.MethodGet, "/api/v3/repos/acme/web/collaborators/"+login+"/permission", tok, "")
+		var out struct {
+			Permission string `json:"permission"`
+			RoleName   string `json:"role_name"`
+			User       struct {
+				Login       string          `json:"login"`
+				Permissions map[string]bool `json:"permissions"`
+			} `json:"user"`
+		}
+		if err := json.Unmarshal([]byte(body), &out); err != nil || status != http.StatusOK || out.User.Login != login {
+			t.Fatalf("permission of %s: status %d, body %s: %v", login, status, body, err)
+		}
+		return out.Permission, out.RoleName, out.User.Permissions["push"]
+	}
+
+	if p, r, push := read("anyone"); p != "write" || r != "write" || !push {
+		t.Errorf("default = %q, %q, push %v; want write, write, true", p, r, push)
+	}
+	for _, tc := range []struct {
+		role, permission, roleName string
+		push                       bool
+	}{
+		{"admin", "admin", "admin", true},
+		{"maintain", "write", "maintain", true},
+		{"write", "write", "write", true},
+		{"triage", "read", "triage", false},
+		{"read", "read", "read", false},
+		{"none", "none", "", false},
+	} {
+		t.Run(tc.role, func(t *testing.T) {
+			status, body := do(t, srv, http.MethodPut, "/_mock/repos/acme/web/collaborators/Alice/permission", "",
+				`{"permission":"`+tc.role+`"}`)
+			if status != http.StatusOK {
+				t.Fatalf("set %s: status %d, body %s", tc.role, status, body)
+			}
+			if p, r, push := read("alice"); p != tc.permission || r != tc.roleName || push != tc.push {
+				t.Errorf("read = %q, %q, push %v; want %q, %q, %v", p, r, push, tc.permission, tc.roleName, tc.push)
+			}
+		})
+	}
+	if p, _, _ := read("bob"); p != "write" {
+		t.Errorf("another login = %q, want write", p)
+	}
+	if status, _ := do(t, srv, http.MethodPut, "/_mock/repos/acme/web/collaborators/alice/permission", "",
+		`{"permission":"owner"}`); status != http.StatusBadRequest {
+		t.Errorf("unknown role: status %d, want 400", status)
+	}
+	do(t, srv, http.MethodPost, "/_mock/reset", "", "")
+	if p, _, _ := read("alice"); p != "write" {
+		t.Errorf("after reset = %q, want write", p)
+	}
+}

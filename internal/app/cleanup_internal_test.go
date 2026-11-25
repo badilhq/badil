@@ -25,6 +25,19 @@ func (f *cleanupForge) GetPullRequest(context.Context, string, string, int) (*fo
 	return &pr, nil
 }
 
+// LabelledBy answers that a writer, octocat, added the last of labels.
+func (*cleanupForge) LabelledBy(_ context.Context, _, _ string, _ int, labels []string) (string, string, bool, error) {
+	if len(labels) == 0 {
+		return "", "", false, nil
+	}
+	return "octocat", labels[len(labels)-1], true, nil
+}
+
+// CanWrite answers that every login has write access.
+func (*cleanupForge) CanWrite(context.Context, string, string, string) (bool, error) {
+	return true, nil
+}
+
 func (f *cleanupForge) UpsertComment(_ context.Context, _, _ string, _ int, body string) error {
 	f.upserts = append(f.upserts, body)
 	return nil

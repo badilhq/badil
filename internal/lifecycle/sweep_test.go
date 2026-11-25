@@ -97,6 +97,19 @@ func (f *fakeAPI) GetPullRequest(_ context.Context, owner, repo string, number i
 	return &forge.PullRequest{Open: f.prOpen[key], Labels: f.prLabels[key], HeadRef: f.prHeadRef[key]}, nil
 }
 
+// LabelledBy answers that a writer, octocat, added the last of labels.
+func (*fakeAPI) LabelledBy(_ context.Context, _, _ string, _ int, labels []string) (string, string, bool, error) {
+	if len(labels) == 0 {
+		return "", "", false, nil
+	}
+	return "octocat", labels[len(labels)-1], true, nil
+}
+
+// CanWrite answers that every login has write access.
+func (*fakeAPI) CanWrite(context.Context, string, string, string) (bool, error) {
+	return true, nil
+}
+
 func (f *fakeAPI) UpsertComment(_ context.Context, owner, repo string, prNumber int, body string) error {
 	f.upserts = append(f.upserts, fmt.Sprintf("%s/%s#%d", owner, repo, prNumber))
 	f.bodies = append(f.bodies, body)

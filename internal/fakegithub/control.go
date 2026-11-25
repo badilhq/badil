@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	gh "github.com/google/go-github/v71/github"
@@ -47,6 +48,7 @@ func (s *Server) routeControl(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+pull+"/reopen", s.reopenPull)
 	mux.HandleFunc("GET "+pull+"/comments", s.readComments)
 	mux.HandleFunc("POST /_mock/repos/{owner}/{repo}/push", s.pushRepo)
+	mux.HandleFunc("PUT /_mock/repos/{owner}/{repo}/collaborators/{login}/permission", s.setPermission)
 	mux.HandleFunc("GET /_mock/stats", s.stats)
 	mux.HandleFunc("POST /_mock/reset", s.reset)
 	mux.HandleFunc("/_mock/", func(w http.ResponseWriter, _ *http.Request) { notFound(w) })
@@ -104,6 +106,9 @@ func (s *Server) openPull(w http.ResponseWriter, r *http.Request) {
 		created:  now,
 		updated:  now,
 	}
+	for _, l := range pr.labels {
+		pr.labeled = append(pr.labeled, labeledEvent{actor: pr.author, label: l})
+	}
 	if in.Fork {
 		pr.headRepo = forkOwner + "/" + repo.name
 	}
@@ -153,13 +158,16 @@ func normalizeFiles(files []changedFile) ([]changedFile, *controlError) {
 	return out, nil
 }
 
-// labelRequest is the body of the label call.
+// labelRequest is the body of the label call. Sender is who adds the label,
+// the pull request's author when empty.
 type labelRequest struct {
-	Name string `json:"name"`
+	Name   string `json:"name"`
+	Sender string `json:"sender"`
 }
 
-// addLabel adds a label and sends pull_request labeled. A label the pull
-// request has is not added twice, and the webhook is still sent.
+// addLabel adds a label, records its labeled event by the sender, and sends
+// pull_request labeled. A label the pull request has is not added twice nor
+// recorded again, as on GitHub, and the webhook is still sent.
 func (s *Server) addLabel(w http.ResponseWriter, r *http.Request) {
 	var in labelRequest
 	if err := decode(r, &in, false); err != nil || in.Name == "" {
@@ -169,6 +177,7 @@ func (s *Server) addLabel(w http.ResponseWriter, r *http.Request) {
 	s.change(w, r, "labeled", in.Name, func(pr *pullRequest) *controlError {
 		if !slices.Contains(pr.labels, in.Name) {
 			pr.labels = append(pr.labels, in.Name)
+			pr.labeled = append(pr.labeled, labeledEvent{actor: cmp.Or(in.Sender, pr.author), label: in.Name})
 		}
 		return nil
 	})
@@ -332,6 +341,85 @@ func (s *Server) pushRepo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, controlResponse{Webhook: s.send(r.Context(), "push", "", ev)})
 }
 
+// Collaborator roles, from the least to the most access.
+const (
+	roleNone     = "none"
+	roleRead     = "read"
+	roleTriage   = "triage"
+	roleWrite    = "write"
+	roleMaintain = "maintain"
+	roleAdmin    = "admin"
+)
+
+// defaultRole is the collaborator role of a login no permission call set.
+const defaultRole = roleWrite
+
+// roles are the collaborator roles, from the least to the most access.
+var roles = []string{ //nolint:gochecknoglobals // fixed table
+	roleNone,
+	roleRead,
+	roleTriage,
+	roleWrite,
+	roleMaintain,
+	roleAdmin,
+}
+
+// grants are the permissions of the permission read and the least role that
+// grants each.
+var grants = map[string]string{ //nolint:gochecknoglobals // fixed table
+	"pull": roleRead, roleTriage: roleTriage, "push": roleWrite, roleMaintain: roleMaintain, roleAdmin: roleAdmin,
+}
+
+// permissionJSON is the permission of login with role, as GET
+// /repos/{owner}/{repo}/collaborators/{username}/permission returns it:
+// permission folds maintain into write and triage into read, role_name is
+// "" for none, and user.permissions holds what role grants.
+func permissionJSON(login, role string) *gh.RepositoryPermissionLevel {
+	rank := slices.Index(roles, role)
+	perms := map[string]bool{}
+	for perm, least := range grants {
+		perms[perm] = rank >= slices.Index(roles, least)
+	}
+	permission, name := role, role
+	switch role {
+	case roleMaintain:
+		permission = roleWrite
+	case roleTriage:
+		permission = roleRead
+	case roleNone:
+		name = ""
+	}
+	return &gh.RepositoryPermissionLevel{
+		Permission: gh.Ptr(permission),
+		RoleName:   gh.Ptr(name),
+		User:       &gh.User{Login: gh.Ptr(login), Permissions: perms, RoleName: gh.Ptr(name)},
+	}
+}
+
+// permissionRequest is the body of the permission call.
+type permissionRequest struct {
+	Permission string `json:"permission"`
+}
+
+// setPermission sets the role of a login on the repository: admin, maintain,
+// write, triage, read or none. It sends no webhook.
+func (s *Server) setPermission(w http.ResponseWriter, r *http.Request) {
+	var in permissionRequest
+	if err := decode(r, &in, false); err != nil {
+		writeMessage(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !slices.Contains(roles, in.Permission) {
+		writeMessage(w, http.StatusBadRequest, "permission must be admin, maintain, write, triage, read or none")
+		return
+	}
+	login := r.PathValue("login")
+	s.mu.Lock()
+	s.repo(r.PathValue("owner"), r.PathValue("repo")).roles[strings.ToLower(login)] = in.Permission
+	s.mu.Unlock()
+	writeJSON(w, http.StatusOK, permissionJSON(login, in.Permission))
+}
+
 // readComments answers the comments of the pull request, in order.
 func (s *Server) readComments(w http.ResponseWriter, r *http.Request) {
 	s.withPull(w, r, func(_ *repository, pr *pullRequest) {
@@ -347,8 +435,8 @@ func (s *Server) stats(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, calls)
 }
 
-// reset clears the repositories, pull requests, comments and API call
-// counters.
+// reset clears the repositories, pull requests, comments, labeled events,
+// collaborator roles and API call counters.
 func (s *Server) reset(w http.ResponseWriter, _ *http.Request) {
 	s.mu.Lock()
 	s.resetLocked()

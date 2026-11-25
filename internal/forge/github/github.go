@@ -4,9 +4,11 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 
 	gh "github.com/google/go-github/v71/github"
@@ -188,6 +190,54 @@ func (f *Forge) UpsertComment(ctx context.Context, owner, repo string, number in
 		return classifyHTTPError(createResp, createErr)
 	}
 	return nil
+}
+
+// labeledEvent is the issue event of an added label.
+const labeledEvent = "labeled"
+
+// LabelledBy returns who last added one of labels to owner/repo#number: the
+// actor and label name of the last labeled event, in listing order (oldest
+// first), whose label name equals one of labels, reading every page (100
+// events each). The bool is false when there is none. A failure on any page
+// is returned as an error.
+func (f *Forge) LabelledBy(
+	ctx context.Context, owner, repo string, number int, labels []string,
+) (string, string, bool, error) {
+	opts := &gh.ListOptions{PerPage: perPage}
+	var login, label string
+	found := false
+	for {
+		events, resp, err := f.gh.Issues.ListIssueEvents(ctx, owner, repo, number, opts)
+		if err != nil {
+			return "", "", false, classifyHTTPError(resp, err)
+		}
+		for _, ev := range events {
+			if ev.GetEvent() != labeledEvent || !slices.Contains(labels, ev.GetLabel().GetName()) {
+				continue
+			}
+			login, label, found = ev.GetActor().GetLogin(), ev.GetLabel().GetName(), true
+		}
+		if resp == nil || resp.NextPage == 0 {
+			return login, label, found, nil
+		}
+		opts.Page = resp.NextPage
+	}
+}
+
+// CanWrite reports whether login has write access to owner/repo: the
+// user.permissions.push of its permission, true for the write, maintain and
+// admin roles. A 404 (a login that is not a user) is no write access and no
+// error.
+func (f *Forge) CanWrite(ctx context.Context, owner, repo, login string) (bool, error) {
+	perm, resp, err := f.gh.Repositories.GetPermissionLevel(ctx, owner, repo, login)
+	if err != nil {
+		err = classifyHTTPError(resp, err)
+		if errors.Is(err, forge.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return perm.GetUser().GetPermissions()["push"], nil
 }
 
 // labelNames returns the names of labels.

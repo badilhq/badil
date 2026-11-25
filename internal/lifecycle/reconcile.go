@@ -53,6 +53,10 @@ const (
 	// LabelConflictReason is the skip reason of an open PR whose named
 	// preview labels conflict.
 	LabelConflictReason = "conflicting preview labels"
+	// LabellerReason is the skip reason of a reconcile refused because the
+	// user who added the label that picked its target has no write access to
+	// its repo, or could not be found.
+	LabellerReason = "labeller without write access"
 )
 
 // Reconcile outcomes, the outcome label of Recorder.Reconcile.
@@ -116,7 +120,9 @@ type Event struct {
 // preview (preview.ResolveTarget). The PR is first torn down from every other
 // preview it may still be pinned in. Then, when it is open and has a target,
 // the catalog services of its repo that it touches (touchedServices) are
-// deployed there at its head SHA, unless another PR already pins one of them,
+// deployed there at its head SHA, unless the user who added the label that
+// picked the target has no write access to the repo or cannot be found
+// (checkLabeller), or another PR already pins one of them,
 // or the preview does not exist and preview.maxPreviews previews already do,
 // or the preview does not exist and its namespace exists and is not a
 // preview namespace for its slug (NamespaceChecker); before that deploy,
@@ -142,7 +148,9 @@ type Event struct {
 // skipped as already deployed.
 //
 // Each call records exactly one outcome through the Recorder: failed when the
-// catalog or the PR can't be read on a non-closed event, when the PR's files
+// catalog or the PR can't be read on a non-closed event, when the labeller
+// check of a PR open with a target can't read the forge (nothing is
+// written), when the PR's files
 // can't be listed, the target preview can't be read, the previews can't be
 // listed or the target's namespace can't be checked (the teardowns from the
 // PR's other previews are still committed),
@@ -208,9 +216,15 @@ func reconcile(ctx context.Context, api ReconcileAPI, ev Event, headSHA *string)
 	if deploy && len(services) == 0 {
 		return reconcileSkipped(ctx, ev, RepoNotInCatalogReason)
 	}
+	var labeller labellerCheck
+	if deploy {
+		if labeller, err = checkLabeller(ctx, api.Forge, ev, targetLabels(pr.Labels, t, cat.Label)); err != nil {
+			return reconcileFailed(ctx, ev, fmt.Errorf("labeller check failed: %w", err))
+		}
+	}
 	p := &reconcilePlan{
 		parsePR: api.Forge.ParsePRURL, ev: ev, pr: pr, t: t, catalog: cat, deploy: deploy, repoServices: services,
-		foreign:      foreignFunc(ctx, api.Namespaces),
+		foreign: foreignFunc(ctx, api.Namespaces), labeller: labeller,
 		cleanupSlugs: cleanupSlugs(t, pr, ev, cat.Label), cleanupReason: cleanupReason(t, pr, ev, cat.Label),
 		timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
@@ -237,6 +251,9 @@ type reconcilePlan struct {
 	timestamp     string
 	// foreign checks the namespace of a new target preview.
 	foreign func(slug string) (bool, error)
+	// labeller is who added the label that picked the target, checked once
+	// before Apply: a refused one refuses the deploy in every attempt.
+	labeller labellerCheck
 	// listErr is the error of the PR's file listing: the change only tears
 	// the PR down from cleanupSlugs, and the reconcile fails.
 	listErr error
@@ -254,6 +271,48 @@ type reconcilePlan struct {
 	inUse     bool
 	unpin     *teardownStep
 	deploys   []*deployStep
+}
+
+// labellerCheck is the labeller check of a PR that deploys: refused when the
+// user who added the label that picked its target, login, has no write
+// access to its repo, or when no labeled event of the target's labels was
+// found (login empty). label is the label of that event, or the target's
+// labels joined with ", " when none was found.
+type labellerCheck struct {
+	refused      bool
+	login, label string
+}
+
+// checkLabeller checks who added the label of labels (the target's) that is
+// in force on ev's PR: the actor of its newest labeled event must have write
+// access to the PR's repo. A failed events or permission read is returned.
+func checkLabeller(ctx context.Context, f forge.Forge, ev Event, labels []string) (labellerCheck, error) {
+	login, label, found, err := f.LabelledBy(ctx, ev.Owner, ev.Repo, ev.Number, labels)
+	if err != nil {
+		return labellerCheck{}, err
+	}
+	if !found {
+		return labellerCheck{refused: true, label: strings.Join(labels, ", ")}, nil
+	}
+	canWrite, err := f.CanWrite(ctx, ev.Owner, ev.Repo, login)
+	if err != nil {
+		return labellerCheck{}, err
+	}
+	return labellerCheck{refused: !canWrite, login: login, label: label}, nil
+}
+
+// targetLabels returns the labels of labels, the PR's, that picked t's
+// target with the preview label base: every named label whose slug is the
+// target when a named label sets it, else the plain label.
+func targetLabels(labels []string, t preview.Resolution, base string) []string {
+	var out []string
+	for _, l := range labels {
+		slug, named, plain := preview.ParseLabel(l, base)
+		if (len(t.Named) > 0 && named && slug == t.Slug) || (len(t.Named) == 0 && plain) {
+			out = append(out, l)
+		}
+	}
+	return out
 }
 
 // heldPin is a service of the target preview pinned by another PR.
@@ -297,7 +356,8 @@ func (p *reconcilePlan) target(slug string) Target {
 // change runs the reconcile on tree. The PR is first torn down from every
 // preview of cleanupSlugs. Then, when it is open and has a target: when it
 // touches no service, it is torn down from the target too; otherwise it is
-// refused when one of its services is pinned there by another PR, or the
+// refused when its labeller check refused it (labeller), or one of its
+// services is pinned there by another PR, or the
 // target does not exist and preview.maxPreviews previews already do, or the
 // target does not exist and its namespace is foreign (foreign); it is not
 // refused, its entries for the services of its repo it does not touch
@@ -321,6 +381,7 @@ func (p *reconcilePlan) change(tree Tree) (Summary, error) {
 	case len(p.services) == 0:
 		p.noService = &teardownStep{tt: p.target(p.t.Slug), reason: NoServiceReason, trigger: triggerWebhook}
 		p.noService.run(tree, p.parsePR)
+	case p.labeller.refused:
 	default:
 		vals, err := tree.GetPreview(p.t.Slug)
 		if err != nil && !errors.Is(err, ErrNotFound) {
@@ -512,6 +573,9 @@ func (p *reconcilePlan) refusal(ctx context.Context, api ReconcileAPI) (string, 
 	var body string
 	var o, r string
 	switch {
+	case p.labeller.refused:
+		body = preview.BuildLabellerSummary(p.t.Slug, p.labeller.login, p.labeller.label, p.ev.FullName)
+		o, r = reconcileSkipped(ctx, p.ev, LabellerReason, slog.String("labeller", p.labeller.login))
 	case p.held != nil:
 		body = preview.BuildServiceHeldSummary(p.t.Slug, p.held.service, p.held.holder, p.catalog.Label)
 		o, r = reconcileSkipped(ctx, p.ev, ServiceHeldReason, slog.String("holder", p.held.holder))
