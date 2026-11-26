@@ -1,6 +1,7 @@
 package fakegithub
 
 import (
+	"cmp"
 	"crypto/rand"
 	"encoding/json"
 	"log/slog"
@@ -45,6 +46,8 @@ func (s *Server) routeAPI(mux *http.ServeMux) {
 		{"GET /repos/{owner}/{repo}/issues/{number}/comments", s.requireToken, s.listComments},
 		{"POST /repos/{owner}/{repo}/issues/{number}/comments", s.requireToken, s.createComment},
 		{"PATCH /repos/{owner}/{repo}/issues/comments/{id}", s.requireToken, s.editComment},
+		{"GET /repos/{owner}/{repo}/issues/{number}/events", s.requireToken, s.listIssueEvents},
+		{"GET /repos/{owner}/{repo}/collaborators/{username}/permission", s.requireToken, s.getPermission},
 	}
 	for _, rt := range routes {
 		method, path, _ := strings.Cut(rt.pattern, " ")
@@ -236,6 +239,33 @@ func (s *Server) editComment(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	notFound(w)
+}
+
+// listIssueEvents answers GET /repos/{owner}/{repo}/issues/{number}/events:
+// a labeled event per label added, oldest first.
+func (s *Server) listIssueEvents(w http.ResponseWriter, r *http.Request) {
+	s.withPull(w, r, func(_ *repository, pr *pullRequest) {
+		events := make([]*gh.IssueEvent, 0, len(pr.labeled))
+		for _, ev := range pr.labeled {
+			events = append(events, &gh.IssueEvent{
+				Event: gh.Ptr("labeled"),
+				Actor: &gh.User{Login: gh.Ptr(ev.actor)},
+				Label: &gh.Label{Name: gh.Ptr(ev.label)},
+			})
+		}
+		writePage(w, r, events)
+	})
+}
+
+// getPermission answers GET
+// /repos/{owner}/{repo}/collaborators/{username}/permission from the login's
+// role, defaultRole when none is set.
+func (s *Server) getPermission(w http.ResponseWriter, r *http.Request) {
+	login := r.PathValue("username")
+	s.mu.Lock()
+	role := cmp.Or(s.repo(r.PathValue("owner"), r.PathValue("repo")).roles[strings.ToLower(login)], defaultRole)
+	s.mu.Unlock()
+	writeJSON(w, http.StatusOK, permissionJSON(login, role))
 }
 
 // withPull runs fn with s.mu held on the pull request of the request's

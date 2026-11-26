@@ -100,6 +100,14 @@ func (f *loopFake) Apply(context.Context, lifecycle.Op) (lifecycle.Result, error
 	return lifecycle.Result{NoOp: true}, nil
 }
 
+func (*loopFake) LabelledBy(context.Context, string, string, int, []string) (string, string, bool, error) {
+	return "", "", false, errUnexpected
+}
+
+func (*loopFake) CanWrite(context.Context, string, string, string) (bool, error) {
+	return false, errUnexpected
+}
+
 func (f *loopFake) UpsertComment(context.Context, string, string, int, string) error {
 	return errUnexpected
 }

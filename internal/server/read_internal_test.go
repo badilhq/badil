@@ -320,6 +320,10 @@ func TestWait_OutcomeStates(t *testing.T) {
 		{res: skipped("service held by another pr"), state: "refused", reason: "service held by another pr"},
 		{res: skipped("preview limit reached"), state: "refused", reason: "preview limit reached"},
 		{res: skipped("namespace in use"), state: "refused", reason: "namespace in use"},
+		{
+			res:   skipped("labeller without write access"),
+			state: "refused", reason: "labeller without write access",
+		},
 		{res: skipped("conflicting preview labels"), state: "refused", reason: "conflicting preview labels"},
 		{res: skipped("fork pr"), state: "refused", reason: "fork pr"},
 		{res: skipped("repo not in catalog"), state: "refused", reason: "repo not in catalog"},
@@ -372,6 +376,14 @@ func TestWait_WebhookUnlabeledPRSkipped(t *testing.T) {
 	if got.SHA != statusSHA {
 		t.Errorf("sha = %q, want %q", got.SHA, statusSHA)
 	}
+}
+
+func TestWait_LabellerWithoutWriteRefused(t *testing.T) {
+	fg := reconcileFake()
+	fg.labeller, fg.noWrite = "triager", map[string]bool{"triager": true}
+	s, _, _ := newReadServer(t, fg, app.Config{})
+	deliver(t, s, labelEvent("labeled", "preview", "preview"))
+	assertState(t, waitFor(t, s, "/v1/wait?repo=acme/backend-1&pr=42"), "refused", "labeller without write access")
 }
 
 func TestWait_FailedReconcile(t *testing.T) {

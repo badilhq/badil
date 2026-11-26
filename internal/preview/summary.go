@@ -190,3 +190,21 @@ func BuildNamespaceInUseSummary(slug string) string {
 		"Rename the branch, or use a `preview:<name>` label.",
 		slug, slug)
 }
+
+// BuildLabellerSummary renders the comment badil leaves on a PR it refused
+// to deploy to the preview slug because login, who added its label label,
+// has no write access to the repository fullName (owner/repo). An empty
+// login is a label whose adder was not found; label then names the target's
+// labels.
+func BuildLabellerSummary(slug, login, label, fullName string) string {
+	if login == "" {
+		return fmt.Sprintf("## ⚠️ Preview: `%s`\n\n"+
+			"badil could not find who added the `%s` label, so it does not deploy this PR. "+
+			"Someone with write access must add the label again.",
+			slug, label)
+	}
+	return fmt.Sprintf("## ⚠️ Preview: `%s`\n\n"+
+		"`%s` added the `%s` label but does not have write access to `%s`, so badil does not deploy this PR. "+
+		"Someone with write access must add the label again.",
+		slug, login, label, fullName)
+}

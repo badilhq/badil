@@ -280,3 +280,118 @@ func TestListOpenPullRequests_FailingLaterPage(t *testing.T) {
 		t.Errorf("pull requests = %+v, want nil", got)
 	}
 }
+
+// labeled is a labeled issue event of label by actor.
+func labeled(actor, label string) string {
+	return fmt.Sprintf(`{"event":"labeled","actor":{"login":%q},"label":{"name":%q}}`, actor, label)
+}
+
+func TestLabelledBy(t *testing.T) {
+	srv := pagedServer(
+		t,
+		"/repos/acme/platform/issues/42/events",
+		nil,
+		"["+labeled(
+			"alice",
+			"preview:demo",
+		)+`,{"event":"unlabeled","actor":{"login":"bob"},"label":{"name":"preview:demo"}},`+
+			labeled(
+				"carol",
+				"bug",
+			)+"]",
+		"["+labeled("dave", "preview:Demo")+`,{"event":"renamed","actor":{"login":"erin"}}]`,
+	)
+	f := newForge(t, srv)
+	cases := []struct {
+		name         string
+		labels       []string
+		login, label string
+		found        bool
+	}{
+		{"newest match across pages", []string{"preview:demo", "preview:Demo"}, "dave", "preview:Demo", true},
+		{"one label", []string{"preview:demo"}, "alice", "preview:demo", true},
+		{"names compared exactly", []string{"PREVIEW:DEMO"}, "", "", false},
+		{"no labels", nil, "", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			login, label, found, err := f.LabelledBy(context.Background(), "acme", "platform", 42, tc.labels)
+			if err != nil {
+				t.Fatalf("LabelledBy: %v", err)
+			}
+			if login != tc.login || label != tc.label || found != tc.found {
+				t.Errorf("LabelledBy = %q, %q, %v; want %q, %q, %v", login, label, found, tc.login, tc.label, tc.found)
+			}
+		})
+	}
+}
+
+func TestLabelledBy_FailingLaterPage(t *testing.T) {
+	srv := pagedServer(t, "/repos/acme/platform/issues/42/events", nil, "["+labeled("alice", "preview")+"]", "")
+	login, _, found, err := newForge(
+		t,
+		srv,
+	).LabelledBy(context.Background(), "acme", "platform", 42, []string{"preview"})
+	if err == nil {
+		t.Fatalf("LabelledBy = %q, %v, nil; want an error", login, found)
+	}
+}
+
+func TestCanWrite(t *testing.T) {
+	cases := []struct {
+		name    string
+		status  int
+		body    string
+		want    bool
+		wantErr error
+	}{
+		{
+			name:   "write",
+			status: http.StatusOK,
+			body:   `{"permission":"write","role_name":"write","user":{"login":"alice","permissions":{"pull":true,"triage":true,"push":true}}}`,
+			want:   true,
+		},
+		{
+			name:   "maintain",
+			status: http.StatusOK,
+			body:   `{"permission":"write","role_name":"maintain","user":{"login":"alice","permissions":{"push":true,"maintain":true}}}`,
+			want:   true,
+		},
+		{
+			name:   "triage",
+			status: http.StatusOK,
+			body:   `{"permission":"read","role_name":"triage","user":{"login":"alice","permissions":{"pull":true,"triage":true,"push":false}}}`,
+		},
+		{
+			name:   "bot",
+			status: http.StatusOK,
+			body:   `{"permission":"none","role_name":"","user":{"login":"github-actions[bot]","type":"Bot"}}`,
+		},
+		{name: "not a user", status: http.StatusNotFound, body: `{"message":"alice is not a user"}`},
+		{name: "forbidden", status: http.StatusForbidden, body: `{"message":"denied"}`, wantErr: forge.ErrUnauthorized},
+		{name: "server error", status: http.StatusInternalServerError, body: `{"message":"boom"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/repos/acme/platform/collaborators/alice/permission" {
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				}
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer srv.Close()
+			got, err := newForge(t, srv).CanWrite(context.Background(), "acme", "platform", "alice")
+			switch {
+			case tc.status >= http.StatusInternalServerError || tc.wantErr != nil:
+				if err == nil || (tc.wantErr != nil && !errors.Is(err, tc.wantErr)) {
+					t.Fatalf("CanWrite = %v, %v; want error %v", got, err, tc.wantErr)
+				}
+			case err != nil:
+				t.Fatalf("CanWrite: %v", err)
+			case got != tc.want:
+				t.Errorf("CanWrite = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

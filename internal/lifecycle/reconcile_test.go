@@ -60,13 +60,24 @@ type reconcileFake struct {
 	beforePush  func(*storetest.Remote) error
 	openPRs     map[string][]forge.PullRequest
 	listErrs    map[string]error
+	// labelEvents are the PR's labeled events, oldest first; nil means one
+	// per label of pr, added by its author.
+	labelEvents []labelEvent
+	eventsErr   error
+	// noWrite holds the logins without write access.
+	noWrite map[string]bool
+	permErr error
 
 	g       *gitops
 	listed  []string
 	prReads int
-	fanOuts []string
-	upserts []string
-	calls   []string
+	// labelled logs the label sets of the LabelledBy calls, checked the
+	// logins of the CanWrite calls.
+	labelled [][]string
+	checked  []string
+	fanOuts  []string
+	upserts  []string
+	calls    []string
 }
 
 func (f *reconcileFake) FetchServiceCatalog(ctx context.Context) (*catalog.Catalog, error) {
@@ -121,6 +132,43 @@ func (f *reconcileFake) GetPullRequest(context.Context, string, string, int) (*f
 		return nil, f.prErr
 	}
 	return f.pr, nil
+}
+
+// labelEvent is a labeled event of a PR: who added which label.
+type labelEvent struct {
+	login, label string
+}
+
+func (f *reconcileFake) LabelledBy(
+	_ context.Context,
+	_, _ string,
+	_ int,
+	labels []string,
+) (string, string, bool, error) {
+	f.labelled = append(f.labelled, slices.Clone(labels))
+	if f.eventsErr != nil {
+		return "", "", false, f.eventsErr
+	}
+	events := f.labelEvents
+	if events == nil {
+		for _, l := range f.pr.Labels {
+			events = append(events, labelEvent{login: f.pr.Author, label: l})
+		}
+	}
+	for _, ev := range slices.Backward(events) {
+		if slices.Contains(labels, ev.label) {
+			return ev.login, ev.label, true, nil
+		}
+	}
+	return "", "", false, nil
+}
+
+func (f *reconcileFake) CanWrite(_ context.Context, _, _, login string) (bool, error) {
+	f.checked = append(f.checked, login)
+	if f.permErr != nil {
+		return false, f.permErr
+	}
+	return !f.noWrite[login], nil
 }
 
 func (f *reconcileFake) UpsertComment(_ context.Context, _, _ string, _ int, body string) error {

@@ -47,6 +47,84 @@ func (_m *MockForge) EXPECT() *MockForge_Expecter {
 	return &MockForge_Expecter{mock: &_m.Mock}
 }
 
+// CanWrite provides a mock function for the type MockForge
+func (_mock *MockForge) CanWrite(ctx context.Context, owner string, repo string, login string) (bool, error) {
+	ret := _mock.Called(ctx, owner, repo, login)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CanWrite")
+	}
+
+	var r0 bool
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) (bool, error)); ok {
+		return returnFunc(ctx, owner, repo, login)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) bool); ok {
+		r0 = returnFunc(ctx, owner, repo, login)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, string) error); ok {
+		r1 = returnFunc(ctx, owner, repo, login)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockForge_CanWrite_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CanWrite'
+type MockForge_CanWrite_Call struct {
+	*mock.Call
+}
+
+// CanWrite is a helper method to define mock.On call
+//   - ctx context.Context
+//   - owner string
+//   - repo string
+//   - login string
+func (_e *MockForge_Expecter) CanWrite(ctx any, owner any, repo any, login any) *MockForge_CanWrite_Call {
+	return &MockForge_CanWrite_Call{Call: _e.mock.On("CanWrite", ctx, owner, repo, login)}
+}
+
+func (_c *MockForge_CanWrite_Call) Run(run func(ctx context.Context, owner string, repo string, login string)) *MockForge_CanWrite_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 string
+		if args[3] != nil {
+			arg3 = args[3].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockForge_CanWrite_Call) Return(b bool, err error) *MockForge_CanWrite_Call {
+	_c.Call.Return(b, err)
+	return _c
+}
+
+func (_c *MockForge_CanWrite_Call) RunAndReturn(run func(ctx context.Context, owner string, repo string, login string) (bool, error)) *MockForge_CanWrite_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetPullRequest provides a mock function for the type MockForge
 func (_mock *MockForge) GetPullRequest(ctx context.Context, owner string, repo string, number int) (*forge.PullRequest, error) {
 	ret := _mock.Called(ctx, owner, repo, number)
@@ -123,6 +201,102 @@ func (_c *MockForge_GetPullRequest_Call) Return(pullRequest *forge.PullRequest, 
 }
 
 func (_c *MockForge_GetPullRequest_Call) RunAndReturn(run func(ctx context.Context, owner string, repo string, number int) (*forge.PullRequest, error)) *MockForge_GetPullRequest_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// LabelledBy provides a mock function for the type MockForge
+func (_mock *MockForge) LabelledBy(ctx context.Context, owner string, repo string, number int, labels []string) (string, string, bool, error) {
+	ret := _mock.Called(ctx, owner, repo, number, labels)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LabelledBy")
+	}
+
+	var r0 string
+	var r1 string
+	var r2 bool
+	var r3 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, int, []string) (string, string, bool, error)); ok {
+		return returnFunc(ctx, owner, repo, number, labels)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, int, []string) string); ok {
+		r0 = returnFunc(ctx, owner, repo, number, labels)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, int, []string) string); ok {
+		r1 = returnFunc(ctx, owner, repo, number, labels)
+	} else {
+		r1 = ret.Get(1).(string)
+	}
+	if returnFunc, ok := ret.Get(2).(func(context.Context, string, string, int, []string) bool); ok {
+		r2 = returnFunc(ctx, owner, repo, number, labels)
+	} else {
+		r2 = ret.Get(2).(bool)
+	}
+	if returnFunc, ok := ret.Get(3).(func(context.Context, string, string, int, []string) error); ok {
+		r3 = returnFunc(ctx, owner, repo, number, labels)
+	} else {
+		r3 = ret.Error(3)
+	}
+	return r0, r1, r2, r3
+}
+
+// MockForge_LabelledBy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LabelledBy'
+type MockForge_LabelledBy_Call struct {
+	*mock.Call
+}
+
+// LabelledBy is a helper method to define mock.On call
+//   - ctx context.Context
+//   - owner string
+//   - repo string
+//   - number int
+//   - labels []string
+func (_e *MockForge_Expecter) LabelledBy(ctx any, owner any, repo any, number any, labels any) *MockForge_LabelledBy_Call {
+	return &MockForge_LabelledBy_Call{Call: _e.mock.On("LabelledBy", ctx, owner, repo, number, labels)}
+}
+
+func (_c *MockForge_LabelledBy_Call) Run(run func(ctx context.Context, owner string, repo string, number int, labels []string)) *MockForge_LabelledBy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 int
+		if args[3] != nil {
+			arg3 = args[3].(int)
+		}
+		var arg4 []string
+		if args[4] != nil {
+			arg4 = args[4].([]string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+			arg4,
+		)
+	})
+	return _c
+}
+
+func (_c *MockForge_LabelledBy_Call) Return(s string, s1 string, b bool, err error) *MockForge_LabelledBy_Call {
+	_c.Call.Return(s, s1, b, err)
+	return _c
+}
+
+func (_c *MockForge_LabelledBy_Call) RunAndReturn(run func(ctx context.Context, owner string, repo string, number int, labels []string) (string, string, bool, error)) *MockForge_LabelledBy_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -293,25 +467,25 @@ func (_mock *MockForge) ParsePRURL(u string) (string, string, int, bool) {
 	var r1 string
 	var r2 int
 	var r3 bool
-	if returnFunc, ok := ret.Get(0).(func(string) (string, string, int, bool)); ok {
+	if returnFunc, ok1 := ret.Get(0).(func(string) (string, string, int, bool)); ok1 {
 		return returnFunc(u)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) string); ok {
+	if returnFunc, ok1 := ret.Get(0).(func(string) string); ok1 {
 		r0 = returnFunc(u)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
-	if returnFunc, ok := ret.Get(1).(func(string) string); ok {
+	if returnFunc, ok1 := ret.Get(1).(func(string) string); ok1 {
 		r1 = returnFunc(u)
 	} else {
 		r1 = ret.Get(1).(string)
 	}
-	if returnFunc, ok := ret.Get(2).(func(string) int); ok {
+	if returnFunc, ok1 := ret.Get(2).(func(string) int); ok1 {
 		r2 = returnFunc(u)
 	} else {
 		r2 = ret.Get(2).(int)
 	}
-	if returnFunc, ok := ret.Get(3).(func(string) bool); ok {
+	if returnFunc, ok1 := ret.Get(3).(func(string) bool); ok1 {
 		r3 = returnFunc(u)
 	} else {
 		r3 = ret.Get(3).(bool)
@@ -364,20 +538,20 @@ func (_mock *MockForge) ParseRepoURL(u string) (string, string, bool) {
 	var r0 string
 	var r1 string
 	var r2 bool
-	if returnFunc, ok := ret.Get(0).(func(string) (string, string, bool)); ok {
+	if returnFunc, ok1 := ret.Get(0).(func(string) (string, string, bool)); ok1 {
 		return returnFunc(u)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) string); ok {
+	if returnFunc, ok1 := ret.Get(0).(func(string) string); ok1 {
 		r0 = returnFunc(u)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
-	if returnFunc, ok := ret.Get(1).(func(string) string); ok {
+	if returnFunc, ok1 := ret.Get(1).(func(string) string); ok1 {
 		r1 = returnFunc(u)
 	} else {
 		r1 = ret.Get(1).(string)
 	}
-	if returnFunc, ok := ret.Get(2).(func(string) bool); ok {
+	if returnFunc, ok1 := ret.Get(2).(func(string) bool); ok1 {
 		r2 = returnFunc(u)
 	} else {
 		r2 = ret.Get(2).(bool)

@@ -332,3 +332,45 @@ func TestForgeOnMock_WrongSecret(t *testing.T) {
 		t.Errorf("webhook = %+v, want pull_request opened answered 401", res.Webhook)
 	}
 }
+
+func TestForgeOnMock_Labeller(t *testing.T) {
+	env := newMockEnv(t, mockSecret)
+	ctx := t.Context()
+	env.control(
+		t,
+		http.MethodPost,
+		"/_mock/repos/acme/web/pulls",
+		`{"number":5,"head_ref":"feat/x","head_sha":"sha1","author":"octocat","labels":["preview"]}`,
+		http.StatusCreated,
+		nil,
+	)
+	for i := range 120 {
+		env.control(t, http.MethodPost, "/_mock/repos/acme/web/pulls/5/labels",
+			fmt.Sprintf(`{"name":"l%d","sender":"writer"}`, i), http.StatusOK, nil)
+	}
+	env.control(t, http.MethodPost, "/_mock/repos/acme/web/pulls/5/labels",
+		`{"name":"preview:demo","sender":"triager"}`, http.StatusOK, nil)
+	env.control(t, http.MethodPut, "/_mock/repos/acme/web/collaborators/triager/permission",
+		`{"permission":"triage"}`, http.StatusOK, nil)
+
+	login, label, found, err := env.forge.LabelledBy(ctx, "acme", "web", 5, []string{"preview:demo", "preview"})
+	if err != nil || login != "triager" || label != "preview:demo" || !found {
+		t.Errorf("LabelledBy = %q, %q, %v, %v; want triager, preview:demo, true", login, label, found, err)
+	}
+	if got := env.stats(t)["GET /repos/{owner}/{repo}/issues/{number}/events"]; got != 2 {
+		t.Errorf("events pages read = %d, want 2", got)
+	}
+	login, label, found, err = env.forge.LabelledBy(ctx, "acme", "web", 5, []string{"preview"})
+	if err != nil || login != "octocat" || label != "preview" || !found {
+		t.Errorf("LabelledBy(preview) = %q, %q, %v, %v; want octocat, preview, true", login, label, found, err)
+	}
+
+	for _, tc := range []struct {
+		login string
+		want  bool
+	}{{"triager", false}, {"octocat", true}} {
+		if got, writeErr := env.forge.CanWrite(ctx, "acme", "web", tc.login); writeErr != nil || got != tc.want {
+			t.Errorf("CanWrite(%s) = %v, %v; want %v", tc.login, got, writeErr, tc.want)
+		}
+	}
+}

@@ -47,6 +47,14 @@ func (*pushForge) ListOpenPullRequests(context.Context, string, string) ([]forge
 	return nil, errUnexpected
 }
 
+func (*pushForge) LabelledBy(context.Context, string, string, int, []string) (string, string, bool, error) {
+	return "", "", false, errUnexpected
+}
+
+func (*pushForge) CanWrite(context.Context, string, string, string) (bool, error) {
+	return false, errUnexpected
+}
+
 func (*pushForge) UpsertComment(context.Context, string, string, int, string) error {
 	return errUnexpected
 }

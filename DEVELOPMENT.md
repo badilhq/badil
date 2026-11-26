@@ -196,16 +196,17 @@ The other control calls:
 
 | Call | Body | Webhook |
 |---|---|---|
-| `POST /_mock/repos/{o}/{r}/pulls` | `{"head_ref", "head_sha", "number"?, "base"?, "author"?, "labels"?, "fork"?, "files"?: [{"filename", "status"?, "previous_filename"?}]}` | `pull_request` `opened` |
-| `POST /_mock/repos/{o}/{r}/pulls/{n}/labels` | `{"name"}` | `labeled` |
+| `POST /_mock/repos/{o}/{r}/pulls` | `{"head_ref", "head_sha", "number"?, "base"?, "author"?, "labels"?, "fork"?, "files"?: [{"filename", "status"?, "previous_filename"?}]}`; each of `labels` records a `labeled` issue event by `author` | `pull_request` `opened` |
+| `POST /_mock/repos/{o}/{r}/pulls/{n}/labels` | `{"name", "sender"?}`; records a `labeled` issue event by `sender`, default the PR's author, unless the PR already has the label | `labeled` |
 | `DELETE /_mock/repos/{o}/{r}/pulls/{n}/labels/{name}` | | `unlabeled` |
 | `POST /_mock/repos/{o}/{r}/pulls/{n}/push` | `{"head_sha", "files"?}` | `synchronize` |
 | `POST /_mock/repos/{o}/{r}/pulls/{n}/close` | `{"merged"?}` | `closed` |
 | `POST /_mock/repos/{o}/{r}/pulls/{n}/reopen` | | `reopened` |
 | `POST /_mock/repos/{o}/{r}/push` | `{"after", "ref"?, "deleted"?}` | `push` |
+| `PUT /_mock/repos/{o}/{r}/collaborators/{login}/permission` | `{"permission"}`: `admin`, `maintain`, `write`, `triage`, `read` or `none`. It sets the role the permission read answers for `login`, `write` by default; only `write`, `maintain` and `admin` have `push`, which badil's [labeller check](docs/EVENTS.md#labeller-check) requires | none |
 | `GET /_mock/repos/{o}/{r}/pulls/{n}/comments` | | none: the comments badil posted |
 | `GET /_mock/stats` | | none: the API calls per route |
-| `POST /_mock/reset` | | none: clears the repos, PRs, comments and counters |
+| `POST /_mock/reset` | | none: clears the repos, PRs, comments, `labeled` events, permissions and counters |
 
 To stop, press Ctrl-C in terminals 1 and 2, then remove Gitea and the settings:
 
