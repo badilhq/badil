@@ -84,6 +84,9 @@ type Config struct {
 	// Status holds the status the renderer reports. Nil means no status is
 	// known.
 	Status StatusRepository
+	// Expiry remembers the PRs of the previews the sweep expired for the TTL
+	// (lifecycle.ExpiryStore). Nil remembers none.
+	Expiry lifecycle.ExpiryStore
 }
 
 // App is badil's application services: the background job queue that runs
@@ -113,6 +116,9 @@ type App struct {
 	jobTimeout time.Duration
 	// status holds the status the renderer reports, nil when none is known.
 	status StatusRepository
+	// expiry remembers the PRs the sweep expired for the TTL, nil when none
+	// is remembered.
+	expiry lifecycle.ExpiryStore
 	// syncer runs the config syncs, one at a time.
 	syncer *lifecycle.Syncer
 }
@@ -129,6 +135,7 @@ func New(cfg Config) *App {
 		wake:       cfg.Wake,
 		jobTimeout: cfg.JobTimeout,
 		status:     cfg.Status,
+		expiry:     cfg.Expiry,
 	}
 	if a.metrics == nil {
 		a.metrics = nopMetrics{}

@@ -26,13 +26,15 @@ type SweepStore interface {
 	GetPreview(ctx context.Context, slug string) (*preview.Values, string, error)
 }
 
-// SweepAPI is what Sweep uses: the store, the forge, the Recorder and the
-// comment fan-out.
+// SweepAPI is what Sweep uses: the store, the forge, the Recorder, the
+// comment fan-out and, when set, the expiry store.
 type SweepAPI struct {
 	Store    SweepStore
 	Forge    forge.Forge
 	Recorder Recorder
 	FanOut   FanOutFunc
+	// Expiry, when set, records the open PRs of the previews rule 2 deletes.
+	Expiry ExpiryStore
 }
 
 // teardownAPI narrows a to what a teardown uses.
@@ -46,7 +48,8 @@ func (a SweepAPI) teardownAPI() TeardownAPI {
 //
 //  1. no pinned entry: the preview is deleted;
 //  2. ttl > 0 and the newest updated-at of its pinned entries is before
-//     now - ttl: the preview is deleted and its open PRs are told it expired;
+//     now - ttl: the preview is deleted, its open PRs are recorded in
+//     api.Expiry at their head SHA, when set, and told it expired;
 //  3. otherwise every distinct PR pinning an entry is looked at. A closed one
 //     is torn down, its comment saying so. An open one whose labels
 //     (preview.ResolveTarget) conflict, or target another preview, is
@@ -341,7 +344,8 @@ func (p *sweepPlan) finish(ctx context.Context, api SweepAPI, res Result) int {
 }
 
 // afterDelete records and logs a preview deleted by rule 1 or 2, pushed as
-// res, and tells the open PRs of an expired one.
+// res, and, for an expired one, records its open PRs in api.Expiry and tells
+// them.
 func (p *sweepPlan) afterDelete(ctx context.Context, api SweepAPI, d sweepDelete, res Result) {
 	api.Recorder.SweepDeleted(d.rule)
 	if d.rule == ruleNoPin {
@@ -352,6 +356,7 @@ func (p *sweepPlan) afterDelete(ctx context.Context, api SweepAPI, d sweepDelete
 		)
 		return
 	}
+	markExpired(ctx, api.Expiry, p.parsePR, d.slug, d.vals, p.states, p.now)
 	last, _ := preview.LastDeploy(d.vals)
 	slog.InfoContext(ctx, "preview deleted",
 		slog.String("slug", d.slug),

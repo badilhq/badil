@@ -15,6 +15,7 @@ import (
 
 	"github.com/badilhq/badil/internal/app"
 	"github.com/badilhq/badil/internal/config"
+	expirykube "github.com/badilhq/badil/internal/expiry/kube"
 	forgegithub "github.com/badilhq/badil/internal/forge/github"
 	"github.com/badilhq/badil/internal/github"
 	"github.com/badilhq/badil/internal/metrics"
@@ -83,6 +84,7 @@ func serveCmd() *cobra.Command {
 			defer stop()
 
 			previewStatus := statuskube.InCluster(ctx)
+			expiry := expirykube.InCluster(ctx)
 			namespaces := namespace.InCluster(ctx)
 			if err = loadStatus(ctx, previewStatus); err != nil {
 				return err
@@ -98,6 +100,7 @@ func serveCmd() *cobra.Command {
 
 			a := app.New(app.Config{
 				Store: st, Forge: f, Metrics: m, Namespaces: namespaces, Wake: wake, Status: previewStatus,
+				Expiry: expiry,
 			})
 			srv := server.NewServer(a, f, f, cfg.DeployToken,
 				server.WithMetrics(m),
@@ -118,7 +121,7 @@ func serveCmd() *cobra.Command {
 				metricsSrv = server.StartMetricsServer(ctx, cfg.MetricsAddr, m.Handler(), os.Exit)
 			}
 			a.Go(func() { app.RunCatchUp(ctx, catchUp) })
-			a.StartSweepLoop(ctx, app.SweepAPI(st, f, m), catchUp, m, interval, ttl)
+			a.StartSweepLoop(ctx, app.SweepAPI(st, f, m, expiry), catchUp, m, interval, ttl)
 
 			<-ctx.Done()
 			slog.InfoContext(ctx, "shutting down server")
@@ -250,8 +253,9 @@ func cleanupCmd() *cobra.Command {
 				return err
 			}
 			defer closeStore(ctx, st)
-			catchUp := app.CleanupCatchUp(st, f, namespace.InCluster(ctx))
-			return app.RunCleanup(cmd.Context(), ctx, app.SweepAPI(st, f, nil), catchUp, time.Now().UTC(), ttl)
+			expiry := expirykube.InCluster(ctx)
+			catchUp := app.CleanupCatchUp(st, f, namespace.InCluster(ctx), expiry)
+			return app.RunCleanup(cmd.Context(), ctx, app.SweepAPI(st, f, nil, expiry), catchUp, time.Now().UTC(), ttl)
 		},
 	}
 }

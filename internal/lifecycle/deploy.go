@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/badilhq/badil/internal/catalog"
 	"github.com/badilhq/badil/internal/forge"
@@ -50,14 +51,15 @@ func (e *CapCheckError) Error() string { return e.Op + ": " + e.Err.Error() }
 func (e *CapCheckError) Unwrap() error { return e.Err }
 
 // DeployAPI is what DeployPR uses: the store, the forge, the Recorder, the
-// comment fan-out and the namespace check of a new preview (nil checks
-// nothing).
+// comment fan-out, the namespace check of a new preview (nil checks
+// nothing) and the expiry store (nil clears nothing).
 type DeployAPI struct {
 	Store      Applier
 	Forge      forge.Forge
 	Recorder   Recorder
 	FanOut     FanOutFunc
 	Namespaces NamespaceChecker
+	Expiry     ExpiryStore
 }
 
 // DeployResult is the outcome of DeployPR: the operation's commit, the
@@ -77,9 +79,12 @@ type DeployResult struct {
 // (api.Namespaces); a failed check is a *NamespaceCheckError. A deploy
 // that changes nothing (the same inputs
 // within the same second) commits nothing: its result and comments carry the
-// remote head's commit. It returns the result, the fan-out error (possibly
-// joined, nil when every comment landed) and the operation's error; on an
-// error nothing is commented. It does not log.
+// remote head's commit. A deploy that is not refused clears the expiry record
+// of the PR inputs.PRURL names (api.Expiry). It returns the result, the
+// fan-out error (possibly joined, nil when every comment landed) and the
+// operation's error; on an error nothing is commented. It logs only the
+// warnings expiry clear failed, when the record can't be cleared, and expiry
+// clear skipped, when inputs.PRURL does not parse.
 func DeployPR(
 	ctx context.Context,
 	api DeployAPI,
@@ -120,11 +125,27 @@ func DeployPR(
 	if write.Created {
 		api.Recorder.PreviewCreated()
 	}
+	clearDeployedExpiry(ctx, api, inputs.PRURL)
 	result := &DeployResult{Commit: res}
 	summary := preview.BuildSummary(
 		api.Forge.ParsePRURL, slug, write.Values, catalog.URLs, catalog.ArgoCDURL, write.Excluded, res.Subject, res.URL,
 	)
 	return result, api.FanOut(ctx, api.Forge, write.Values, summary), nil
+}
+
+// clearDeployedExpiry clears the expiry record of the PR prURL names in
+// api.Expiry, a nil one doing nothing. A URL the forge does not parse is
+// logged and clears nothing.
+func clearDeployedExpiry(ctx context.Context, api DeployAPI, prURL string) {
+	if api.Expiry == nil {
+		return
+	}
+	owner, repo, number, ok := api.Forge.ParsePRURL(prURL)
+	if !ok {
+		slog.WarnContext(ctx, "expiry clear skipped", slog.String("pr_url", prURL))
+		return
+	}
+	clearExpiry(ctx, api.Expiry, Target{Owner: owner, Repo: repo, FullName: owner + "/" + repo, Number: number})
 }
 
 // refusal reports whether the deploy of the preview slug in tree is refused

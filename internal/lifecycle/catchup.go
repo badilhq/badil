@@ -30,11 +30,14 @@ type CatchUpRecorder interface {
 }
 
 // CatchUpAPI is what CatchUp uses: the store, the forge, the recorder and,
-// when set, Skipped.
+// when set, the expiry store and Skipped.
 type CatchUpAPI struct {
 	Store    CatchUpStore
 	Forge    forge.Forge
 	Recorder CatchUpRecorder
+	// Expiry, when set, holds the PRs the sweep expired, which Run skips at
+	// the head SHA they were expired at.
+	Expiry ExpiryStore
 	// Skipped, when set, is called with the target of each listed PR that
 	// Run leaves alone at its step 1 or 2, the skipped result it would get
 	// (reason NotLabeledReason or ForkPRReason, at its listed head SHA), and
@@ -73,7 +76,7 @@ func NewCatchUp(api CatchUpAPI, reconcile ReconcileFunc) *CatchUp {
 
 // catchUpStats are the counts of the catch-up log line.
 type catchUpStats struct {
-	repos, openLabelled, reconciled, skippedPinned, skippedSeen, listErrors int
+	repos, openLabelled, reconciled, skippedPinned, skippedSeen, skippedExpired, listErrors int
 }
 
 // Run lists the open pull requests of every repo of the catalog's services
@@ -85,21 +88,26 @@ type catchUpStats struct {
 //  2. so is a fork PR (its head repo differs from its base repo). A PR left
 //     alone at step 1 or 2 is passed to the Skipped callback, when set,
 //     with the time taken just before its repo was listed;
-//  3. its target preview is resolved from its labels (preview.ResolveTarget);
-//     with conflicting labels it has none, and goes on to step 5;
-//  4. a PR with a target whose preview file has an entry whose pr-url names
+//  3. a PR the expiry store (api.Expiry) holds at its head SHA, which the
+//     sweep expired for the TTL, is skipped; one it holds at another SHA has
+//     its record cleared and goes on. A failed read is logged and the PR
+//     goes on;
+//  4. its target preview is resolved from its labels (preview.ResolveTarget);
+//     with conflicting labels it has none, and goes on to step 6;
+//  5. a PR with a target whose preview file has an entry whose pr-url names
 //     the PR (preview.MatchesPR) and whose commitSha is its head SHA is
 //     pinned at head, and skipped;
-//  5. a PR in the seen map at its head SHA, or whose catch-up reconcile is
+//  6. a PR in the seen map at its head SHA, or whose catch-up reconcile is
 //     queued or running, is skipped;
-//  6. any other PR is reconciled as a synchronize event with its listed
+//  7. any other PR is reconciled as a synchronize event with its listed
 //     labels. Once its reconcile completes with an outcome other than
 //     failed, it enters the seen map at the head SHA listed here.
 //
 // A repo whose listing fails is logged and skipped. When the catalog can't
 // be read, Run logs it and lists nothing. Once ctx is done, Run lists no
-// more repos and claims no more PRs. Each started reconcile is recorded,
-// and the run ends with the catch-up log line.
+// more repos and claims no more PRs. Each started reconcile is recorded.
+// Before the catch-up log line that ends the run, the expiry store is pruned
+// (pruneExpiry).
 func (c *CatchUp) Run(ctx context.Context) {
 	catalog, err := c.api.Store.FetchServiceCatalog(ctx)
 	if err != nil {
@@ -109,6 +117,9 @@ func (c *CatchUp) Run(ctx context.Context) {
 	var stats catchUpStats
 	repos := catalog.Repos(c.api.Forge.ParseRepoURL)
 	stats.repos = len(repos)
+	// listings holds, by lowercased owner/repo, the PRKeys of the open PRs of
+	// each repo whose listing succeeded.
+	listings := map[string]map[string]bool{}
 	for _, r := range repos {
 		if ctx.Err() != nil {
 			break
@@ -123,6 +134,11 @@ func (c *CatchUp) Run(ctx context.Context) {
 			)
 			continue
 		}
+		listed := map[string]bool{}
+		for _, pr := range prs {
+			listed[PRKey(catchUpEvent(pr).Target)] = true
+		}
+		listings[strings.ToLower(r.Owner+"/"+r.Repo)] = listed
 		for _, pr := range prs {
 			if ctx.Err() != nil {
 				break
@@ -130,14 +146,42 @@ func (c *CatchUp) Run(ctx context.Context) {
 			c.consider(ctx, catalog.Label, pr, listedAt, &stats)
 		}
 	}
+	c.pruneExpiry(ctx, repos, listings)
 	slog.InfoContext(ctx, "catch-up",
 		slog.Int("repos", stats.repos),
 		slog.Int("open_labelled", stats.openLabelled),
 		slog.Int("reconciled", stats.reconciled),
 		slog.Int("skipped_pinned", stats.skippedPinned),
 		slog.Int("skipped_seen", stats.skippedSeen),
+		slog.Int("skipped_expired", stats.skippedExpired),
 		slog.Int("list_errors", stats.listErrors),
 	)
+}
+
+// pruneExpiry drops from the expiry store, when set, the record of a PR
+// whose repo is not one of repos, or whose repo was listed in listings
+// (lowercased owner/repo to the PRKeys of its open PRs) without it. Records
+// of repos whose listing failed or was not reached are kept. A failure is
+// logged as a warning.
+func (c *CatchUp) pruneExpiry(ctx context.Context, repos []catalog.Repo, listings map[string]map[string]bool) {
+	if c.api.Expiry == nil {
+		return
+	}
+	inCatalog := map[string]bool{}
+	for _, r := range repos {
+		inCatalog[strings.ToLower(r.Owner+"/"+r.Repo)] = true
+	}
+	keep := func(key string) bool {
+		repo, _, _ := strings.Cut(key, "#")
+		if !inCatalog[repo] {
+			return false
+		}
+		listed, ok := listings[repo]
+		return !ok || listed[key]
+	}
+	if err := c.api.Expiry.Prune(ctx, keep); err != nil {
+		slog.WarnContext(ctx, "expiry prune failed", slog.String("err", err.Error()))
+	}
 }
 
 // consider applies Run's decision order to pr, listed at listedAt, label
@@ -154,6 +198,10 @@ func (c *CatchUp) consider(ctx context.Context, label string, pr forge.PullReque
 		c.skipped(pr, ForkPRReason, listedAt)
 		return
 	}
+	if c.expired(ctx, pr) {
+		stats.skippedExpired++
+		return
+	}
 	if t := preview.ResolveTarget(pr.Labels, pr.HeadRef, label); t.Slug != "" && c.pinnedAtHead(ctx, t.Slug, pr) {
 		stats.skippedPinned++
 		return
@@ -168,6 +216,32 @@ func (c *CatchUp) consider(ctx context.Context, label string, pr forge.PullReque
 	stats.reconciled++
 	c.api.Recorder.CatchUpReconcile()
 	c.reconcile(ctx, catchUpEvent(pr), func(res ReconcileResult) { c.release(pr, res) })
+}
+
+// expired reports whether the expiry store holds pr at its head SHA (step 3
+// of Run). A record at another SHA is cleared. Without an expiry store, or
+// when the read fails (logged), pr is not expired.
+func (c *CatchUp) expired(ctx context.Context, pr forge.PullRequest) bool {
+	if c.api.Expiry == nil {
+		return false
+	}
+	t := catchUpEvent(pr).Target
+	sha, ok, err := c.api.Expiry.Recorded(ctx, PRKey(t))
+	switch {
+	case err != nil:
+		slog.WarnContext(ctx, "catch-up expiry read failed",
+			slog.String("repo", pr.FullName),
+			slog.Int("pr_number", pr.Number),
+			slog.String("err", err.Error()),
+		)
+		return false
+	case !ok:
+		return false
+	case sha == pr.HeadSHA:
+		return true
+	}
+	clearExpiry(ctx, c.api.Expiry, t)
+	return false
 }
 
 // skipped passes pr, listed at listedAt and left alone for reason, to the

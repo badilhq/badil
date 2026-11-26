@@ -82,6 +82,8 @@ type ReconcileAPI struct {
 	Recorder   Recorder
 	FanOut     FanOutFunc
 	Namespaces NamespaceChecker
+	// Expiry, when set, loses the record of a PR once a reconcile deploys it.
+	Expiry ExpiryStore
 }
 
 // teardownAPI narrows a to what a teardown uses.
@@ -732,8 +734,9 @@ func hasPreviewLabel(labels []string, label string) bool {
 // afterDeploy handles the deploys of the last attempt, pushed as res: it
 // handles the unpin of the PR's untouched services (afterTeardown, its
 // summary left to the deploy's when a service was written), logs each
-// service, records a created preview, and posts the preview's summary once
-// on its open PRs. It returns, as reconcile does, OutcomeDeployed when at
+// service, records a created preview, clears the PR's expiry record when a
+// service was written, and posts the preview's summary once on its open
+// PRs. It returns, as reconcile does, OutcomeDeployed when at
 // least one service was written, OutcomeFailed when none was and at least
 // one failed, and otherwise, every service being unchanged, the skip of
 // reconcileSkipped with reason alreadyDeployedReason.
@@ -767,6 +770,7 @@ func (p *reconcilePlan) afterDeploy(ctx context.Context, api ReconcileAPI, res R
 	}
 	switch {
 	case len(written) > 0:
+		clearExpiry(ctx, api.Expiry, p.ev.Target)
 		last := written[len(written)-1].result
 		summary := preview.BuildSummary(
 			p.parsePR, p.t.Slug, last.Values, p.catalog.URLs, p.catalog.ArgoCDURL, last.Excluded, res.Subject, res.URL,

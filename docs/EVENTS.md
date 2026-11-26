@@ -188,10 +188,11 @@ Each listed PR is decided in this order:
 
 1. A PR without a preview label (the plain label, or a named label with a non-empty slug) is not reconciled.
 2. A fork PR is not reconciled.
-3. The PR's labels resolve its target preview (see [Target preview](#target-preview)). A PR whose named labels conflict has no target, so it can't be pinned, and goes on to step 5.
-4. A PR is pinned at head when its target's `values.yaml` has an entry whose `metadata.pr-url` names the PR (its owner, repo and number, owner and repo in any letter case) and whose `commitSha` is its head SHA. It is skipped. A target that does not exist pins nothing; one that can't be read is logged (`catch-up preview read failed`) and the PR goes on to step 5.
-5. A PR is skipped when it is in the seen map at its head SHA, or when a catch-up reconcile of it is still queued or running.
-6. Any other PR is reconciled.
+3. A PR whose preview the sweeper expired for `CLEANUP_TTL` (see [Expired PRs](OPERATIONS.md#expired-prs)) is skipped while its head SHA is the one it was expired at. Once it has another head SHA, its record is cleared and it goes on. A record that can't be read is logged (`catch-up expiry read failed`, with `repo`, `pr_number` and `err`) and the PR goes on.
+4. The PR's labels resolve its target preview (see [Target preview](#target-preview)). A PR whose named labels conflict has no target, so it can't be pinned, and goes on to step 6.
+5. A PR is pinned at head when its target's `values.yaml` has an entry whose `metadata.pr-url` names the PR (its owner, repo and number, owner and repo in any letter case) and whose `commitSha` is its head SHA. It is skipped. A target that does not exist pins nothing; one that can't be read is logged (`catch-up preview read failed`) and the PR goes on to step 6.
+6. A PR is skipped when it is in the seen map at its head SHA, or when a catch-up reconcile of it is still queued or running.
+7. Any other PR is reconciled.
 
 The seen map holds, per PR, the head SHA its last catch-up reconcile was started at, once that reconcile completed with an outcome other than `failed`. A reconcile that fails, or never completes (dropped at shutdown, or panicked), leaves the PR out of it, so the next run reconciles it again at the same head SHA. A PR that never gets a pin (no service changed, held by another PR, preview cap reached, namespace in use, conflicting labels) is therefore reconciled once per head SHA. `badil serve` keeps the seen map for the life of the process; each `badil cleanup` run starts with an empty one.
 
@@ -199,4 +200,4 @@ The seen map holds, per PR, the head SHA its last catch-up reconcile was started
 
 Each PR gets the reconcile a `synchronize` delivery carrying its listed labels gets, so its outcome, comments and metrics are those of a delivery, and it reads the PR again. In `badil serve` it goes through the [reconcile queue](#reconcile-queue), with the same 20s budget, and never runs alongside another reconcile. `badil cleanup` reconciles the PRs one after another, each with a 20s budget. Its exit code stays the sweep's: catch-up's listing failures and failed reconciles are only logged and counted.
 
-Each run logs `catch-up` with `repos`, `open_labelled` (PRs with a preview label, forks included), `reconciled`, `skipped_pinned`, `skipped_seen` and `list_errors`. A `badil.yaml` that can't be read logs `catch-up failed` and lists nothing. The reconciles a run starts are counted in `badil_catchup_reconciles_total` (see [Metrics](OPERATIONS.md#metric-list)).
+Each run logs `catch-up` with `repos`, `open_labelled` (PRs with a preview label, forks included), `reconciled`, `skipped_pinned`, `skipped_seen`, `skipped_expired` (step 3) and `list_errors`. Before that line, the run prunes the expired PRs' records (see [Expired PRs](OPERATIONS.md#expired-prs)); a failed prune logs `expiry prune failed` with `err`. A record that can't be cleared, at step 3 or once a deploy pins the PR, logs `expiry clear failed` with `repo`, `pr_number` and `err`. A `badil.yaml` that can't be read logs `catch-up failed` and lists nothing. The reconciles a run starts are counted in `badil_catchup_reconciles_total` (see [Metrics](OPERATIONS.md#metric-list)).

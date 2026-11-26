@@ -21,7 +21,9 @@ spec:
         spec:
           restartPolicy: Never
           serviceAccountName: {{ include "badil.fullname" . }}
-          # The catch-up reads the namespace of a new preview (clusterrole.yaml).
+          # The catch-up reads the namespace of a new preview (clusterrole.yaml),
+          # and the sweep and the catch-up read and write the badil-expired
+          # ConfigMap (role.yaml).
           automountServiceAccountToken: true
           {{- with .Values.imagePullSecrets }}
           imagePullSecrets:
@@ -36,6 +38,10 @@ spec:
               args: ["cleanup"]
               env:
                 {{- include "badil.env" . | nindent 16 }}
+                - name: POD_NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
                 {{- with .Values.cleanup.ttl }}
                 - name: CLEANUP_TTL
                   value: {{ . | quote }}

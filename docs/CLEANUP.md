@@ -38,9 +38,9 @@ This requires the ApplicationSet controller policy `sync` (the default) or `crea
 
 - closes missed while badil was down;
 - pins written by a deploy after the PR closed;
-- a labeled PR whose branch was renamed after the deploy: it is unpinned from its old slug, without a comment. Push to redeploy it at the new slug.
+- a PR whose head branch was renamed after the deploy: on GitHub, renaming the head branch of an open PR closes the PR ("If the renamed branch is the head branch of an open pull request, this pull request is closed", [Renaming a branch](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-branches-in-your-repository/renaming-a-branch)), so its previews are torn down as a closed PR's.
 
-A labeled PR with no push for longer than `CLEANUP_TTL` is expired by the sweeper, and is not recreated while the label stays. Push, or remove and re-add the label, to recreate it.
+A labeled PR with no push for longer than `CLEANUP_TTL` is expired by the sweeper, and is not recreated while the label stays. The sweeper remembers each open PR of the expired preview at its head SHA, in the `badil-expired` ConfigMap of badil's namespace (see [Expired PRs](OPERATIONS.md#expired-prs)), and [catch-up](EVENTS.md#catch-up) skips a PR remembered at its current head SHA. A push, removing and re-adding the label, or a `/v1/deploy` of the PR clears it and recreates the preview.
 
 A missed `unlabeled` of a named label, or a label that moved, is unpinned by the sweeper. A missed `unlabeled` of the plain label at the branch slug still waits for close or TTL.
 
