@@ -187,7 +187,7 @@ badil's Go packages are grouped in layers, and each package imports only what it
 |---|---|---|
 | Domain | `internal/preview`, `internal/catalog` | The standard library, yaml.v3, doublestar, jsonschema and other domain packages. |
 | Use cases and ports | `internal/forge`, `internal/lifecycle`, `internal/app` | The same libraries, domain and use-case packages. |
-| Adapters | `internal/store` (with `internal/store/storetest`), `internal/forge/github` (with `internal/forge/github/githubtest`), `internal/github`, `internal/github/manifest`, `internal/namespace`, `internal/status`, `internal/status/kube`, `internal/metrics`, `internal/server` (with `internal/server/mocks`), `internal/api`, `internal/apiclient`, `internal/config` | Any library, domain and use cases, and another adapter only as listed below. |
+| Adapters | `internal/store` (with `internal/store/storetest`), `internal/forge/github` (with `internal/forge/github/githubtest`), `internal/github`, `internal/github/manifest`, `internal/namespace`, `internal/status`, `internal/status/kube`, `internal/expiry`, `internal/expiry/kube`, `internal/metrics`, `internal/server` (with `internal/server/mocks`), `internal/api`, `internal/apiclient`, `internal/config` | Any library, domain and use cases, and another adapter only as listed below. |
 | Tooling | `internal/chartvalues`, `internal/fakegithub`, `internal/archtest`, `cmd/schemagen`, `cmd/fakegithub` | Anything. |
 | Composition root | `cmd/badil` | Anything. |
 
@@ -198,6 +198,7 @@ Allowed adapter imports:
 - `internal/server` → `internal/api`
 - `internal/apiclient` → `internal/api`
 - `internal/status/kube` → `internal/status`
+- `internal/expiry/kube` → `internal/expiry`
 - `internal/config` → `internal/github`
 
 Domain and use-case packages never reach go-git, go-github, ghinstallation, client-go, Prometheus, chi or cobra, not even through another package.

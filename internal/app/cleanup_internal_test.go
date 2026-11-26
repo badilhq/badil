@@ -56,7 +56,7 @@ func TestCleanupCatchUp_ChecksNamespaces(t *testing.T) {
 	f := &cleanupForge{loopFake: &loopFake{openPRs: []forge.PullRequest{pr}}, pr: pr}
 	ns := &foreignNamespaces{}
 
-	CleanupCatchUp(st, f, ns).Run(context.Background())
+	CleanupCatchUp(st, f, ns, nil).Run(context.Background())
 
 	if !slices.Equal(ns.checked, []string{"pricing"}) {
 		t.Errorf("checked = %v, want [pricing]", ns.checked)

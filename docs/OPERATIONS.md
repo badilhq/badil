@@ -47,9 +47,19 @@ badil keeps the latest status per preview and service:
 
 When a preview is deleted, its status and ConfigMap go: at once when the server's own commit deleted it, and otherwise (`badil cleanup`, a manual deletion) after the next fetch of the gitops repo that moves its head, and at start.
 
-The chart's Role lets badil get, list, create, update and delete ConfigMaps in its namespace, nothing else. Its ClusterRole, `<release>-namespaces`, only lets it get namespaces, for the [namespace check](EVENTS.md#namespace-in-use) of a new preview. Outside a cluster, or without `POD_NAMESPACE`, the status is kept in memory only and badil logs `status persistence disabled` at start.
+The chart's Role lets badil get, list, create, update and delete ConfigMaps in its namespace, nothing else: the status ConfigMaps and `badil-expired` (see [Expired PRs](#expired-prs)). Its ClusterRole, `<release>-namespaces`, only lets it get namespaces, for the [namespace check](EVENTS.md#namespace-in-use) of a new preview. Outside a cluster, or without `POD_NAMESPACE`, the status is kept in memory only and badil logs `status persistence disabled` at start.
 
-Only `badil serve` keeps status; `badil cleanup` only gets namespaces, for the namespace check of its catch-up.
+Only `badil serve` keeps status. `badil cleanup` gets namespaces, for the namespace check of its catch-up, and reads and writes `badil-expired`.
+
+### Expired PRs
+
+When the sweeper deletes a preview for `CLEANUP_TTL`, badil records each of its open PRs at its head SHA, so that [catch-up](EVENTS.md#catch-up) does not recreate the preview (see [Cleanup](CLEANUP.md#what-the-sweeper-catches)). The records live in the ConfigMap `badil-expired` of badil's namespace (`POD_NAMESPACE`), labelled `app.kubernetes.io/managed-by: badil`. Each `data` key is the first 32 hex characters of the SHA-256 of the PR's key (`<owner>/<repo>#<number>`, owner and repo lowercased); its value is `{"key", "pr", "sha", "at"}`: the PR's key, its URL, the head SHA it expired at and when.
+
+- **Writers:** `badil serve` (its sweep, its catch-up and its deploys) and the cleanup CronJob's `badil cleanup` write it concurrently. Each write reads the ConfigMap again and changes only its own keys, retrying a conflicting write up to 3 times.
+- **Cleared:** a deploy of the PR, by a label event, a push, catch-up or `/v1/deploy`, or a catch-up that lists the PR at another head SHA, removes its record.
+- **Pruned:** each catch-up drops the records of PRs whose repo is no longer in `badil.yaml`, or whose repo it listed without them (the PR was closed or merged). Records of a repo whose listing failed are kept. A value that does not decode is dropped.
+
+A failed read or write is logged as a warning and never stops a sweep, a catch-up or a deploy: a failed read lets catch-up reconcile the PR. Outside a cluster, or without `POD_NAMESPACE`, the records are kept in memory only, and badil logs `expiry persistence disabled` with `reason` at start.
 
 ## Spin-up time
 

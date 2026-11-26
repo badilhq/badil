@@ -1,5 +1,7 @@
 # The server keeps each preview's status in a ConfigMap of its own namespace
-# (badil-status-<slug>): it reads, writes and deletes only ConfigMaps here.
+# (badil-status-<slug>), and the server and the cleanup CronJob keep the PRs
+# of the previews expired for the TTL in badil-expired: they read, write and
+# delete only ConfigMaps here.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:

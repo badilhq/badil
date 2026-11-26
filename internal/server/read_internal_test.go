@@ -412,7 +412,7 @@ func TestWait_CatchUpRecordsTheFilteredPRs(t *testing.T) {
 		reconciled++
 		s.app.QueueReconcile(ctx, ev, done)
 	}
-	api := app.CatchUpAPI(fg, fg, nil)
+	api := app.CatchUpAPI(fg, fg, nil, nil)
 	api.Skipped = s.app.RecordCatchUpSkip
 	lifecycle.NewCatchUp(api, reconcile).Run(context.Background())
 	if err := s.app.WaitBackground(context.Background()); err != nil {
@@ -436,7 +436,7 @@ func TestWait_CatchUpSkipAndNewerOutcome(t *testing.T) {
 	path := "/v1/wait?repo=acme/front&pr=7&sha=" + statusSHA
 	run := func(t *testing.T, fg *fakeGitops, s *Server) {
 		t.Helper()
-		api := app.CatchUpAPI(fg, fg, nil)
+		api := app.CatchUpAPI(fg, fg, nil, nil)
 		api.Skipped = s.app.RecordCatchUpSkip
 		lifecycle.NewCatchUp(api, s.app.QueueReconcile).Run(context.Background())
 		if err := s.app.WaitBackground(context.Background()); err != nil {

@@ -47,6 +47,8 @@ func layerMap() map[string]placement {
 		module + "internal/namespace":               {layer: adapter, component: "namespace"},
 		module + "internal/status":                  {layer: adapter, component: "status"},
 		module + "internal/status/kube":             {layer: adapter, component: "status kube"},
+		module + "internal/expiry":                  {layer: adapter, component: "expiry"},
+		module + "internal/expiry/kube":             {layer: adapter, component: "expiry kube"},
 		module + "internal/metrics":                 {layer: adapter, component: "metrics"},
 		module + "internal/server":                  {layer: adapter, component: "server"},
 		module + "internal/server/mocks":            {layer: adapter, component: "server"},
@@ -71,6 +73,7 @@ func allowedAdapterImports() map[string][]string {
 		"server":          {"api"},
 		"apiclient":       {"api"},
 		"status kube":     {"status"},
+		"expiry kube":     {"expiry"},
 		"config":          {"github"},
 	}
 }
