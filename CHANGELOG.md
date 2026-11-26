@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.2](https://github.com/badilhq/badil/compare/v0.30.1...v0.30.2) (2026-11-26)
+
+
+### Bug Fixes
+
+* **lifecycle:** keep ttl-expired previews down until a push or a relabel ([#162](https://github.com/badilhq/badil/issues/162)) ([01f1f9e](https://github.com/badilhq/badil/commit/01f1f9e205cffe005f160978488cbdf0c4f8622b))
+
 ## [0.30.1](https://github.com/badilhq/badil/compare/v0.30.0...v0.30.1) (2026-11-25)
 
 
