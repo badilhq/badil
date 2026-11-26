@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/badilhq/badil/internal/api"
 	"github.com/badilhq/badil/internal/app"
+	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
 	"github.com/badilhq/badil/internal/metrics"
 	"github.com/badilhq/badil/internal/preview"
@@ -21,14 +24,26 @@ import (
 func validBody() string {
 	return `{
 		"service": "backend-1",
-		"head_ref": "feature/add-pricing",
 		"commit_sha": "abc1234567890",
-		"pr_author": "octocat",
-		"pr_url": "https://github.com/acme/backend-1/pull/42",
 		"pr_number": "42",
 		"workflow_run_url": "https://github.com/acme/backend-1/actions/runs/1"
 	}`
 }
+
+// deployPR is acme/backend-1#42, open, by octocat, from headRef.
+func deployPR(headRef string) *forge.PullRequest {
+	return &forge.PullRequest{
+		Open: true, HeadRef: headRef, HeadSHA: "abc1234567890", Author: "octocat",
+		URL: "https://github.com/acme/backend-1/pull/42", FullName: "acme/backend-1",
+		HeadFullName: "acme/backend-1", Number: 42,
+	}
+}
+
+// addPricingPR is acme/backend-1#42 from feature/add-pricing.
+func addPricingPR() *forge.PullRequest { return deployPR("feature/add-pricing") }
+
+// pricingPR is acme/backend-1#42 from feature/pricing.
+func pricingPR() *forge.PullRequest { return deployPR("feature/pricing") }
 
 func newTestServer(t *testing.T, fg *fakeGitops) *Server {
 	t.Helper()
@@ -49,7 +64,7 @@ func postDeploy(t *testing.T, srv *Server, body, bearer string) *httptest.Respon
 }
 
 func TestDeploy_HappyPath(t *testing.T) {
-	fg := &fakeGitops{catalog: []string{"backend-1", "backend-2", "front"}}
+	fg := &fakeGitops{pr: addPricingPR(), catalog: []string{"backend-1", "backend-2", "front"}}
 	rec := postDeploy(t, newTestServer(t, fg), validBody(), "test-token")
 
 	if rec.Code != http.StatusOK {
@@ -89,7 +104,7 @@ func TestDeploy_HappyPath(t *testing.T) {
 // commit the preview is at and comments, whether the second one changed the
 // file or, within the same second, changed nothing.
 func TestDeploy_RedeployAnswersTheHeadCommit(t *testing.T) {
-	fg := &fakeGitops{catalog: []string{"backend-1"}}
+	fg := &fakeGitops{pr: addPricingPR(), catalog: []string{"backend-1"}}
 	srv := newTestServer(t, fg)
 	for i := range 2 {
 		fg.fanOutBodyCalled = false
@@ -111,13 +126,10 @@ func TestDeploy_RedeployAnswersTheHeadCommit(t *testing.T) {
 }
 
 func TestDeploy_MissingField(t *testing.T) {
-	fg := &fakeGitops{catalog: []string{"backend-1"}}
+	fg := &fakeGitops{pr: addPricingPR(), catalog: []string{"backend-1"}}
 	body := `{
 		"service": "backend-1",
-		"head_ref": "feature/x",
 		"commit_sha": "",
-		"pr_author": "octocat",
-		"pr_url": "https://github.com/acme/backend-1/pull/1",
 		"pr_number": "1",
 		"workflow_run_url": "https://github.com/acme/backend-1/actions/runs/1"
 	}`
@@ -132,7 +144,7 @@ func TestDeploy_MissingField(t *testing.T) {
 }
 
 func TestDeploy_ServiceNotInCatalog(t *testing.T) {
-	fg := &fakeGitops{catalog: []string{"backend-2", "front"}}
+	fg := &fakeGitops{pr: addPricingPR(), catalog: []string{"backend-2", "front"}}
 	rec := postDeploy(t, newTestServer(t, fg), validBody(), "test-token")
 
 	if rec.Code != http.StatusNotFound {
@@ -148,7 +160,7 @@ func TestDeploy_FanOutPartialFailureSurfacesAsWarnings(t *testing.T) {
 		errors.New("service backend-2 (acme/backend-2#7): rate limited"),
 		errors.New("service front (acme/front#11): not found"),
 	)
-	fg := &fakeGitops{catalog: []string{"backend-1", "backend-2", "front"}, fanOutErr: joined}
+	fg := &fakeGitops{pr: addPricingPR(), catalog: []string{"backend-1", "backend-2", "front"}, fanOutErr: joined}
 	rec := postDeploy(t, newTestServer(t, fg), validBody(), "test-token")
 
 	if rec.Code != http.StatusOK {
@@ -164,7 +176,7 @@ func TestDeploy_FanOutPartialFailureSurfacesAsWarnings(t *testing.T) {
 }
 
 func TestDeploy_MissingBearer(t *testing.T) {
-	fg := &fakeGitops{catalog: []string{"backend-1"}}
+	fg := &fakeGitops{pr: addPricingPR(), catalog: []string{"backend-1"}}
 	rec := postDeploy(t, newTestServer(t, fg), validBody(), "")
 
 	if rec.Code != http.StatusUnauthorized {
@@ -186,13 +198,10 @@ func TestDeploy_InvalidJSON(t *testing.T) {
 
 func TestDeploy_UnknownField(t *testing.T) {
 	// DisallowUnknownFields guards against drift between client and server.
-	fg := &fakeGitops{catalog: []string{"backend-1"}}
+	fg := &fakeGitops{pr: addPricingPR(), catalog: []string{"backend-1"}}
 	body := `{
 		"service": "backend-1",
-		"head_ref": "feature/x",
 		"commit_sha": "abc",
-		"pr_author": "octocat",
-		"pr_url": "https://github.com/acme/backend-1/pull/1",
 		"pr_number": "1",
 		"workflow_run_url": "https://github.com/acme/backend-1/actions/runs/1",
 		"extra_field": "should be rejected"
@@ -220,13 +229,9 @@ preview:
       path: /docs
 `
 
-func previewBody() string {
-	return strings.Replace(validBody(), "feature/add-pricing", "feature/pricing", 1)
-}
-
 func TestDeploy_PreviewURLsInSummary(t *testing.T) {
-	fg := &fakeGitops{badilYAML: servicesWithPreview}
-	rec := postDeploy(t, newTestServer(t, fg), previewBody(), "test-token")
+	fg := &fakeGitops{pr: pricingPR(), badilYAML: servicesWithPreview}
+	rec := postDeploy(t, newTestServer(t, fg), validBody(), "test-token")
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
@@ -247,8 +252,8 @@ func TestDeploy_PreviewURLsInSummary(t *testing.T) {
 
 func TestDeploy_ArgoCDLinkInSummary(t *testing.T) {
 	yml := servicesWithPreview + "  argocdURL: https://argocd.example.com/\n"
-	fg := &fakeGitops{badilYAML: yml}
-	rec := postDeploy(t, newTestServer(t, fg), previewBody(), "test-token")
+	fg := &fakeGitops{pr: pricingPR(), badilYAML: yml}
+	rec := postDeploy(t, newTestServer(t, fg), validBody(), "test-token")
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
@@ -261,8 +266,8 @@ func TestDeploy_ArgoCDLinkInSummary(t *testing.T) {
 
 func TestDeploy_PreviewURLsDefaultToHTTPS(t *testing.T) {
 	yml := strings.Replace(servicesWithPreview, "  tls: false\n", "", 1)
-	fg := &fakeGitops{badilYAML: yml}
-	rec := postDeploy(t, newTestServer(t, fg), previewBody(), "test-token")
+	fg := &fakeGitops{pr: pricingPR(), badilYAML: yml}
+	rec := postDeploy(t, newTestServer(t, fg), validBody(), "test-token")
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
@@ -274,8 +279,8 @@ func TestDeploy_PreviewURLsDefaultToHTTPS(t *testing.T) {
 
 func TestDeploy_MalformedPreviewFails(t *testing.T) {
 	yml := strings.Replace(servicesWithPreview, "path: /docs", "path: docs", 1)
-	fg := &fakeGitops{badilYAML: yml}
-	rec := postDeploy(t, newTestServer(t, fg), previewBody(), "test-token")
+	fg := &fakeGitops{pr: pricingPR(), badilYAML: yml}
+	rec := postDeploy(t, newTestServer(t, fg), validBody(), "test-token")
 
 	if rec.Code < http.StatusBadRequest {
 		t.Fatalf("status = %d, want an error (body: %s)", rec.Code, rec.Body.String())
@@ -297,8 +302,8 @@ preview:
 `
 
 func TestDeploy_PreviewLimitRefusesNewSlug(t *testing.T) {
-	fg := &fakeGitops{badilYAML: servicesWithCap, previews: capPreviews("checkout", "search")}
-	rec := postDeploy(t, newTestServer(t, fg), previewBody(), "test-token")
+	fg := &fakeGitops{pr: pricingPR(), badilYAML: servicesWithCap, previews: capPreviews("checkout", "search")}
+	rec := postDeploy(t, newTestServer(t, fg), validBody(), "test-token")
 
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409 (body: %s)", rec.Code, rec.Body.String())
@@ -345,8 +350,8 @@ func TestDeploy_PreviewLimitDeploys(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			fg := &fakeGitops{badilYAML: tc.yaml, previews: tc.previews}
-			rec := postDeploy(t, newTestServer(t, fg), previewBody(), "test-token")
+			fg := &fakeGitops{pr: pricingPR(), badilYAML: tc.yaml, previews: tc.previews}
+			rec := postDeploy(t, newTestServer(t, fg), validBody(), "test-token")
 
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
@@ -373,11 +378,11 @@ func TestDeploy_PushUnauthorized(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	fg := &fakeGitops{badilYAML: servicesWithCap}
+	fg := &fakeGitops{pr: pricingPR(), badilYAML: servicesWithCap}
 	fg.open(t)
 	fg.st = st
 	a := app.New(app.Config{Store: fg, Forge: fg, FanOut: fakeFanOut(fg)})
-	rec := postDeploy(t, NewServer(a, fg, nil, "test-token"), previewBody(), "test-token")
+	rec := postDeploy(t, NewServer(a, fg, nil, "test-token"), validBody(), "test-token")
 
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502 (body: %s)", rec.Code, rec.Body.String())
@@ -424,8 +429,9 @@ func TestDeploy_PreviewLimitReadErrors(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.fg.badilYAML = servicesWithCap
+			tc.fg.pr = pricingPR()
 			tc.fg.writeResult = previewWriteResult()
-			rec := postDeploy(t, newTestServer(t, tc.fg), previewBody(), "test-token")
+			rec := postDeploy(t, newTestServer(t, tc.fg), validBody(), "test-token")
 
 			if rec.Code != tc.status {
 				t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.status, rec.Body.String())
@@ -452,7 +458,7 @@ func TestWithMetrics_NilRecordsNothing(t *testing.T) {
 		"nil *metrics.Metrics": (*metrics.Metrics)(nil),
 	} {
 		t.Run(name, func(t *testing.T) {
-			fg := &fakeGitops{catalog: []string{"backend-1"}}
+			fg := &fakeGitops{pr: addPricingPR(), catalog: []string{"backend-1"}}
 			fg.open(t)
 			a := app.New(app.Config{Store: fg, Forge: fg, Metrics: m, FanOut: fakeFanOut(fg)})
 			srv := NewServer(a, fg, nil, "test-token", WithMetrics(m))
@@ -461,4 +467,165 @@ func TestWithMetrics_NilRecordsNothing(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestDeploy_RemovedFieldsRejected sends each field badil now reads from the
+// forge: the body is rejected, naming it, before any read.
+func TestDeploy_RemovedFieldsRejected(t *testing.T) {
+	for _, field := range []string{"head_ref", "pr_author", "pr_url"} {
+		t.Run(field, func(t *testing.T) {
+			fg := &fakeGitops{pr: addPricingPR(), catalog: []string{"backend-1"}}
+			body := strings.Replace(validBody(), `"service"`, `"`+field+`": "x", "service"`, 1)
+			rec := postDeploy(t, newTestServer(t, fg), body, "test-token")
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
+			}
+			want := `{"error":"invalid body: json: unknown field \"` + field + `\""}` + "\n"
+			if got := rec.Body.String(); got != want {
+				t.Errorf("body = %q, want %q", got, want)
+			}
+			if fg.prCalls != 0 || fg.capturedSlug != "" {
+				t.Error("a rejected body must not read the PR nor write")
+			}
+		})
+	}
+}
+
+// TestDeploy_PRMetadataFromForge deploys backend-1 for PR 42: the slug, the
+// stored pr-author and pr-url come from the PR the forge returns for the
+// service's repo, not from the caller.
+func TestDeploy_PRMetadataFromForge(t *testing.T) {
+	const prURL = "https://github.com/acme/backend-1/pull/42"
+	pr := deployPR("feature/x")
+	pr.Author, pr.URL = "alice", prURL
+	fg := &fakeGitops{pr: pr, catalog: []string{"backend-1"}}
+	rec := postDeploy(t, newTestServer(t, fg), validBody(), "test-token")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if fg.prOwner != "acme" || fg.prRepo != "backend-1" || fg.prNumber != 42 {
+		t.Errorf("PR read = %s/%s#%d, want acme/backend-1#42", fg.prOwner, fg.prRepo, fg.prNumber)
+	}
+	var resp api.DeployResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.PreviewSlug != "feature-x" {
+		t.Errorf("PreviewSlug = %q, want feature-x", resp.PreviewSlug)
+	}
+	file := fg.remote.Commits()[0].Tree["previews/feature-x/values.yaml"]
+	for _, want := range []string{"pr-author: alice\n", "pr-url: " + prURL + "\n", "pr-number: \"42\"\n"} {
+		if !strings.Contains(file, want) {
+			t.Errorf("previews/feature-x/values.yaml missing %q, got:\n%s", want, file)
+		}
+	}
+	if in := fg.capturedInputs; in.HeadRef != "feature/x" || in.PRAuthor != "alice" || in.PRURL != prURL {
+		t.Errorf("stored head ref, author, URL = %q, %q, %q; want feature/x, alice, %s",
+			in.HeadRef, in.PRAuthor, in.PRURL, prURL)
+	}
+}
+
+func TestDeploy_InvalidPRNumber(t *testing.T) {
+	cases := []struct {
+		name, service, number string
+	}{
+		{name: "not a number", service: "backend-1", number: "abc"},
+		{name: "zero", service: "backend-1", number: "0"},
+		{name: "negative", service: "backend-1", number: "-1"},
+		{name: "unknown service", service: "nope", number: "abc"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fg := &fakeGitops{pr: addPricingPR(), catalog: []string{"backend-1"}}
+			body := strings.Replace(validBody(), `"pr_number": "42"`, `"pr_number": "`+tc.number+`"`, 1)
+			body = strings.Replace(body, `"service": "backend-1"`, `"service": "`+tc.service+`"`, 1)
+			rec := postDeploy(t, newTestServer(t, fg), body, "test-token")
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
+			}
+			want := `{"error":"invalid pr_number: ` + tc.number + `"}` + "\n"
+			if got := rec.Body.String(); got != want {
+				t.Errorf("body = %q, want %q", got, want)
+			}
+			if fg.prCalls != 0 || fg.capturedSlug != "" || len(fg.remote.Commits()) != 1 {
+				t.Error("an invalid pr_number must not read the PR nor write")
+			}
+		})
+	}
+}
+
+func TestDeploy_PRReadRefusals(t *testing.T) {
+	cases := []struct {
+		name   string
+		yaml   string
+		prErr  error
+		status int
+		body   string
+		logged bool
+	}{
+		{
+			name:   "repo not on the forge",
+			yaml:   "services:\n  backend-1:\n    repo: git@github.com:acme/backend-1.git\n",
+			status: http.StatusBadRequest,
+			body:   `{"error":"service backend-1 repo is not a repository of the forge"}` + "\n",
+		},
+		{
+			name:   "pull request not found",
+			prErr:  fmt.Errorf("%w: 404 Not Found", forge.ErrNotFound),
+			status: http.StatusNotFound,
+			body:   `{"error":"pull request acme/backend-1#42 not found"}` + "\n",
+		},
+		{
+			name:   "forge failure",
+			prErr:  errors.New("boom"),
+			status: http.StatusBadGateway,
+			body:   `{"error":"read pull request: boom"}` + "\n",
+			logged: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			capture := &LogCapture{}
+			prev := slog.Default()
+			slog.SetDefault(slog.New(capture))
+			t.Cleanup(func() { slog.SetDefault(prev) })
+
+			fg := &fakeGitops{pr: addPricingPR(), prErr: tc.prErr, catalog: []string{"backend-1"}, badilYAML: tc.yaml}
+			rec := postDeploy(t, newTestServer(t, fg), validBody(), "test-token")
+
+			if rec.Code != tc.status {
+				t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.status, rec.Body.String())
+			}
+			if got := rec.Body.String(); got != tc.body {
+				t.Errorf("body = %q, want %q", got, tc.body)
+			}
+			if fg.capturedSlug != "" || fg.fanOutBodyCalled || len(fg.remote.Commits()) != 1 {
+				t.Error("a refused deploy must not write nor comment")
+			}
+			if got := loggedOp(capture, "deploy failed"); (got == "read pull request") != tc.logged {
+				t.Errorf("deploy failed op = %q, want logged %v", got, tc.logged)
+			}
+		})
+	}
+}
+
+// loggedOp returns the op of the last record of c with message msg, "" when
+// there is none.
+func loggedOp(c *LogCapture, msg string) string {
+	op := ""
+	for _, r := range c.Records() {
+		if r.Message != msg {
+			continue
+		}
+		r.Attrs(func(a slog.Attr) bool {
+			if a.Key == "op" {
+				op = a.Value.String()
+			}
+			return true
+		})
+	}
+	return op
 }

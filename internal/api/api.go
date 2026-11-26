@@ -1,14 +1,13 @@
 // Package api holds the JSON bodies of badil's HTTP API, shared by the server and its clients.
 package api
 
-// DeployRequest is the body of POST /v1/deploy. All fields are required; the
-// server stamps timestamp from time.Now() so retries don't drift.
+// DeployRequest is the body of POST /v1/deploy. All fields are required;
+// PRNumber is a positive integer. The server reads the PR's head branch,
+// author and URL from the forge, and stamps timestamp from time.Now() so
+// retries don't drift.
 type DeployRequest struct {
 	Service        string `json:"service"`
-	HeadRef        string `json:"head_ref"`
 	CommitSha      string `json:"commit_sha"`
-	PRAuthor       string `json:"pr_author"`
-	PRURL          string `json:"pr_url"`
 	PRNumber       string `json:"pr_number"`
 	WorkflowRunURL string `json:"workflow_run_url"`
 }
