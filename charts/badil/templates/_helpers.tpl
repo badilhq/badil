@@ -46,6 +46,14 @@ Server environment.
 - name: GITOPS_REPO_USERNAME
   value: {{ . | quote }}
 {{- end }}
+{{- with .Values.config.gitopsCommitName }}
+- name: GITOPS_COMMIT_NAME
+  value: {{ . | quote }}
+{{- end }}
+{{- with .Values.config.gitopsCommitEmail }}
+- name: GITOPS_COMMIT_EMAIL
+  value: {{ . | quote }}
+{{- end }}
 {{- with .Values.config.githubURL }}
 - name: GITHUB_URL
   value: {{ . | quote }}
@@ -79,6 +87,11 @@ Server environment.
     secretKeyRef:
       name: {{ $secret }}
       key: gitops-repo-token
+- name: GITOPS_SIGNING_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secret }}
+      key: gitops-signing-key
       optional: true
 {{- end -}}
 

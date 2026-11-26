@@ -23,6 +23,11 @@ func validEnv() map[string]string {
 		"GITHUB_WEBHOOK_SECRET":  "secret",
 		"GITHUB_INSTALLATION_ID": "67890",
 		"GITOPS_REPO_URL":        "https://github.com/org/gitops-repo.git",
+		"GITOPS_REPO_TOKEN":      "gitops-secret",
+		"GITOPS_REPO_USERNAME":   "",
+		"GITOPS_COMMIT_NAME":     "",
+		"GITOPS_COMMIT_EMAIL":    "",
+		"GITOPS_SIGNING_KEY":     "",
 		"BADIL_DEPLOY_TOKEN":     "deploy-secret",
 	}
 }
@@ -93,9 +98,9 @@ func TestLoad_Valid(t *testing.T) {
 	if cfg.GitOpsRepoURL != "https://github.com/org/gitops-repo.git" {
 		t.Errorf("GitOpsRepoURL = %q, want %q", cfg.GitOpsRepoURL, "https://github.com/org/gitops-repo.git")
 	}
-	if cfg.GitOpsRepoUsername != "" || cfg.GitOpsRepoToken != "" {
-		t.Errorf("GitOpsRepoUsername, GitOpsRepoToken = %q, %q; want empty when unset",
-			cfg.GitOpsRepoUsername, cfg.GitOpsRepoToken)
+	if cfg.GitOpsRepoUsername != "" || cfg.GitOpsRepoToken != "gitops-secret" {
+		t.Errorf("GitOpsRepoUsername, GitOpsRepoToken = %q, %q; want empty, %q",
+			cfg.GitOpsRepoUsername, cfg.GitOpsRepoToken, "gitops-secret")
 	}
 	if cfg.DeployToken != "deploy-secret" {
 		t.Errorf("DeployToken = %q, want %q", cfg.DeployToken, "deploy-secret")
@@ -247,8 +252,9 @@ func TestLoad_GitOpsRepoCredentials(t *testing.T) {
 		{
 			name:     "username without token",
 			username: "deploy-user",
-			wantErr:  "GITOPS_REPO_USERNAME requires GITOPS_REPO_TOKEN",
+			wantErr:  "GITOPS_REPO_TOKEN is required",
 		},
+		{name: "no token", wantErr: "GITOPS_REPO_TOKEN is required"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

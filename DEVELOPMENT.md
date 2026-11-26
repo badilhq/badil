@@ -20,6 +20,7 @@ ngrok http 8080
 make dev-bootstrap         # shows a preflight plan, then (on y) creates the App + writes .env + PEM
 # (browser opens; click "Create GitHub App", then "Install" on the repos you want)
 # Paste the installation ID from the install URL into .env (GITHUB_INSTALLATION_ID=...)
+# Create a token with Contents write on the gitops repo and set it in .env (GITOPS_REPO_TOKEN=...)
 
 make dev-verify            # confirms the credentials are good and shows installation IDs
 make dev-serve             # starts the server
@@ -41,6 +42,8 @@ The sections below detail each step.
 7. Opens the App's install page so you can attach it to the gitops repo + service repos.
 
 After install, the browser URL ends with `/settings/installations/<ID>`. Paste that into `.env` as `GITHUB_INSTALLATION_ID`.
+
+The App has Contents read only: badil pushes to the gitops repo with `GITOPS_REPO_TOKEN`, which bootstrap cannot create. The `.env` holds the line `export GITOPS_REPO_TOKEN= # set this — ...`: create a token with Contents write on the gitops repo (a fine-grained personal access token with access to that repo only), set it there, then run `make dev-serve`. Without it, badil exits at start with `GITOPS_REPO_TOKEN is required`. See [Gitops repo credentials](docs/CONFIGURATION.md#gitops-repo-credentials).
 
 On another GitHub host (GitHub Enterprise), export `GITHUB_URL` and `GITHUB_API_URL` before `make dev-bootstrap` and add them to `.env`: `bootstrap-app`, `verify-app` and `serve` all read them (see [Server environment variables](docs/CONFIGURATION.md#server-environment-variables)).
 
@@ -226,6 +229,7 @@ rm /tmp/badil-mock.env
 | `badil verify-app` returns `401 A JSON web token could not be decoded` | `GITHUB_APP_ID` and `dev.private-key.pem` don't match | Re-run `make dev-bootstrap`, or regenerate the private key from the App settings page and replace `dev.private-key.pem` |
 | `badil verify-app` shows `Installations (0)` | App created but not installed anywhere | Open the App settings, click **Install App**, pick repos |
 | `badil serve` fails with `GITHUB_APP_ID is required` | `.env` not sourced | `source .env` first, or use `make dev-serve` which sources for you |
+| `badil serve` fails with `GITOPS_REPO_TOKEN is required` | The `.env` placeholder `GITOPS_REPO_TOKEN=` was left empty | Set it to a token with Contents write on the gitops repo |
 
 ## Appendix B — manual App creation (manifest-flow fallback)
 
@@ -236,7 +240,7 @@ If `make dev-bootstrap` doesn't work in your environment, create the App by hand
    - **Homepage URL**: `http://localhost:8080`
    - **Webhook URL**: `<your-public-base-url>/webhooks/github`
    - **Webhook secret**: `openssl rand -hex 32` — save the value
-   - **Repository permissions**: Contents R/W, Pull requests W, Metadata R
+   - **Repository permissions**: Contents R, Pull requests W, Metadata R
    - **Subscribe to events**: `pull_request` and `push` (installation / installation_repositories fire automatically — do not subscribe to them explicitly)
    - **Where can this be installed?**: Only on this account
 2. Click **Create GitHub App**. Note the **App ID** at the top of the page.
@@ -251,6 +255,7 @@ If `make dev-bootstrap` doesn't work in your environment, create the App by hand
    export GITHUB_WEBHOOK_SECRET=<from step 1>
    export GITHUB_INSTALLATION_ID=<from the install URL>
    export GITOPS_REPO_URL=https://github.com/<your-org>/<your-gitops-repo>.git
+   export GITOPS_REPO_TOKEN=<a token with Contents write on the gitops repo>
    export BADIL_DEPLOY_TOKEN=$(openssl rand -hex 32)
    export LISTEN_ADDR=:8080
    EOF

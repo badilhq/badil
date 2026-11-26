@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/ProtonMail/go-crypto/openpgp"
 	"gopkg.in/yaml.v3"
 
 	"github.com/badilhq/badil/internal/catalog"
@@ -40,8 +41,10 @@ type GitHubStore struct {
 	// webBase is repoURL's scheme, host and fullName, the base of commit links.
 	webBase  string
 	identity CommitIdentity
-	metrics  Recorder
-	clone    *gitClone
+	// signingKey signs the commits Apply pushes, nil when they are unsigned.
+	signingKey *openpgp.Entity
+	metrics    Recorder
+	clone      *gitClone
 	// applySlot serialises Apply: it holds one token while an Apply runs.
 	applySlot chan struct{}
 	// sleep waits between Apply's attempts.
@@ -65,6 +68,15 @@ func WithMetrics(m Recorder) Option {
 		if m != nil {
 			c.metrics = m
 		}
+	}
+}
+
+// WithSigningKey makes Apply sign its commits with key, an OpenPGP entity
+// with an unencrypted private key that can sign. A nil key leaves them
+// unsigned.
+func WithSigningKey(key *openpgp.Entity) Option {
+	return func(c *GitHubStore) {
+		c.signingKey = key
 	}
 }
 

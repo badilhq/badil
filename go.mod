@@ -5,6 +5,7 @@ go 1.27.0
 toolchain go1.27.4
 
 require (
+	github.com/ProtonMail/go-crypto v1.1.6
 	github.com/bmatcuk/doublestar/v4 v4.10.4
 	github.com/bradleyfalzon/ghinstallation/v2 v2.19.0
 	github.com/go-chi/chi/v5 v5.5.0
@@ -26,7 +27,6 @@ require (
 require (
 	dario.cat/mergo v1.0.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
-	github.com/ProtonMail/go-crypto v1.1.6 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect

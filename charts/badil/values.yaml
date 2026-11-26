@@ -12,7 +12,8 @@ image:
 imagePullSecrets: []
 
 # Server configuration; githubAppId, githubInstallationId and gitopsRepoURL
-# are required, gitopsRepoUsername, githubURL and githubAPIURL are optional.
+# are required, gitopsRepoUsername, gitopsCommitName, gitopsCommitEmail,
+# githubURL and githubAPIURL are optional.
 config:
   # GitHub App ID (GITHUB_APP_ID).
   githubAppId: ""
@@ -24,6 +25,12 @@ config:
   # Basic-auth username of the Secret key gitops-repo-token
   # (GITOPS_REPO_USERNAME); empty uses x-access-token.
   gitopsRepoUsername: ""
+  # Author and committer of the gitops commits (GITOPS_COMMIT_NAME and
+  # GITOPS_COMMIT_EMAIL), set together; both empty use the GitHub App's bot.
+  # Required with the Secret key gitops-signing-key, the email being an
+  # identity of that key and a verified email of the account that holds it.
+  gitopsCommitName: ""
+  gitopsCommitEmail: ""
   # Web base of the GitHub host (GITHUB_URL), e.g. https://ghe.example.com:
   # the host of the service repos' URLs and PR URLs. Empty uses
   # https://github.com.
@@ -34,11 +41,14 @@ config:
   # contains ".api.". Empty uses https://api.github.com/.
   githubAPIURL: ""
 
-# Required: existing Secret with keys github-private-key and github-webhook-secret.
+# Required: existing Secret with keys github-private-key, github-webhook-secret and gitops-repo-token.
+# Key gitops-repo-token authenticates badil's git calls to the gitops repo (GITOPS_REPO_TOKEN): a token with Contents
+# write on the gitops repo, on GitHub a machine user's.
 # Optional key deploy-token enables POST /v1/deploy and POST /v1/sync (BADIL_DEPLOY_TOKEN).
 # Optional key read-token enables the GET /v1 routes (BADIL_READ_TOKEN); deploy-token grants them too.
 # Optional key status-token enables POST /webhooks/status (BADIL_STATUS_TOKEN).
-# Optional key gitops-repo-token authenticates badil's git calls to the gitops repo (GITOPS_REPO_TOKEN) instead of the GitHub App installation token.
+# Optional key gitops-signing-key signs the gitops commits (GITOPS_SIGNING_KEY): an ASCII-armored OpenPGP private key
+# without passphrase; it requires config.gitopsCommitName and config.gitopsCommitEmail.
 existingSecret: ""
 
 # Port the server listens on and the Service exposes.

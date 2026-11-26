@@ -58,7 +58,7 @@ func mustNewForge(t *testing.T, cfg *config.Config) (*forgegithub.Forge, store.C
 	if err != nil {
 		t.Fatalf("newApp: %v", err)
 	}
-	_, f, identity, err := newForge(context.Background(), app, cfg)
+	f, identity, err := newForge(context.Background(), app, cfg)
 	if err != nil {
 		t.Fatalf("newForge: %v", err)
 	}
@@ -104,5 +104,30 @@ func TestNewForge_CustomAPIURL(t *testing.T) {
 				t.Errorf("ParsePRURL(%q) = %q, %q, %d, %v; want acme, front, 7, true", pr.URL, o, r, n, ok)
 			}
 		})
+	}
+}
+
+// TestNewForge_ConfiguredIdentity checks that with GITOPS_COMMIT_NAME and
+// GITOPS_COMMIT_EMAIL set, they are the gitops commit identity and the App's
+// bot is not looked up.
+func TestNewForge_ConfiguredIdentity(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pemKey := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	srv, requests := fakeGitHubAPI(t)
+	cfg := &config.Config{
+		AppID: 12345, PrivateKey: pemKey, InstallationID: 67890,
+		GitHubURL: "https://github.com", GitHubAPIURL: srv.URL + "/api/v3/",
+		GitOpsCommitName: "badil-gitops", GitOpsCommitEmail: "badil-gitops@users.noreply.github.com",
+	}
+	_, identity := mustNewForge(t, cfg)
+	want := store.CommitIdentity{Name: "badil-gitops", Email: "badil-gitops@users.noreply.github.com"}
+	if identity != want {
+		t.Errorf("identity = %+v, want %+v", identity, want)
+	}
+	if len(*requests) != 0 {
+		t.Errorf("requests = %q, want none", *requests)
 	}
 }

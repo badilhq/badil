@@ -18,8 +18,8 @@ Or set it up by hand:
 
 - Commit at the root a `badil.yaml`, starting from [`examples/argocd/badil.yaml`](../examples/argocd/badil.yaml): the service catalog, and optionally the image tag format, namespace metadata, dependencies, needs and the `preview` block. Every key is in the [Configuration reference](CONFIGURATION.md#badilyaml).
 - badil creates `previews/` itself; a missing directory reads as no previews.
-- badil commits straight to the default branch. Its protection must let the App push directly: no required pull request, or the App on the bypass list.
-- The default branch must not require signed commits: badil pushes unsigned commits, authored and committed by the App's bot.
+- badil commits straight to the default branch, pushing with the gitops repo token of [§5](#5-github-app). Its protection must let that token's owner push directly: no required pull request, or that user on the bypass list.
+- badil's commits are unsigned and authored and committed by the App's bot, unless you set a commit identity and a signing key. When the default branch requires signed commits, set them up as [Signed commits](CONFIGURATION.md#signed-commits) says.
 
 ## 3. Argo CD wiring
 
@@ -52,7 +52,7 @@ Choose the https host GitHub will call, e.g. `https://badil.example.com`, and cr
 
    `$(go env GOPATH)/bin` must be on `PATH`. Use `@vX.Y.Z` to match a pinned chart. `badil version` prints the installed version.
 2. In an empty working directory, create the App. It writes `.env` and `dev.private-key.pem` there.
-   - Run it on a machine with a desktop browser signed in to GitHub, not over SSH on a remote host: it listens on `127.0.0.1` and waits 5 minutes for the browser redirect. Otherwise create the App by hand (item 5).
+   - Run it on a machine with a desktop browser signed in to GitHub, not over SSH on a remote host: it listens on `127.0.0.1` and waits 5 minutes for the browser redirect. Otherwise create the App by hand (item 6).
    - The App is private, so it can only be installed on the account that owns it. When the repos are in an org, `--owner <org>` is required, and creating the App needs org owner (or App manager) rights.
 
    ```bash
@@ -77,7 +77,7 @@ Choose the https host GitHub will call, e.g. `https://badil.example.com`, and cr
      --gitops-repo-url "$GITOPS"
    ```
 3. Install the App on the gitops repo and every service repo, all under that one account. badil accepts webhooks from that single installation only.
-   The App subscribes to `pull_request` and `push`. An App created before `push` was added does not receive it: in the App settings, **Permissions & events** → **Subscribe to events**, tick **Push** and click **Save changes**. `push` needs Contents read, which the App already has, so installations approve nothing. Without it, a `badil.yaml` change reaches previews only at their next deploy or sweep, or through `POST /v1/sync`.
+   The App subscribes to `pull_request` and `push`. An App created before `push` was added does not receive it: in the App settings, **Permissions & events** → **Subscribe to events**, tick **Push** and click **Save changes**. `push` needs Contents read, the App's only Contents permission, so installations approve nothing. Without it, a `badil.yaml` change reaches previews only at their next deploy or sweep, or through `POST /v1/sync`.
 4. In the same directory, list the installations:
 
    ```bash
@@ -86,7 +86,8 @@ Choose the https host GitHub will call, e.g. `https://badil.example.com`, and cr
    ```
 
    Put the listed `id=` into `GITHUB_INSTALLATION_ID` in `.env`, then run `. ./.env` again.
-5. Alternative: create the App by hand following [DEVELOPMENT.md Appendix B](../DEVELOPMENT.md#appendix-b--manual-app-creation-manifest-flow-fallback), with the webhook URL `<base>/webhooks/github`, and write the same `.env` keys yourself.
+5. Create the gitops repo token. The App has Contents read only: badil pushes to the gitops repo with a token of its own (see [Gitops repo credentials](CONFIGURATION.md#gitops-repo-credentials)). On GitHub, create a machine user, a GitHub account for badil alone, give it write access to the gitops repo only, and create for it a fine-grained personal access token with access to the gitops repo only and the repository permission Contents read and write. Put the token into `GITOPS_REPO_TOKEN` in `.env`, then run `. ./.env` again.
+6. Alternative: create the App by hand following [DEVELOPMENT.md Appendix B](../DEVELOPMENT.md#appendix-b--manual-app-creation-manifest-flow-fallback), with the webhook URL `<base>/webhooks/github`, and write the same `.env` keys yourself.
 
 `.env` and the PEM are secrets: keep them out of git and store them in a secret manager. The PEM is the only copy; if lost, generate a new private key in the App settings.
 
@@ -114,6 +115,7 @@ kubectl create namespace badil
 kubectl create secret generic badil -n badil \
   --from-file=github-private-key="$GITHUB_PRIVATE_KEY_PATH" \
   --from-literal=github-webhook-secret="$GITHUB_WEBHOOK_SECRET" \
+  --from-literal=gitops-repo-token="$GITOPS_REPO_TOKEN" \
   --from-literal=deploy-token="$BADIL_DEPLOY_TOKEN"
 helm install badil oci://ghcr.io/badilhq/charts/badil -n badil \
   --set-string config.githubAppId="$GITHUB_APP_ID" \
@@ -126,7 +128,8 @@ helm install badil oci://ghcr.io/badilhq/charts/badil -n badil \
 
 - Without `--version`, Helm installs the latest chart. Add `--version X.Y.Z` to pin a release (do so in production), and take the step 3 example files from the same `vX.Y.Z` tag. The image tag defaults to the chart `appVersion`.
 - When the Secret has `deploy-token`, badil serves `POST /v1/deploy`, the manual trigger, and `POST /v1/sync`, which syncs every preview (or one) with `badil.yaml` at once, both protected by that bearer token (see [README](../README.md)). `deploy-token` is optional: leave out the `--from-literal=deploy-token=...` line to turn both endpoints off (404). When the Secret has `read-token` or `deploy-token`, badil serves the read routes `GET /v1/previews` and `GET /v1/wait`, protected by either token (see [Wait for a preview](#wait-for-a-preview)). The Ingress routes `POST /v1/deploy`, `POST /v1/sync`, `GET /v1/previews` and `GET /v1/wait` only with `ingress.api: true`. `POST /webhooks/status`, the renderer's status callback, is protected by the optional `status-token` bearer token (see [Preview status](#preview-status-optional)); the Ingress never routes it, and Argo CD reaches it through the Service.
-- badil's git calls to the gitops repo authenticate as the App installation. To use a token instead, add `--from-literal=gitops-repo-token=<token>` to the Secret, and `--set config.gitopsRepoUsername=<username>` when the host needs a username other than `x-access-token` (see [Gitops repo credentials](CONFIGURATION.md#gitops-repo-credentials)). Pushes then run as the token's owner.
+- The Secret keys `github-private-key`, `github-webhook-secret` and `gitops-repo-token` are required. badil's git calls to the gitops repo authenticate with `gitops-repo-token`, and its pushes run as the token's owner. Add `--set config.gitopsRepoUsername=<username>` when the host needs a username other than `x-access-token` (see [Gitops repo credentials](CONFIGURATION.md#gitops-repo-credentials)). To rotate the token, update the Secret key and restart badil.
+- To sign badil's commits, add `--from-file=gitops-signing-key=<armored private key file>` to the Secret and `--set config.gitopsCommitName=<name>,config.gitopsCommitEmail=<email>` to the install, as [Signed commits](CONFIGURATION.md#signed-commits) says. The App's permissions are Contents read, Pull requests write and Metadata read.
 - `cleanup.ttl` (e.g. `168h`) is optional: it also deletes previews with no deploy for that long.
 - The cleanup sweep runs in the server every hour by default (`cleanup.interval`, `1h`): it deletes stale previews and rewrites every kept preview to match `badil.yaml`, and exports its metrics (with the Prometheus Operator, scrape them with `metrics.serviceMonitor.enabled=true` and `metrics.serviceMonitor.labels` matching its selector, e.g. `release: <kube-prometheus-stack release>`). `cleanup.enabled=true` switches it to an hourly CronJob without metrics and turns the in-server sweep off.
 - The chart also installs a ClusterRole and ClusterRoleBinding, `<release>-namespaces`, that let badil get namespaces and nothing else: before creating a preview, badil reads the namespace named after its slug and refuses the preview when that namespace exists and is not a preview (see [Namespace in use](EVENTS.md#namespace-in-use)).
@@ -376,6 +379,21 @@ wait-for-preview:
 Set `preview.domain` in `badil.yaml`, create a wildcard DNS record `*.<domain>` pointing to the ingress controller, and list the services under `expose`. Details: [Per-preview URLs](CONFIGURATION.md#per-preview-urls).
 
 ## 10. Upgrade
+
+Upgrading from a release where `gitops-repo-token` was optional: badil no longer pushes as the App and does not start without the token. Before the `helm upgrade`, in this order:
+
+1. Create the gitops repo token as [§5](#5-github-app) item 5 says.
+2. Add it to the Secret as `gitops-repo-token` (a merge patch keeps the other keys):
+
+   ```bash
+   kubectl patch secret badil -n badil --type merge \
+     -p "{\"stringData\":{\"gitops-repo-token\":\"$GITOPS_REPO_TOKEN\"}}"
+   ```
+3. If a branch rule on the gitops repo's default branch lists the App on its bypass list, add the token's owner (the machine user) to that list, as [§2](#2-gitops-repo) says: pushes now run as that user, and the rule rejects them otherwise.
+4. Upgrade badil as below.
+5. Lower the App's Contents permission to read: in the App settings, **Permissions & events** → **Repository permissions** → **Contents**, choose **Read-only** and click **Save changes**. A removed permission takes effect at once: installations approve nothing.
+
+To upgrade badil:
 
 1. Upgrade badil, with the values of the installed release:
 
