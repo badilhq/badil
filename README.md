@@ -106,7 +106,6 @@ Local setup: [DEVELOPMENT.md](DEVELOPMENT.md).
 |---|---|
 | [`charts/badil`](charts/badil) | Installs the badil server; the cleanup sweep runs in the server hourly by default |
 | [`charts/preview-apps`](charts/preview-apps) | One preview: AppProject, Namespace, one ArgoCD Application per service and per dependency |
-| [`charts/app`](charts/app) | Generic service chart; service charts wrap it as a dependency aliased `app` |
 
 Install: [docs/INSTALL.md](docs/INSTALL.md); ArgoCD wiring: [examples/argocd](examples/argocd/README.md). Charts are published to `oci://ghcr.io/badilhq/charts`; see [CONTRIBUTING.md](CONTRIBUTING.md#releases) for how versions are set.
 

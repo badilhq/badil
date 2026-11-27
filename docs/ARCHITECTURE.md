@@ -54,7 +54,7 @@ badil is a few binaries and charts. Each service repo adds its own chart.
 | `badil serve` | this repo | chi HTTP server: the GitHub webhook, the renderer's status callback, and the optional deploy and sync endpoints. Keeps each preview's status in memory and in a ConfigMap of its namespace. See the [HTTP API reference](API.md). |
 | `preview-apps` chart | this repo, [`charts/preview-apps`](../charts/preview-apps) | The [renderer](CONTRACT.md#preview-contract) badil ships: an AppProject, a Namespace, and one Argo CD Application per service and per dependency. Application annotations `preview.badil.dev/*` carry the PR metadata. |
 | ApplicationSet | this repo, [`examples/argocd`](../examples/argocd) | Git directory generator on `previews/*`. |
-| Service chart | each service repo | Built on the `app` chart, [`charts/app`](../charts/app). See the [Service repo contract](CONFIGURATION.md#service-repo-contract). |
+| Service chart | each service repo | Any Helm chart that takes the image tag (and, for exposed services, the host) as Helm parameters. See the [Service repo contract](CONFIGURATION.md#service-repo-contract). |
 | `badil` chart | this repo, [`charts/badil`](../charts/badil) | Installs `badil serve` (Deployment, Service, optional Ingress, a Role for the ConfigMaps of its namespace, and a ClusterRole with `get` on namespaces). |
 
 ## How a preview flows
@@ -189,7 +189,7 @@ badil never reads, writes or drops data stores.
 - Each service's release name is the service name, so per-preview data is keyed by namespace.
 - Data that lives in the preview namespace is pruned with it on teardown, sweep or expiry.
 - Data outside the namespace is owned, and dropped, by whatever provisions it.
-- The [`app`](../charts/app) chart only offers `envFrom` and `initContainers` to wire a data provider.
+- Wiring a data provider (env from a Secret, an init container that waits or migrates) is the service chart's job.
 
 ## Code layers
 
