@@ -1,0 +1,43 @@
+# Namespace guard: a ValidatingAdmissionPolicy and its binding, both named
+# badil-namespace-guard, that refuse any update or delete of a namespace by
+# the renderer that deploys previews unless the namespace already carries the
+# preview label badil.dev/preview. The renderer then cannot adopt or delete a
+# namespace that badil did not create, whoever wrote the preview file.
+#
+# - Requires Kubernetes 1.30 or later.
+# - The renderer identity is an example to adapt: Argo CD's application
+#   controller, system:serviceaccount:argocd:argocd-application-controller, in
+#   the policy's match condition. Read it with:
+#     kubectl get statefulset argocd-application-controller -n argocd -o jsonpath='{.spec.template.spec.serviceAccountName}'
+#   A wrong identity leaves the guard inactive without error.
+# - The policy covers every namespace that identity updates or deletes, not
+#   only previews: apply it only when the renderer manages no namespace other
+#   than previews.
+#
+# Apply: kubectl apply -f namespace-guard.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: badil-namespace-guard
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["namespaces"]
+        operations: ["UPDATE", "DELETE"]
+  matchConditions:
+    - name: preview-renderer
+      expression: 'request.userInfo.username == "system:serviceaccount:argocd:argocd-application-controller"'
+  validations:
+    - expression: "oldObject.metadata.?labels[?'badil.dev/preview'].hasValue()"
+      message: namespace is not a badil preview
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: badil-namespace-guard
+spec:
+  policyName: badil-namespace-guard
+  validationActions: [Deny]

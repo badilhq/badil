@@ -100,19 +100,3 @@ cleanup:
   # Delete previews with no deploy for this long (CLEANUP_TTL), as a Go
   # duration such as 168h; empty disables the TTL.
   ttl: ""
-
-# Admission policy that refuses any update or delete of a namespace by the
-# ServiceAccount of the renderer that deploys previews unless the namespace
-# already carries the preview label badil.dev/preview. It applies whoever wrote
-# the preview file. The renderer must manage no namespace other than previews:
-# its updates and deletes of any other namespace are refused too.
-# Renders a cluster-scoped ValidatingAdmissionPolicy and its binding; needs
-# Kubernetes 1.30+.
-namespaceGuard:
-  enabled: false
-  # Namespace and ServiceAccount of the renderer; the policy only matches
-  # requests from that identity. The default is Argo CD's application
-  # controller.
-  renderer:
-    namespace: argocd
-    serviceAccount: argocd-application-controller
