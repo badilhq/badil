@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.31.0](https://github.com/badilhq/badil/compare/v0.30.2...v0.31.0) (2026-11-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **gitops:** badil no longer falls back to the GitHub App installation token for the gitops repo: GITOPS_REPO_TOKEN (chart Secret key gitops-repo-token) is required, and the bootstrap manifest requests Contents read instead of write.
+* **lifecycle:** a preview label added by a user without write access to the repo (Triage role), by a bot, or by an unknown account no longer deploys the pull request; automation deploys through POST /v1/deploy.
+* **api:** POST /v1/deploy no longer accepts head_ref, pr_author and pr_url; badil reads them from pull request pr_number of the service's repo.
+
+### Features
+
+* **api:** read the manual deploy's head branch, author and url from the pull request ([#159](https://github.com/badilhq/badil/issues/159)) ([8d7a8ed](https://github.com/badilhq/badil/commit/8d7a8ed315192cb23d44765c723f4f673d8173b0))
+* **gitops:** require a gitops repo token and sign commits with an optional gpg key ([#161](https://github.com/badilhq/badil/issues/161)) ([1d76cd6](https://github.com/badilhq/badil/commit/1d76cd6e3901b111d1ab191c855747717245ced1))
+* **lifecycle:** deploy a labelled pull request only when its labeller has write access ([#160](https://github.com/badilhq/badil/issues/160)) ([276887c](https://github.com/badilhq/badil/commit/276887cadd054f9a9ef523ff5441371d402bcc57))
+
 ## [0.30.2](https://github.com/badilhq/badil/compare/v0.30.1...v0.30.2) (2026-11-26)
 
 
