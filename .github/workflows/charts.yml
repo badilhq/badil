@@ -321,52 +321,36 @@ jobs:
             exit 1
           fi
 
-      - name: Render badil namespace guard
+      - name: Namespace guard example
         run: |
-          # GitHub runs this step with bash -e and no pipefail: without it a failed helm template would print nothing
-          # and pass the "nothing by default" check.
-          set -o pipefail
+          got=$(yq -N '[.apiVersion, .kind, .metadata.name] | join(" ")' examples/namespace-guard/namespace-guard.yaml)
+          want='admissionregistration.k8s.io/v1 ValidatingAdmissionPolicy badil-namespace-guard
+          admissionregistration.k8s.io/v1 ValidatingAdmissionPolicyBinding badil-namespace-guard'
+          if [ "$got" != "$want" ]; then
+            echo '::error::expected examples/namespace-guard/namespace-guard.yaml to be a ValidatingAdmissionPolicy then a ValidatingAdmissionPolicyBinding, both admissionregistration.k8s.io/v1 and named badil-namespace-guard'
+            printf 'got:\n%s\n' "$got"
+            exit 1
+          fi
           # Prints each admission object as "<kind> <name>", followed for the policy by its failure policy and rules,
           # its match condition and its validation, and for the binding by its policy name and actions.
-          guard() {
-            helm template t charts/badil -f charts/badil/ci/test-values.yaml "$@" \
-              | yq -N 'select(.kind == "ValidatingAdmissionPolicy*") | .kind + " " + .metadata.name,
-                (select(.kind == "ValidatingAdmissionPolicy") | (.spec.failurePolicy + " " + (.spec.matchConstraints.resourceRules | to_json(0))),
-                  (.spec.matchConditions[] | .name + ": " + .expression),
-                  (.spec.validations[] | .expression + " -> " + .message)),
-                (select(.kind == "ValidatingAdmissionPolicyBinding") | .spec.policyName + " " + (.spec.validationActions | to_json(0)))'
-          }
-          # The expected output of guard for the renderer identity system:serviceaccount:$1:$2.
-          want() {
-            printf '%s\n' \
-              'ValidatingAdmissionPolicy t-namespace-guard' \
-              'Fail [{"apiGroups":[""],"apiVersions":["v1"],"resources":["namespaces"],"operations":["UPDATE","DELETE"]}]' \
-              "preview-renderer: request.userInfo.username == \"system:serviceaccount:$1:$2\"" \
-              "oldObject.metadata.?labels[?'badil.dev/preview'].hasValue() -> namespace is not a badil preview" \
-              'ValidatingAdmissionPolicyBinding t-namespace-guard' \
-              't-namespace-guard ["Deny"]'
-          }
-          # check <message> <want> <guard args...>
-          check() {
-            local message=$1 expected=$2 got
-            shift 2
-            got=$(guard "$@")
-            if [ "$got" != "$expected" ]; then
-              echo "::error::$message"
-              printf 'got:\n%s\n' "$got"
-              exit 1
-            fi
-          }
-          check 'expected no ValidatingAdmissionPolicy or binding by default' ''
-          check 'expected the namespace guard policy and binding with namespaceGuard.enabled=true' \
-            "$(want argocd argocd-application-controller)" --set namespaceGuard.enabled=true
-          check 'expected the policy and binding with the match condition username built from namespaceGuard.renderer.namespace and serviceAccount' \
-            "$(want flux-system helm-controller)" \
-            --set namespaceGuard.enabled=true,namespaceGuard.renderer.namespace=flux-system,namespaceGuard.renderer.serviceAccount=helm-controller
-          # A helm upgrade --reuse-values from a release without these values has no renderer identity.
-          check 'expected the default renderer identity when namespaceGuard.renderer is missing' \
-            "$(want argocd argocd-application-controller)" \
-            --set namespaceGuard.enabled=true,namespaceGuard.renderer=null
+          got=$(yq -N 'select(.kind == "ValidatingAdmissionPolicy*") | .kind + " " + .metadata.name,
+            (select(.kind == "ValidatingAdmissionPolicy") | (.spec.failurePolicy + " " + (.spec.matchConstraints.resourceRules | to_json(0))),
+              (.spec.matchConditions[] | .name + ": " + .expression),
+              (.spec.validations[] | .expression + " -> " + .message)),
+            (select(.kind == "ValidatingAdmissionPolicyBinding") | .spec.policyName + " " + (.spec.validationActions | to_json(0)))' \
+            examples/namespace-guard/namespace-guard.yaml)
+          want=$(printf '%s\n' \
+            'ValidatingAdmissionPolicy badil-namespace-guard' \
+            'Fail [{"apiGroups":[""],"apiVersions":["v1"],"resources":["namespaces"],"operations":["UPDATE","DELETE"]}]' \
+            'preview-renderer: request.userInfo.username == "system:serviceaccount:argocd:argocd-application-controller"' \
+            "oldObject.metadata.?labels[?'badil.dev/preview'].hasValue() -> namespace is not a badil preview" \
+            'ValidatingAdmissionPolicyBinding badil-namespace-guard' \
+            'badil-namespace-guard ["Deny"]')
+          if [ "$got" != "$want" ]; then
+            echo '::error::expected the namespace guard policy to refuse renderer updates and deletes of unlabelled namespaces, and its binding to deny'
+            printf 'got:\n%s\n' "$got"
+            exit 1
+          fi
 
       - name: Render badil sweep interval and ServiceMonitor
         run: |
