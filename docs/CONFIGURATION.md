@@ -243,7 +243,7 @@ badil and the `preview-apps` chart create no quota or policy objects. Per-previe
 
 It creates a ResourceQuota, a LimitRange and an ingress NetworkPolicy in every preview namespace, and keeps them in sync with the policy. Kyverno creates them, not Argo CD, so the `previews` AppProject is unchanged. Teardown deletes them with the namespace.
 
-A quota on compute resources (`requests.cpu`, `requests.memory`, `limits.memory`) refuses pods that do not set them, and a chart that sets no `resources` gets the LimitRange defaults. Ship a LimitRange with default requests and limits next to such a quota, as the example does.
+A quota on compute resources (`requests.cpu`, `requests.memory`, `limits.memory`) refuses pods that do not set them. A chart that sets no `resources` relies on LimitRange defaults: ship a LimitRange with default requests and limits next to such a quota, as the example does.
 
 ## Namespace guard
 
