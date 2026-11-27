@@ -29,6 +29,10 @@ import (
 // then background teardowns share it, inside the default 30s pod grace period.
 const shutdownTimeout = 25 * time.Second
 
+// appCheckTimeout bounds serve's startup check of the GitHub App
+// credentials (newCheckedApp).
+const appCheckTimeout = 30 * time.Second
+
 func main() {
 	if err := rootCmd().Execute(); err != nil {
 		os.Exit(exitCode(err))
@@ -73,13 +77,13 @@ func serveCmd() *cobra.Command {
 				m = metrics.New()
 			}
 
-			ghApp, err := newApp(cfg)
+			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			defer stop()
+
+			ghApp, err := newCheckedApp(ctx, cfg)
 			if err != nil {
 				return err
 			}
-
-			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-			defer stop()
 
 			previewStatus := statuskube.InCluster(ctx)
 			expiry := expirykube.InCluster(ctx)
@@ -133,6 +137,22 @@ func serveCmd() *cobra.Command {
 			return shutdownErr
 		},
 	}
+}
+
+// newCheckedApp builds the GitHub App from cfg (newApp), then checks its
+// credentials and the installation cfg.InstallationID (github.CheckApp)
+// within appCheckTimeout.
+func newCheckedApp(ctx context.Context, cfg *config.Config) (*github.App, error) {
+	app, err := newApp(cfg)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, appCheckTimeout)
+	defer cancel()
+	if err = github.CheckApp(ctx, app, cfg.InstallationID); err != nil {
+		return nil, fmt.Errorf("github app check: %w", err)
+	}
+	return app, nil
 }
 
 // loadStatus reads the previews' status back into s (status.Store.Load),
