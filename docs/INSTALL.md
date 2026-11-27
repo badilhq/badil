@@ -8,7 +8,7 @@ From an empty cluster to a first preview. Contract details live in the [Configur
 - An ingress controller with TLS for the badil webhook URL (GitHub calls it over https), plus wildcard DNS when preview URLs are used.
 - A GitHub gitops repo, and service repos whose CI pushes images tagged as the `imageTag` format of `badil.yaml` renders the commit SHA (the full SHA by default), all under the one account (user or org) the App is installed on. `/v1/deploy` must send the full SHA: see [`imageTag`](CONFIGURATION.md#imagetag).
 - Service images pullable from the preview namespaces: `preview-apps` creates each namespace fresh, with no `imagePullSecrets`. Use public images, node-level registry credentials, or pull secrets set by the service chart.
-- `kubectl`, Helm 3.8+ and Go 1.27+ (for the `badil` CLI).
+- `kubectl` and Helm 3.8+. The `badil` CLI is optional (`verify-app`, `list`, `wait`): see [Install the badil CLI](#install-the-badil-cli).
 
 ## 2. Gitops repo
 
@@ -75,7 +75,7 @@ Choose the https host GitHub will call, e.g. `https://badil.example.com`, and cr
    EOF
    chmod 600 .env
    ```
-4. Create the gitops repo token. The App has Contents read only: badil pushes to the gitops repo with a token of its own (see [Gitops repo credentials](CONFIGURATION.md#gitops-repo-credentials)). On GitHub, create a machine user, a GitHub account for badil alone, give it write access to the gitops repo only, and create for it a fine-grained personal access token with access to the gitops repo only and the repository permission Contents read and write. Put the token into `GITOPS_REPO_TOKEN` in `.env`, then run `. ./.env` again.
+4. Create the gitops repo token. The App has Contents read only: badil pushes to the gitops repo with a token of its own (see [Gitops repo credentials](CONFIGURATION.md#gitops-repo-credentials)). On GitHub, create a machine user, a GitHub account for badil alone, give it write access to the gitops repo only, and create for it a fine-grained personal access token with access to the gitops repo only and the repository permission Contents read and write. Put the token into `GITOPS_REPO_TOKEN` in `.env`.
 5. Optional: check the credentials. With `.env` loaded, `badil verify-app` prints the App and its installations; it needs the CLI ([Install the badil CLI](#install-the-badil-cli)).
 
    ```bash
