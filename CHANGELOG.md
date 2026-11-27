@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.32.0](https://github.com/badilhq/badil/compare/v0.31.0...v0.32.0) (2026-11-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* **cli:** badil bootstrap-app is removed; create the GitHub App by hand as INSTALL §5 says.
+
+### Features
+
+* **cli:** remove the bootstrap-app command ([#166](https://github.com/badilhq/badil/issues/166)) ([6b7d469](https://github.com/badilhq/badil/commit/6b7d4694d19d9629f50bf069eb007df0f02617f1))
+
 ## [0.31.0](https://github.com/badilhq/badil/compare/v0.30.2...v0.31.0) (2026-11-26)
 
 
