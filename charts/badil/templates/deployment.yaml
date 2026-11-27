@@ -59,14 +59,12 @@ spec:
                   fieldPath: metadata.namespace
             - name: METRICS_ADDR
               value: {{ ternary (printf ":%v" .Values.metrics.port) "" .Values.metrics.enabled | quote }}
-            {{- if not .Values.cleanup.enabled }}
             {{- with .Values.cleanup.interval }}
             - name: CLEANUP_INTERVAL
               value: {{ . | quote }}
             {{- with $.Values.cleanup.ttl }}
             - name: CLEANUP_TTL
               value: {{ . | quote }}
-            {{- end }}
             {{- end }}
             {{- end }}
           # serve clones the gitops repo before it listens: allow 5 minutes

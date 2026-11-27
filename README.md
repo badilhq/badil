@@ -31,7 +31,7 @@ A shared staging environment makes changes wait in line to be validated and inte
 2. Adding the `preview` label to the PR makes badil write `previews/<slug>/values.yaml` (every catalog service, the PR's at its head SHA where it changes them when they declare `paths`; with `needs` in `badil.yaml`, only the preview's pinned services and what they need) and comment on the PR; a push to the labeled PR updates it. With `paths` in `badil.yaml`, a labelled PR pins only the services it changes. The slug is the PR's branch, slugified; a `preview:<name>` label picks the preview name instead.
 3. An ArgoCD ApplicationSet picks up `previews/*` and deploys one namespace per preview, one Application per service, and one per dependency: an upstream chart from an OCI registry or a Helm repository (postgres, redis) declared in `badil.yaml`, with no git repo of its own.
 4. Removing the label or closing the PR unpins its service, or deletes the file when no PR remains, and ArgoCD prunes the preview.
-5. `badil cleanup` (in the server on an interval, or an hourly CronJob) sweeps every preview: it deletes previews with no pinned service, or with no deploy within `CLEANUP_TTL` when set, and tears down the pins of closed PRs that step 4 missed, and of open PRs whose label moved, conflicts or is gone. It then rewrites each preview it keeps to match `badil.yaml`. ArgoCD prunes what it removes.
+5. The cleanup sweep, run in the server every `CLEANUP_INTERVAL`, goes over every preview: it deletes previews with no pinned service, or with no deploy within `CLEANUP_TTL` when set, and tears down the pins of closed PRs that step 4 missed, and of open PRs whose label moved, conflicts or is gone. It then rewrites each preview it keeps to match `badil.yaml`. ArgoCD prunes what it removes.
 
 ### Sharing a preview across repos
 
@@ -81,7 +81,7 @@ The gitops repo can start from the template [`badilhq/gitops-template`](https://
 
 Pre-1.0, and the v1 scope is complete. The full loop (label a PR, preview deployed by Argo CD, URLs tested, merge, teardown) runs end to end on a k3d testbed with a four-service demo.
 
-Working: label-triggered previews per branch or per `preview:<name>` label across repos, per-service chart overrides, upstream chart dependencies, teardown when a PR closes or loses its label, a cleanup sweep with optional TTL (in the server or as a CronJob), the manual `/v1/deploy` endpoint, previews synced when `badil.yaml` changes (push webhook, or `/v1/sync`), PR comments with preview links, Prometheus metrics and a Grafana dashboard, preview status and spin-up time from the renderer's status callback, and GitHub deployments through Argo CD notifications.
+Working: label-triggered previews per branch or per `preview:<name>` label across repos, per-service chart overrides, upstream chart dependencies, teardown when a PR closes or loses its label, an in-server cleanup sweep with optional TTL, the manual `/v1/deploy` endpoint, previews synced when `badil.yaml` changes (push webhook, or `/v1/sync`), PR comments with preview links, Prometheus metrics and a Grafana dashboard, preview status and spin-up time from the renderer's status callback, and GitHub deployments through Argo CD notifications.
 
 Until 1.0, env vars, metric names, annotations and chart values can still change between minor releases; the [CHANGELOG](CHANGELOG.md) marks breaking changes.
 
@@ -89,7 +89,6 @@ Until 1.0, env vars, metric names, annotations and chart values can still change
 
 ```bash
 badil serve           # API + webhook server
-badil cleanup         # stale preview cleanup
 badil list            # list previews and their status
 badil wait            # wait for a PR's or a slug's preview to be ready
 badil version         # print the version (also badil --version)
@@ -105,7 +104,7 @@ Local setup: [DEVELOPMENT.md](DEVELOPMENT.md).
 
 | Chart | Purpose |
 |---|---|
-| [`charts/badil`](charts/badil) | Installs the badil server; the cleanup sweep runs in the server hourly by default, the cleanup CronJob is disabled by default |
+| [`charts/badil`](charts/badil) | Installs the badil server; the cleanup sweep runs in the server hourly by default |
 | [`charts/preview-apps`](charts/preview-apps) | One preview: AppProject, Namespace, one ArgoCD Application per service and per dependency |
 | [`charts/app`](charts/app) | Generic service chart; service charts wrap it as a dependency aliased `app` |
 

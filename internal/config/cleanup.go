@@ -23,11 +23,6 @@ func LoadSweepSchedule() (time.Duration, time.Duration, error) {
 	return interval, ttl, nil
 }
 
-// LoadCleanupTTL reads CLEANUP_TTL (ParseCleanupTTL).
-func LoadCleanupTTL() (time.Duration, error) {
-	return ParseCleanupTTL(os.Getenv("CLEANUP_TTL"))
-}
-
 // ParseCleanupInterval parses CLEANUP_INTERVAL. Empty means no in-server
 // sweep (0); otherwise it must be a Go duration of at least
 // minCleanupInterval.

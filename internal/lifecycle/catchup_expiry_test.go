@@ -137,7 +137,7 @@ func TestCatchUp_SkipsTTLExpiredPRAtSameHead(t *testing.T) {
 		t.Errorf("case 1: record of %s = %+v (ok %v), want s1, %s, %v", key, rec, ok, pr.URL, now)
 	}
 
-	// Case 3: a fresh CatchUp, as badil cleanup builds one per run, still
+	// Case 3: a fresh CatchUp, as after a restart, still
 	// skips it at the same head.
 	r = &reconciles{}
 	newCatchUp(r).Run(context.Background())

@@ -260,7 +260,7 @@ jobs:
           fi
 
       - name: Render badil with all components
-        run: helm template t charts/badil -f charts/badil/ci/test-values.yaml --set ingress.enabled=true,ingress.host=badil.example.com,cleanup.enabled=true,metrics.serviceMonitor.enabled=true,dashboard.enabled=true
+        run: helm template t charts/badil -f charts/badil/ci/test-values.yaml --set ingress.enabled=true,ingress.host=badil.example.com,metrics.serviceMonitor.enabled=true,dashboard.enabled=true
 
       - name: Render badil ingress paths
         run: |
@@ -286,22 +286,24 @@ jobs:
             exit 1
           fi
 
-      - name: Render badil cleanup TTL
+      - name: Render badil sweep TTL
         run: |
-          # Prints "CronJob:" then its CLEANUP_TTL as "<tag> <value>"; nothing without a CronJob.
-          ttl_env() {
-            helm template t charts/badil -f charts/badil/ci/test-values.yaml --set "cleanup.enabled=true$1" \
-              | yq -N 'select(.kind == "CronJob") | .kind + ":" + ([.spec.jobTemplate.spec.template.spec.containers[0].env[] | select(.name == "CLEANUP_TTL") | .value | tag + " " + .] | join(","))'
+          # GitHub runs this step with bash -e and no pipefail: without it a failed helm template would print nothing.
+          set -o pipefail
+          # Prints "Deployment:" then the badil container's CLEANUP_INTERVAL and CLEANUP_TTL as "<name>=<tag> <value>".
+          sweep_env() {
+            helm template t charts/badil -f charts/badil/ci/test-values.yaml "$@" \
+              | yq -N 'select(.kind == "Deployment") | .kind + ":" + ([.spec.template.spec.containers[] | select(.name == "badil") | .env[] | select(.name == "CLEANUP_INTERVAL" or .name == "CLEANUP_TTL") | .name + "=" + (.value | tag) + " " + .value] | join(","))'
           }
-          got=$(ttl_env ,cleanup.ttl=168h)
-          if [ "$got" != 'CronJob:!!str 168h' ]; then
-            echo '::error::expected CLEANUP_TTL "168h" on the cleanup CronJob when cleanup.ttl is set'
+          got=$(sweep_env --set cleanup.ttl=168h)
+          if [ "$got" != 'Deployment:CLEANUP_INTERVAL=!!str 1h,CLEANUP_TTL=!!str 168h' ]; then
+            echo '::error::expected CLEANUP_INTERVAL "1h" and CLEANUP_TTL "168h" on the Deployment when cleanup.ttl is set'
             printf 'got: %s\n' "$got"
             exit 1
           fi
-          got=$(ttl_env "")
-          if [ "$got" != 'CronJob:' ]; then
-            echo '::error::expected no CLEANUP_TTL on the cleanup CronJob when cleanup.ttl is unset'
+          got=$(sweep_env)
+          if [ "$got" != 'Deployment:CLEANUP_INTERVAL=!!str 1h' ]; then
+            echo '::error::expected no CLEANUP_TTL on the Deployment when cleanup.ttl is unset'
             printf 'got: %s\n' "$got"
             exit 1
           fi
@@ -366,32 +368,12 @@ jobs:
             "$(want argocd argocd-application-controller)" \
             --set namespaceGuard.enabled=true,namespaceGuard.renderer=null
 
-      - name: Render badil cleanup token
+      - name: Render badil sweep interval and ServiceMonitor
         run: |
-          got=$(helm template t charts/badil -f charts/badil/ci/test-values.yaml --set cleanup.enabled=true \
-            | yq -N 'select(.kind == "CronJob") | .spec.jobTemplate.spec.template.spec.automountServiceAccountToken')
-          if [ "$got" != 'true' ]; then
-            echo '::error::expected automountServiceAccountToken true on the cleanup CronJob pod, for its namespace check'
-            printf 'got: %s\n' "$got"
-            exit 1
-          fi
-
-      - name: Render badil cleanup interval and ServiceMonitor
-        run: |
-          # Prints the Deployment's CLEANUP_INTERVAL as "<tag> <value>" and "CronJob" when one renders.
-          cleanup() {
-            helm template t charts/badil -f charts/badil/ci/test-values.yaml "$@" \
-              | yq -N '(select(.kind == "Deployment") | .spec.template.spec.containers[0].env[] | select(.name == "CLEANUP_INTERVAL") | .value | tag + " " + .), (select(.kind == "CronJob") | .kind)'
-          }
-          got=$(cleanup)
+          got=$(helm template t charts/badil -f charts/badil/ci/test-values.yaml \
+            | yq -N 'select(.kind == "Deployment") | .spec.template.spec.containers[0].env[] | select(.name == "CLEANUP_INTERVAL") | .value | tag + " " + .')
           if [ "$got" != '!!str 1h' ]; then
-            echo '::error::expected CLEANUP_INTERVAL "1h" on the Deployment and no CronJob by default'
-            printf 'got: %s\n' "$got"
-            exit 1
-          fi
-          got=$(cleanup --set cleanup.enabled=true)
-          if [ "$got" != 'CronJob' ]; then
-            echo '::error::expected no CLEANUP_INTERVAL on the Deployment and a CronJob with cleanup.enabled=true'
+            echo '::error::expected CLEANUP_INTERVAL "1h" on the Deployment by default'
             printf 'got: %s\n' "$got"
             exit 1
           fi
@@ -453,64 +435,59 @@ jobs:
 
       - name: Render badil required gitops repo token
         run: |
-          out=$(helm template t charts/badil -f charts/badil/ci/test-values.yaml --set cleanup.enabled=true)
           ref='select(.name == "GITOPS_REPO_TOKEN") | .valueFrom.secretKeyRef | .name + " " + .key + " optional:" + (has("optional") | to_string)'
-          deploy=$(echo "$out" | yq -N "select(.kind == \"Deployment\") | .spec.template.spec.containers[0].env[] | $ref")
-          cron=$(echo "$out" | yq -N "select(.kind == \"CronJob\") | .spec.jobTemplate.spec.template.spec.containers[0].env[] | $ref")
-          if [ "$deploy" != 'badil gitops-repo-token optional:false' ] || [ "$cron" != 'badil gitops-repo-token optional:false' ]; then
-            echo '::error::expected GITOPS_REPO_TOKEN from required key gitops-repo-token of Secret badil on the Deployment and the CronJob'
-            printf 'got: Deployment %s, CronJob %s\n' "$deploy" "$cron"
+          got=$(helm template t charts/badil -f charts/badil/ci/test-values.yaml \
+            | yq -N "select(.kind == \"Deployment\") | .spec.template.spec.containers[0].env[] | $ref")
+          if [ "$got" != 'badil gitops-repo-token optional:false' ]; then
+            echo '::error::expected GITOPS_REPO_TOKEN from required key gitops-repo-token of Secret badil on the Deployment'
+            printf 'got: %s\n' "$got"
             exit 1
           fi
 
       - name: Render badil gitops commit identity and signing key
         run: |
           # Prints "<kind>:" then GITOPS_COMMIT_NAME and GITOPS_COMMIT_EMAIL as "<name>=<value>" and the Secret key of
-          # GITOPS_SIGNING_KEY as "<secret> <key> optional:<optional>", for the Deployment then the CronJob.
+          # GITOPS_SIGNING_KEY as "<secret> <key> optional:<optional>", for the Deployment.
           commit_env() {
             vars='[.[] | select(.name == "GITOPS_COMMIT_NAME" or .name == "GITOPS_COMMIT_EMAIL") | .name + "=" + .value] | join(",")'
             key='[.[] | select(.name == "GITOPS_SIGNING_KEY") | .valueFrom.secretKeyRef | .name + " " + .key + " optional:" + (.optional | to_string)] | join(",")'
-            helm template t charts/badil -f charts/badil/ci/test-values.yaml --set cleanup.enabled=true "$@" \
-              | yq -N "(select(.kind == \"Deployment\") | .kind + \":\" + (.spec.template.spec.containers[0].env | $vars) + \";\" + (.spec.template.spec.containers[0].env | $key)), (select(.kind == \"CronJob\") | .kind + \":\" + (.spec.jobTemplate.spec.template.spec.containers[0].env | $vars) + \";\" + (.spec.jobTemplate.spec.template.spec.containers[0].env | $key))"
+            helm template t charts/badil -f charts/badil/ci/test-values.yaml "$@" \
+              | yq -N "select(.kind == \"Deployment\") | .kind + \":\" + (.spec.template.spec.containers[0].env | $vars) + \";\" + (.spec.template.spec.containers[0].env | $key)"
           }
           got=$(commit_env)
-          want='Deployment:;badil gitops-signing-key optional:true
-          CronJob:;badil gitops-signing-key optional:true'
+          want='Deployment:;badil gitops-signing-key optional:true'
           if [ "$got" != "$want" ]; then
-            echo '::error::expected no GITOPS_COMMIT_NAME or GITOPS_COMMIT_EMAIL by default, and GITOPS_SIGNING_KEY from optional key gitops-signing-key of Secret badil, on the Deployment and the CronJob'
+            echo '::error::expected no GITOPS_COMMIT_NAME or GITOPS_COMMIT_EMAIL by default, and GITOPS_SIGNING_KEY from optional key gitops-signing-key of Secret badil, on the Deployment'
             printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
             exit 1
           fi
           got=$(commit_env --set config.gitopsCommitName=badil-gitops,config.gitopsCommitEmail=badil-gitops@users.noreply.github.com)
-          want='Deployment:GITOPS_COMMIT_NAME=badil-gitops,GITOPS_COMMIT_EMAIL=badil-gitops@users.noreply.github.com;badil gitops-signing-key optional:true
-          CronJob:GITOPS_COMMIT_NAME=badil-gitops,GITOPS_COMMIT_EMAIL=badil-gitops@users.noreply.github.com;badil gitops-signing-key optional:true'
+          want='Deployment:GITOPS_COMMIT_NAME=badil-gitops,GITOPS_COMMIT_EMAIL=badil-gitops@users.noreply.github.com;badil gitops-signing-key optional:true'
           if [ "$got" != "$want" ]; then
-            echo '::error::expected GITOPS_COMMIT_NAME and GITOPS_COMMIT_EMAIL on the Deployment and the CronJob when config.gitopsCommitName and config.gitopsCommitEmail are set'
+            echo '::error::expected GITOPS_COMMIT_NAME and GITOPS_COMMIT_EMAIL on the Deployment when config.gitopsCommitName and config.gitopsCommitEmail are set'
             printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
             exit 1
           fi
 
       - name: Render badil GitHub host
         run: |
-          # Prints "<kind>:" then GITHUB_URL and GITHUB_API_URL as "<name>=<value>", for the Deployment then the CronJob.
+          # Prints "<kind>:" then GITHUB_URL and GITHUB_API_URL as "<name>=<value>", for the Deployment.
           host_env() {
             vars='[.[] | select(.name == "GITHUB_URL" or .name == "GITHUB_API_URL") | .name + "=" + .value] | join(",")'
-            helm template t charts/badil -f charts/badil/ci/test-values.yaml --set cleanup.enabled=true "$@" \
-              | yq -N "(select(.kind == \"Deployment\") | .kind + \":\" + (.spec.template.spec.containers[0].env | $vars)), (select(.kind == \"CronJob\") | .kind + \":\" + (.spec.jobTemplate.spec.template.spec.containers[0].env | $vars))"
+            helm template t charts/badil -f charts/badil/ci/test-values.yaml "$@" \
+              | yq -N "select(.kind == \"Deployment\") | .kind + \":\" + (.spec.template.spec.containers[0].env | $vars)"
           }
           got=$(host_env)
-          want='Deployment:
-          CronJob:'
+          want='Deployment:'
           if [ "$got" != "$want" ]; then
-            echo '::error::expected no GITHUB_URL or GITHUB_API_URL on the Deployment and the CronJob by default'
+            echo '::error::expected no GITHUB_URL or GITHUB_API_URL on the Deployment by default'
             printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
             exit 1
           fi
           got=$(host_env --set config.githubURL=https://ghe.example.com,config.githubAPIURL=https://ghe.example.com/api/v3/)
-          want='Deployment:GITHUB_URL=https://ghe.example.com,GITHUB_API_URL=https://ghe.example.com/api/v3/
-          CronJob:GITHUB_URL=https://ghe.example.com,GITHUB_API_URL=https://ghe.example.com/api/v3/'
+          want='Deployment:GITHUB_URL=https://ghe.example.com,GITHUB_API_URL=https://ghe.example.com/api/v3/'
           if [ "$got" != "$want" ]; then
-            echo '::error::expected GITHUB_URL and GITHUB_API_URL on the Deployment and the CronJob when config.githubURL and config.githubAPIURL are set'
+            echo '::error::expected GITHUB_URL and GITHUB_API_URL on the Deployment when config.githubURL and config.githubAPIURL are set'
             printf 'got:\n%s\nwant:\n%s\n' "$got" "$want"
             exit 1
           fi

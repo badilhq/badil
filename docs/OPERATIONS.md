@@ -27,13 +27,13 @@ Every label has a closed set of values. Go runtime (`go_*`) and process (`proces
 | `badil_catchup_reconciles_total` | counter | | Reconciles started by [catch-up](EVENTS.md#catch-up), at server start and after each in-server sweep. Each is also counted in `badil_reconciles_total` once it runs. |
 | `badil_status_events_total` | counter | `status`, `result` | Valid, authorized events of [`/webhooks/status`](API.md#post-webhooksstatus). `status` is the reported status: `ready`, `progressing`, `degraded` or `sync-failed`. `result` is `recorded`, `ignored` (unknown preview, unknown service or stale) or `error` (the preview read failed: answered 503). 400 and 401 answers are not counted. |
 
-### Gauges and the CronJob
+### Gauges
 
-`badil_sweep_last_success_timestamp_seconds` is always exported and reads 0 until the first in-server sweep. With the CronJob alone, it stays at 0.
+`badil_sweep_last_success_timestamp_seconds` is always exported and reads 0 until the first in-server sweep.
 
 `badil_previews` is set at server startup, from a listing taken before the server accepts requests and limited to 10 seconds. When that listing fails, the gauge stays as it is until the next in-server sweep or restart.
 
-Deletions made by the `badil cleanup` CronJob show only after the next server restart or in-server sweep.
+Deletions made outside the server, such as a manual commit, show only after the next server restart or in-server sweep.
 
 ## Preview status
 
@@ -45,17 +45,15 @@ badil keeps the latest status per preview and service:
 - **In one ConfigMap per preview** in badil's namespace (`POD_NAMESPACE`): `badil-status-<slug>`, labelled `app.kubernetes.io/managed-by: badil` and `badil.dev/preview: <slug>`, one `data` key per service holding `{"revision", "status", "at"}`. Writes are coalesced: each preview's ConfigMap is written at most once every 5 s, with the full status of the preview, and once more on graceful shutdown. A failed write is logged and retried at the next flush.
 - **On start**, before it listens, badil lists those ConfigMaps and rebuilds memory from them. A failed listing stops the server.
 
-When a preview is deleted, its status and ConfigMap go: at once when the server's own commit deleted it, and otherwise (`badil cleanup`, a manual deletion) after the next fetch of the gitops repo that moves its head, and at start.
+When a preview is deleted, its status and ConfigMap go: at once when the server's own commit deleted it, and otherwise (a manual deletion) after the next fetch of the gitops repo that moves its head, and at start.
 
 The chart's Role lets badil get, list, create, update and delete ConfigMaps in its namespace, nothing else: the status ConfigMaps and `badil-expired` (see [Expired PRs](#expired-prs)). Its ClusterRole, `<release>-namespaces`, only lets it get namespaces, for the [namespace check](EVENTS.md#namespace-in-use) of a new preview. Outside a cluster, or without `POD_NAMESPACE`, the status is kept in memory only and badil logs `status persistence disabled` at start.
-
-Only `badil serve` keeps status. `badil cleanup` gets namespaces, for the namespace check of its catch-up, and reads and writes `badil-expired`.
 
 ### Expired PRs
 
 When the sweeper deletes a preview for `CLEANUP_TTL`, badil records each of its open PRs at its head SHA, so that [catch-up](EVENTS.md#catch-up) does not recreate the preview (see [Cleanup](CLEANUP.md#what-the-sweeper-catches)). The records live in the ConfigMap `badil-expired` of badil's namespace (`POD_NAMESPACE`), labelled `app.kubernetes.io/managed-by: badil`. Each `data` key is the first 32 hex characters of the SHA-256 of the PR's key (`<owner>/<repo>#<number>`, owner and repo lowercased); its value is `{"key", "pr", "sha", "at"}`: the PR's key, its URL, the head SHA it expired at and when.
 
-- **Writers:** `badil serve` (its sweep, its catch-up and its deploys) and the cleanup CronJob's `badil cleanup` write it concurrently. Each write reads the ConfigMap again and changes only its own keys, retrying a conflicting write up to 3 times.
+- **Writers:** `badil serve`'s sweep, catch-up and deploys write it concurrently. Each write reads the ConfigMap again and changes only its own keys, retrying a conflicting write up to 3 times.
 - **Cleared:** a deploy of the PR, by a label event, a push, catch-up or `/v1/deploy`, or a catch-up that lists the PR at another head SHA, removes its record.
 - **Pruned:** each catch-up drops the records of PRs whose repo is no longer in `badil.yaml`, or whose repo it listed without them (the PR was closed or merged). Records of a repo whose listing failed are kept. A value that does not decode is dropped.
 

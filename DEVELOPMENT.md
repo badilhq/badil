@@ -21,7 +21,7 @@ ngrok http 8080
 # Create a token with Contents write on the gitops repo and set it in .env (GITOPS_REPO_TOKEN=...)
 
 make dev-serve             # starts the server
-make dev-cleanup           # runs one cleanup sweep (CLEANUP_TTL=168h make dev-cleanup to also expire idle previews)
+CLEANUP_INTERVAL=1m make dev-serve   # also runs the cleanup sweep, the first one a minute after start
 ```
 
 The sections below detail each step.

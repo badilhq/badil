@@ -115,7 +115,7 @@ Any held entry refuses the whole PR, for every target, branch or named, since tw
 
 The reconcile logs `preview reconcile skipped` with reason `service held by another pr` and a `holder` attribute. A preview file that can't be read logs `preview reconcile failed` and deploys nothing.
 
-The holder PR is never read: a holder left by a missed event is released by the sweeper. A refused PR is not retried when the holder leaves, except by [catch-up](#catch-up): `badil serve` reconciles it again once per head SHA per process, and `badil cleanup` starts each run with an empty seen map, so it reconciles refused PRs again on every run. A freed holder is therefore picked up at the next `badil cleanup` run, or in `badil serve` at a new head SHA or after a restart. Since the cleanup runs first, the refused PR has already left its previous preview, as its labels ask.
+The holder PR is never read: a holder left by a missed event is released by the sweeper. A refused PR is retried at its next push, at a relabel, after a restart (by [catch-up](#catch-up), which reconciles it again once per head SHA per process), or by `/v1/deploy`. A released holder is not picked up on its own until then. Since the cleanup runs first, the refused PR has already left its previous preview, as its labels ask.
 
 The check is decided on the head the reconcile's commit is made on, and again on every push attempt: a push is rejected when any other commit landed since, whoever made it. So it does not rely on reconciles being serialized in one replica. `/v1/deploy` skips the check: it stays last-writer-wins and can overwrite a holder's pin.
 
@@ -133,7 +133,7 @@ The preview limit (<max>) is reached. Once a preview is torn down, push to this 
 
 It logs `preview reconcile skipped` with reason `preview limit reached` and a `max_previews` attribute.
 
-A refused PR is not retried when a slot frees, except by [catch-up](#catch-up): `badil serve` reconciles it again once per head SHA per process, and `badil cleanup` starts each run with an empty seen map, so it reconciles refused PRs again on every run. A freed slot is therefore picked up at the next `badil cleanup` run, or in `badil serve` at a new head SHA or after a restart. Since the cleanup runs first, the refused PR has already left its previous preview.
+A refused PR is retried at its next push, at a relabel, after a restart (by [catch-up](#catch-up), which reconciles it again once per head SHA per process), or by `/v1/deploy`. A freed cap slot is not picked up on its own until then. Since the cleanup runs first, the refused PR has already left its previous preview.
 
 The cap check of `/v1/deploy` is described in [`POST /v1/deploy`](API.md#post-v1deploy).
 
@@ -157,7 +157,7 @@ It logs `preview reconcile skipped` with reason `namespace in use`.
 
 A failed check, such as an unreachable API server, `Forbidden` without the ClusterRole, or a pod without a ServiceAccount token, fails the reconcile: it logs `preview reconcile failed` with `namespace check failed: <error>` and commits only the PR's teardowns from its other previews. [Catch-up](#catch-up) or the PR's next event retries it.
 
-A refused PR is retried as one over the preview cap: by catch-up, once per head SHA in `badil serve` and on every `badil cleanup` run. Both check the namespace.
+A refused PR is retried as one over the preview cap: at its next push, at a relabel, after a restart, or by `/v1/deploy`. Each retry checks the namespace.
 
 The check runs on every push attempt, and `/v1/deploy` runs it too (see [`POST /v1/deploy`](API.md#post-v1deploy)). A namespace created after the check and before Argo CD syncs the new preview, at most one ApplicationSet poll later, is still adopted. Outside a cluster, badil logs `namespace check disabled` at start and checks nothing.
 
@@ -192,7 +192,7 @@ It logs `preview reconcile skipped` with reason `labeller without write access` 
 
 Any other failed events or permission read fails the reconcile: it logs `preview reconcile failed` with `labeller check failed: <error>` and writes nothing, not even the PR's teardowns from its other previews. [Catch-up](#catch-up) or the PR's next event retries it.
 
-A refused PR is retried as one over the preview cap: by catch-up, once per head SHA in `badil serve` and on every `badil cleanup` run. A user with write access who removes the label and adds it again becomes the newest labeller, and the next reconcile deploys.
+A refused PR is retried as one over the preview cap: at its next push, at a relabel, after a restart, or by `/v1/deploy`. A user with write access who removes the label and adds it again becomes the newest labeller, and the next reconcile deploys.
 
 ## Reconcile queue
 
@@ -210,9 +210,8 @@ A deploy is not lost to a delivery that arrives while badil is down or restartin
 
 - When `badil serve` starts, in the background once the gitops clone is ready, without delaying readiness.
 - After each in-server sweep, whether it succeeded or failed. It does not start once shutdown has begun.
-- After the sweep of each `badil cleanup` run, whether it succeeded or failed.
 
-With `CLEANUP_INTERVAL` unset and no CronJob, it runs only at start. Each run, listing and queueing, is bounded by 10 minutes, apart from the sweep's own bound. Once that bound expires, or shutdown begins, the run lists no more repos and queues no more reconciles; it still logs its `catch-up` line.
+With `CLEANUP_INTERVAL` unset, it runs only at start. Each run, listing and queueing, is bounded by 10 minutes, apart from the sweep's own bound. Once that bound expires, or shutdown begins, the run lists no more repos and queues no more reconciles; it still logs its `catch-up` line.
 
 ### Which PRs
 
@@ -228,10 +227,10 @@ Each listed PR is decided in this order:
 6. A PR is skipped when it is in the seen map at its head SHA, or when a catch-up reconcile of it is still queued or running.
 7. Any other PR is reconciled.
 
-The seen map holds, per PR, the head SHA its last catch-up reconcile was started at, once that reconcile completed with an outcome other than `failed`. A reconcile that fails, or never completes (dropped at shutdown, or panicked), leaves the PR out of it, so the next run reconciles it again at the same head SHA. A PR that never gets a pin (no service changed, held by another PR, preview cap reached, namespace in use, labeller without write access, conflicting labels) is therefore reconciled once per head SHA. `badil serve` keeps the seen map for the life of the process; each `badil cleanup` run starts with an empty one.
+The seen map holds, per PR, the head SHA its last catch-up reconcile was started at, once that reconcile completed with an outcome other than `failed`. A reconcile that fails, or never completes (dropped at shutdown, or panicked), leaves the PR out of it, so the next run reconciles it again at the same head SHA. A PR that never gets a pin (no service changed, held by another PR, preview cap reached, namespace in use, labeller without write access, conflicting labels) is therefore reconciled once per head SHA. `badil serve` keeps the seen map for the life of the process; a restart starts with an empty one.
 
 ### How
 
-Each PR gets the reconcile a `synchronize` delivery carrying its listed labels gets, so its outcome, comments and metrics are those of a delivery, and it reads the PR again. In `badil serve` it goes through the [reconcile queue](#reconcile-queue), with the same 20s budget, and never runs alongside another reconcile. `badil cleanup` reconciles the PRs one after another, each with a 20s budget. Its exit code stays the sweep's: catch-up's listing failures and failed reconciles are only logged and counted.
+Each PR gets the reconcile a `synchronize` delivery carrying its listed labels gets, so its outcome, comments and metrics are those of a delivery, and it reads the PR again. It goes through the [reconcile queue](#reconcile-queue), with the same 20s budget, and never runs alongside another reconcile. Catch-up's listing failures and failed reconciles are only logged and counted.
 
 Each run logs `catch-up` with `repos`, `open_labelled` (PRs with a preview label, forks included), `reconciled`, `skipped_pinned`, `skipped_seen`, `skipped_expired` (step 3) and `list_errors`. Before that line, the run prunes the expired PRs' records (see [Expired PRs](OPERATIONS.md#expired-prs)); a failed prune logs `expiry prune failed` with `err`. A record that can't be cleared, at step 3 or once a deploy pins the PR, logs `expiry clear failed` with `repo`, `pr_number` and `err`. A `badil.yaml` that can't be read logs `catch-up failed` and lists nothing. The reconciles a run starts are counted in `badil_catchup_reconciles_total` (see [Metrics](OPERATIONS.md#metric-list)).

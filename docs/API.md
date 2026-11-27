@@ -180,13 +180,13 @@ The state of a PR is decided in this order:
 3. `pending` when no preview has an entry whose `metadata.pr-url` names the PR (owner and repo in any letter case) and, with `sha`, whose `commitSha` matches it.
 4. The state of the wait set in that preview: `failed`, reason `<service> is <status> at <revision>`, when an entry is failed; `ready` when every entry is ready; `progressing` otherwise.
 
-badil keeps the latest reconcile outcome of each PR in memory only. After a restart, [catch-up](EVENTS.md#catch-up) reconciles each open labelled PR not pinned at head, and records `not labeled` and `fork pr` for the other open PRs of the catalog's repos, unless the PR's outcome was recorded after catch-up started listing its repo; until then, a refused PR reads `pending`. The reconciles of `badil cleanup` run in another process and are not recorded: their effect reaches the waits through badil's next fetch of the gitops repo.
+badil keeps the latest reconcile outcome of each PR in memory only. After a restart, [catch-up](EVENTS.md#catch-up) reconciles each open labelled PR not pinned at head, and records `not labeled` and `fork pr` for the other open PRs of the catalog's repos, unless the PR's outcome was recorded after catch-up started listing its repo; until then, a refused PR reads `pending`.
 
 **SHAs.** Two SHAs, `sha` against a `commitSha` or a reconcile's head SHA, match when both are set and, in lowercase, the longer starts with the shorter: `POST /v1/deploy` accepts a short `commit_sha`, while Argo CD reports full SHAs. A status's revision is at a pin when it starts with the entry's `commitSha`.
 
 **Wait set.** The PR's pinned entries in the preview, plus every service and dependency in the transitive [`needs`](CONFIGURATION.md#servicesnameneeds-and-dependenciesnameneeds) of those that are catalog services. Without `needs`, it is the PR's pinned entries. A pinned entry is `ready` when its status is `ready` at its pin, and failed when it is `degraded` or `sync-failed` at its pin; another entry is `ready` when its latest status is `ready`, and failed when it is `degraded` or `sync-failed`. Anything else, `unknown` included, is not ready.
 
-**Long poll.** A final state answers at once. Otherwise the request waits until a status event, a commit badil pushes, a fetch that moves the gitops repo's head (a push by `badil cleanup` or by hand) or a recorded reconcile outcome changes the state, then answers; after 25s it answers the current state. When badil shuts down, every waiting request answers its current state at once.
+**Long poll.** A final state answers at once. Otherwise the request waits until a status event, a commit badil pushes, a fetch that moves the gitops repo's head (a push by hand) or a recorded reconcile outcome changes the state, then answers; after 25s it answers the current state. When badil shuts down, every waiting request answers its current state at once.
 
 ### Wait response
 

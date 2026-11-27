@@ -49,7 +49,6 @@ func rootCmd() *cobra.Command {
 	}
 
 	root.AddCommand(serveCmd())
-	root.AddCommand(cleanupCmd())
 	root.AddCommand(listCmd())
 	root.AddCommand(waitCmd())
 	root.AddCommand(versionCmd())
@@ -242,39 +241,4 @@ func newApp(cfg *config.Config) (*github.App, error) {
 		return nil, fmt.Errorf("creating github app: %w", err)
 	}
 	return app, nil
-}
-
-// cleanupCmd runs one sweep over the gitops repo's previews: previews with no
-// pin are deleted, previews idle for longer than CLEANUP_TTL (when set) are
-// deleted, and pins of closed PRs are torn down. A catch-up follows it
-// (app.RunCleanup).
-func cleanupCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "cleanup",
-		Short: "Delete stale and expired preview environments",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := config.Load()
-			if err != nil {
-				return fmt.Errorf("loading config: %w", err)
-			}
-			ttl, err := config.LoadCleanupTTL()
-			if err != nil {
-				return err
-			}
-			ghApp, err := newApp(cfg)
-			if err != nil {
-				return err
-			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), app.CleanupTimeout)
-			defer cancel()
-			st, f, err := newStoreAndForge(ctx, ghApp, cfg)
-			if err != nil {
-				return err
-			}
-			defer closeStore(ctx, st)
-			expiry := expirykube.InCluster(ctx)
-			catchUp := app.CleanupCatchUp(st, f, namespace.InCluster(ctx), expiry)
-			return app.RunCleanup(cmd.Context(), ctx, app.SweepAPI(st, f, nil, expiry), catchUp, time.Now().UTC(), ttl)
-		},
-	}
 }

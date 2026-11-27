@@ -52,11 +52,10 @@ badil is a few binaries and charts. Each service repo adds its own chart.
 | Component | Where | Role |
 |---|---|---|
 | `badil serve` | this repo | chi HTTP server: the GitHub webhook, the renderer's status callback, and the optional deploy and sync endpoints. Keeps each preview's status in memory and in a ConfigMap of its namespace. See the [HTTP API reference](API.md). |
-| `badil cleanup` | this repo | One-shot [cleanup sweep](#cleanup-sweep), run by a CronJob (hourly). |
 | `preview-apps` chart | this repo, [`charts/preview-apps`](../charts/preview-apps) | The [renderer](CONTRACT.md#preview-contract) badil ships: an AppProject, a Namespace, and one Argo CD Application per service and per dependency. Application annotations `preview.badil.dev/*` carry the PR metadata. |
 | ApplicationSet | this repo, [`examples/argocd`](../examples/argocd) | Git directory generator on `previews/*`. |
 | Service chart | each service repo | Built on the `app` chart, [`charts/app`](../charts/app). See the [Service repo contract](CONFIGURATION.md#service-repo-contract). |
-| `badil` chart | this repo, [`charts/badil`](../charts/badil) | Installs `badil serve` (Deployment, Service, optional Ingress, a Role for the ConfigMaps of its namespace, and a ClusterRole with `get` on namespaces) and the cleanup CronJob (off by default). |
+| `badil` chart | this repo, [`charts/badil`](../charts/badil) | Installs `badil serve` (Deployment, Service, optional Ingress, a Role for the ConfigMaps of its namespace, and a ClusterRole with `get` on namespaces). |
 
 ## How a preview flows
 
@@ -143,7 +142,7 @@ Key: [`paths`](CONFIGURATION.md#servicesnamepaths). Rules: [Path filters](SERVIC
 
 The cleanup sweep fixes what missed webhooks leave behind, for example when badil was down or a label was renamed.
 
-It runs in the server every `CLEANUP_INTERVAL`, or as the `badil cleanup` CronJob. For each preview, it deletes the file when no service is pinned, or when no deploy happened within `CLEANUP_TTL`. Otherwise it unpins closed PRs, and open PRs whose label moved, conflicts or is gone. It then rewrites every preview it keeps to match `badil.yaml`.
+It runs in the server every `CLEANUP_INTERVAL`. For each preview, it deletes the file when no service is pinned, or when no deploy happened within `CLEANUP_TTL`. Otherwise it unpins closed PRs, and open PRs whose label moved, conflicts or is gone. It then rewrites every preview it keeps to match `badil.yaml`.
 
 Rules: [Cleanup sweep](CLEANUP.md#cleanup-sweep).
 
@@ -176,7 +175,7 @@ flowchart LR
 
 - badil records an event only for a preview and a service the gitops repo has, and only when it is not older than the stored status.
 - Memory is the source of truth for reads. Each preview's status is written to one ConfigMap of badil's namespace, coalesced, and read back on start, so a restart keeps it.
-- A deleted preview loses its status and ConfigMap: at once when the server's own commit deleted it, and otherwise once a fetch moves the gitops repo's head past the deletion (`badil cleanup`, a manual deletion).
+- A deleted preview loses its status and ConfigMap: at once when the server's own commit deleted it, and otherwise once a fetch moves the gitops repo's head past the deletion (a manual deletion).
 - badil's Kubernetes access is limited to its own namespace's ConfigMaps (a Role with get, list, create, update and delete) and `get` on namespaces (a ClusterRole), used only to check a new preview's namespace (see [Namespace in use](EVENTS.md#namespace-in-use)). It never writes namespaces nor reads what is in them; the renderer still does every deploy and deletion.
 - The first `ready` of a pinned service at its pinned revision gives its spin-up time.
 

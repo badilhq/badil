@@ -59,8 +59,8 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 // TestStatusHooks checks serve's wiring of the status store to the gitops
 // store, with no in-server sweep: a preview deleted by a landed Apply loses
 // its status and ConfigMap through store.WithApplied, and one deleted by a
-// commit made outside the server (as badil cleanup does) loses them once a
-// fetch moves the head past it.
+// commit made outside the server (a manual commit) loses them once a fetch
+// moves the head past it.
 func TestStatusHooks(t *testing.T) {
 	remote := storetest.NewRemote(t, map[string]string{
 		"badil.yaml":                    "services: {}\n",

@@ -48,14 +48,9 @@ A missed `unlabeled` of a named label, or a label that moved, is unpinned by the
 
 ### Schedule
 
-The sweep runs in one of two places. Use one or the other: both run the same idempotent sweep, so running both only wastes work.
+The sweep runs in the server every `CLEANUP_INTERVAL` when it is set, starting one interval after startup. Runs never overlap, and shutdown cancels a run in progress. It exports the sweep metrics. The chart sets `cleanup.interval`, `1h` by default.
 
-- **In the server**, every `CLEANUP_INTERVAL` when it is set, starting one interval after startup. Runs never overlap, and shutdown cancels a run in progress. Only the in-server sweep exports the sweep metrics.
-- **As a CronJob**: otherwise `badil cleanup` runs it once per CronJob schedule (hourly by default).
-
-The chart runs the sweep in the server (`cleanup.interval`, `1h` by default) unless `cleanup.enabled=true` switches it to the CronJob.
-
-In both places, each sweep is followed by a [catch-up](EVENTS.md#catch-up), whether the sweep succeeded or failed: it reconciles the open labelled PRs not pinned at their head SHA, which repairs deploys whose deliveries were missed. `badil cleanup` exits with the sweep's error, whatever the catch-up does.
+Each sweep is followed by a [catch-up](EVENTS.md#catch-up), whether the sweep succeeded or failed: it reconciles the open labelled PRs not pinned at their head SHA, which repairs deploys whose deliveries were missed.
 
 ### Rules
 
@@ -121,7 +116,7 @@ A sweep is one commit, `chore(preview): sweep: delete <d>, unpin <u>, sync <s>`,
 
 The PR states rule 3 needs are read once, before the commit, one read per PR. A PR that a retried attempt finds pinned without its state read keeps its pins until the next sweep. The comments are posted once the commit is pushed.
 
-A preview file that can't be read is logged and the sweep goes on. The command then exits 1 and the Job fails without retrying (`backoffLimit: 0`). A failing closed-PR teardown is only logged. A failed commit fails the whole sweep. The next scheduled run retries all of them.
+A preview file that can't be read is logged and the sweep goes on; the sweep then logs `cleanup failed` and records a failed run (`badil_sweep_runs_total{result="error"}`). A failing closed-PR teardown is only logged. A failed commit fails the whole sweep. The next interval's sweep retries all of them.
 
 Comment fan-outs (deploy, teardown, expiry) skip closed PRs, so a closed PR keeps its teardown comment.
 
@@ -151,7 +146,7 @@ Otherwise every preview is synced with that content, in one commit, and its SHA 
 
 One config sync runs at a time in the server. Pushes and `/v1/sync` calls each wait their turn, in no guaranteed order. A push whose `badil.yaml` SHA a run before it synced stops at the SHA check, and each `/v1/sync` call gets its own answer.
 
-A run is one commit: `chore(preview): sync <slug> with badil.yaml` for one preview, `chore(preview): sync <n> previews with badil.yaml` for several. It is capped at 10 minutes (the sweep's bound), counted from when it starts running. Its commit is serialized with the other operations of the process, and a push rejected because the remote head moved is decided again on the new head, so concurrent writes, from the server or the cleanup CronJob, are safe.
+A run is one commit: `chore(preview): sync <slug> with badil.yaml` for one preview, `chore(preview): sync <n> previews with badil.yaml` for several. It is capped at 10 minutes (the sweep's bound), counted from when it starts running. Its commit is serialized with the other operations of the process, and a push rejected because the remote head moved is decided again on the new head, so concurrent writes, from the server or by hand, are safe.
 
 Shutdown waits for a push sync like for reconciles (up to 25s).
 
