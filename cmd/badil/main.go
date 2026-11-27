@@ -29,6 +29,10 @@ import (
 // then background teardowns share it, inside the default 30s pod grace period.
 const shutdownTimeout = 25 * time.Second
 
+// appCheckTimeout bounds serve's startup check of the GitHub App
+// credentials (newCheckedApp).
+const appCheckTimeout = 30 * time.Second
+
 func main() {
 	if err := rootCmd().Execute(); err != nil {
 		os.Exit(exitCode(err))
@@ -48,7 +52,6 @@ func rootCmd() *cobra.Command {
 	root.AddCommand(cleanupCmd())
 	root.AddCommand(listCmd())
 	root.AddCommand(waitCmd())
-	root.AddCommand(verifyAppCmd())
 	root.AddCommand(versionCmd())
 	return root
 }
@@ -73,13 +76,13 @@ func serveCmd() *cobra.Command {
 				m = metrics.New()
 			}
 
-			ghApp, err := newApp(cfg)
+			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			defer stop()
+
+			ghApp, err := newCheckedApp(ctx, cfg)
 			if err != nil {
 				return err
 			}
-
-			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-			defer stop()
 
 			previewStatus := statuskube.InCluster(ctx)
 			expiry := expirykube.InCluster(ctx)
@@ -133,6 +136,22 @@ func serveCmd() *cobra.Command {
 			return shutdownErr
 		},
 	}
+}
+
+// newCheckedApp builds the GitHub App from cfg (newApp), then checks its
+// credentials and the installation cfg.InstallationID (github.CheckApp)
+// within appCheckTimeout.
+func newCheckedApp(ctx context.Context, cfg *config.Config) (*github.App, error) {
+	app, err := newApp(cfg)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, appCheckTimeout)
+	defer cancel()
+	if err = github.CheckApp(ctx, app, cfg.InstallationID); err != nil {
+		return nil, fmt.Errorf("github app check: %w", err)
+	}
+	return app, nil
 }
 
 // loadStatus reads the previews' status back into s (status.Store.Load),
@@ -256,41 +275,6 @@ func cleanupCmd() *cobra.Command {
 			expiry := expirykube.InCluster(ctx)
 			catchUp := app.CleanupCatchUp(st, f, namespace.InCluster(ctx), expiry)
 			return app.RunCleanup(cmd.Context(), ctx, app.SweepAPI(st, f, nil, expiry), catchUp, time.Now().UTC(), ttl)
-		},
-	}
-}
-
-// verifyAppCmd hits GET /app with App-JWT auth using GITHUB_APP_ID and the
-// PEM at GITHUB_PRIVATE_KEY_PATH (or inline GITHUB_PRIVATE_KEY), on the API
-// base of GITHUB_API_URL (config.LoadGitHubURLs). On success
-// it prints the App's identity and lists every installation reachable with
-// these credentials — the installation IDs needed for GITHUB_INSTALLATION_ID.
-//
-// Intended for operator use after creating or rotating a GitHub App: confirms
-// that the (App ID, private key) pair is valid before standing up the server.
-func verifyAppCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "verify-app",
-		Short: "Verify GitHub App credentials and list installations",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			appID, err := config.LoadAppID()
-			if err != nil {
-				return err
-			}
-			pem, err := config.LoadPrivateKey()
-			if err != nil {
-				return err
-			}
-			_, apiURL, err := config.LoadGitHubURLs()
-			if err != nil {
-				return err
-			}
-
-			ghApp, err := github.NewApp(github.AppConfig{AppID: appID, PrivateKey: pem, APIURL: apiURL})
-			if err != nil {
-				return fmt.Errorf("loading PEM: %w", err)
-			}
-			return github.VerifyApp(cmd.Context(), ghApp, cmd.OutOrStdout())
 		},
 	}
 }

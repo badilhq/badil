@@ -2,7 +2,7 @@ BINARY := badil
 CMD := ./cmd/badil
 VERSION ?= dev
 
-.PHONY: build test lint schema contract-golden template docker-build dev-verify dev-serve dev-cleanup
+.PHONY: build test lint schema contract-golden template docker-build dev-serve dev-cleanup
 
 build:
 	CGO_ENABLED=0 go build -o $(BINARY) $(CMD)
@@ -34,10 +34,6 @@ template:
 
 docker-build:
 	docker build -t $(BINARY):latest .
-
-# Sanity-check the App credentials currently in .env / dev.private-key.pem.
-dev-verify:
-	set -a; . ./.env; set +a; go run $(CMD) verify-app
 
 # Start the server with the current .env.
 dev-serve:

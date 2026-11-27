@@ -1,21 +1,21 @@
 package github_test
 
 import (
-	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/badilhq/badil/internal/fakegithub"
 	"github.com/badilhq/badil/internal/github"
 )
 
-// TestVerifyApp_Mock checks VerifyApp's output against the mock GitHub
-// server: the mock App's identity and its one installation.
-func TestVerifyApp_Mock(t *testing.T) {
+// TestCheckApp checks CheckApp against the fake GitHub, whose one
+// installation is 1: installation 1 passes, installation 2 fails on its token.
+func TestCheckApp(t *testing.T) {
 	mock := httptest.NewServer(fakegithub.New(fakegithub.Config{
 		WebURL: "http://git.local:3000", WebhookURL: "http://127.0.0.1:1/webhooks/github", WebhookSecret: "s",
 		InstallationID: 1, AppSlug: "badil-mock", BotUserID: 1,
@@ -33,19 +33,16 @@ func TestVerifyApp_Mock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewApp: %v", err)
 	}
-	var out bytes.Buffer
-	if err = github.VerifyApp(t.Context(), app, &out); err != nil {
-		t.Fatalf("VerifyApp: %v", err)
-	}
-	const want = "App credentials OK\n" +
-		"  id:    1\n" +
-		"  slug:  badil-mock\n" +
-		"  name:  badil-mock\n" +
-		"  owner: badil\n" +
-		"  url:   http://git.local:3000/apps/badil-mock\n" +
-		"\nInstallations (1):\n" +
-		"  - id=1  account=badil (Organization)\n"
-	if got := out.String(); got != want {
-		t.Errorf("output = %q, want %q", got, want)
-	}
+
+	t.Run("installed", func(t *testing.T) {
+		if got := github.CheckApp(t.Context(), app, 1); got != nil {
+			t.Errorf("CheckApp(1) = %v, want nil", got)
+		}
+	})
+	t.Run("wrong installation", func(t *testing.T) {
+		got := github.CheckApp(t.Context(), app, 2)
+		if got == nil || !strings.Contains(got.Error(), "installation 2 token") {
+			t.Errorf("CheckApp(2) = %v, want an error containing %q", got, "installation 2 token")
+		}
+	})
 }
