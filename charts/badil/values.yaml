@@ -91,16 +91,11 @@ dashboard:
   labels:
     grafana_dashboard: "1"
 
-# Cleanup sweep: deletes stale previews and rewrites every kept preview to
-# match badil.yaml. It runs in the server every cleanup.interval (with
-# metrics) by default; cleanup.enabled=true moves it to a CronJob (no
-# metrics) and turns the in-server sweep off.
+# Cleanup sweep, run in the server every cleanup.interval: deletes stale
+# previews and rewrites every kept preview to match badil.yaml.
 cleanup:
-  # Run the sweep as a CronJob on schedule instead of in the server.
-  enabled: false
-  schedule: "0 * * * *"
   # Run the sweep in the server every interval (CLEANUP_INTERVAL), as a Go
-  # duration of at least 1m; empty disables it. Ignored when enabled is true.
+  # duration of at least 1m; empty disables it.
   interval: "1h"
   # Delete previews with no deploy for this long (CLEANUP_TTL), as a Go
   # duration such as 168h; empty disables the TTL.

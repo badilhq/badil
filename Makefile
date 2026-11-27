@@ -2,7 +2,7 @@ BINARY := badil
 CMD := ./cmd/badil
 VERSION ?= dev
 
-.PHONY: build test lint schema contract-golden template docker-build dev-serve dev-cleanup
+.PHONY: build test lint schema contract-golden template docker-build dev-serve
 
 build:
 	CGO_ENABLED=0 go build -o $(BINARY) $(CMD)
@@ -38,9 +38,3 @@ docker-build:
 # Start the server with the current .env.
 dev-serve:
 	set -a; . ./.env; set +a; go run $(CMD) serve
-
-# Run one cleanup sweep with the current .env. Set CLEANUP_TTL (e.g. 168h) to
-# also expire idle previews:
-#   CLEANUP_TTL=168h make dev-cleanup
-dev-cleanup:
-	set -a; . ./.env; set +a; go run $(CMD) cleanup

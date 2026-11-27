@@ -341,7 +341,7 @@ badil reads these environment variables:
 | `BADIL_STATUS_TOKEN` | no | unset | `serve` only: bearer token of the renderer's status callback; enables `/webhooks/status`, which answers 404 when unset |
 | `POD_NAMESPACE` | no | unset: status kept in memory only | `serve` only: the namespace where badil keeps each preview's status as a ConfigMap, through the in-cluster Kubernetes config. Without it, or outside a cluster, the status is not persisted and badil logs `status persistence disabled` at start. The chart sets it to the release namespace |
 | `CLEANUP_INTERVAL` | no | unset: no in-server sweep | `serve` only: how often the in-server sweep runs, a Go duration of at least `1m` (e.g. `1h`) |
-| `CLEANUP_TTL` | no | unset: no expiry | `cleanup`, and `serve` when `CLEANUP_INTERVAL` is set: sweep expiry, a Go duration (e.g. `168h`) |
+| `CLEANUP_TTL` | no | unset: no expiry | `serve` only, when `CLEANUP_INTERVAL` is set: sweep expiry, a Go duration (e.g. `168h`) |
 
 ### Gitops repo credentials
 

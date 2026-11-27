@@ -1,6 +1,6 @@
 // Package kube keeps the PRs of the previews the sweep expired for the TTL
 // (lifecycle.ExpiryStore) in the ConfigMap badil-expired of badil's
-// namespace, written by the server and the cleanup CronJob.
+// namespace, written by the server.
 package kube
 
 import (
@@ -48,8 +48,8 @@ type record struct {
 }
 
 // Store is the ConfigMap lifecycle.ExpiryStore. Each write reads the
-// ConfigMap again and changes only its own data keys, as the server and the
-// cleanup CronJob write it concurrently; Recorded reads it on every call.
+// ConfigMap again and changes only its own data keys, as the server's sweep,
+// catch-up and deploys write it concurrently; Recorded reads it on every call.
 type Store struct {
 	client    kubernetes.Interface
 	namespace string

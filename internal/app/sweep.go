@@ -100,15 +100,3 @@ func runSweep(
 	}
 	rec.SweepRun(err == nil, now())
 }
-
-// RunCleanup runs one sweep under sweepCtx, then one catch-up of c under its
-// own CleanupTimeout from ctx (RunCatchUp), whether the sweep succeeded or
-// failed. It returns the sweep's error: catch-up's failures are only logged
-// and counted.
-func RunCleanup(
-	ctx, sweepCtx context.Context, api lifecycle.SweepAPI, c CatchUpRunner, now time.Time, ttl time.Duration,
-) error {
-	err := lifecycle.Sweep(sweepCtx, api, now, ttl)
-	RunCatchUp(ctx, c)
-	return err
-}

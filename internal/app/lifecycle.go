@@ -1,8 +1,6 @@
 package app
 
 import (
-	"context"
-
 	"github.com/badilhq/badil/internal/forge"
 	"github.com/badilhq/badil/internal/lifecycle"
 )
@@ -65,34 +63,4 @@ func (a *App) CatchUp() *lifecycle.CatchUp {
 	api := CatchUpAPI(a.store, a.forge, a.metrics, a.expiry)
 	api.Skipped = a.RecordCatchUpSkip
 	return lifecycle.NewCatchUp(api, a.QueueReconcile)
-}
-
-// CleanupStore is the gitops store badil cleanup's catch-up reads and
-// writes: *store.GitHubStore.
-type CleanupStore interface {
-	lifecycle.CatchUpStore
-	lifecycle.ReconcileStore
-}
-
-// CleanupCatchUp is badil cleanup's catch-up over st and f, recording no
-// metrics: it reconciles at once (reconcileNow), checking the namespace of a
-// new preview with ns and remembering expiries in e as serve does.
-func CleanupCatchUp(
-	st CleanupStore, f forge.Forge, ns lifecycle.NamespaceChecker, e lifecycle.ExpiryStore,
-) *lifecycle.CatchUp {
-	m := nopMetrics{}
-	reconcile := lifecycle.ReconcileAPI{
-		Store: st, Forge: f, Recorder: m, FanOut: lifecycle.FanOutPRComments, Namespaces: ns, Expiry: e,
-	}
-	return lifecycle.NewCatchUp(CatchUpAPI(st, f, m, e), reconcileNow(reconcile))
-}
-
-// reconcileNow reconciles through lifecycle.ReconcilePR over api at once,
-// each reconcile capped at ReconcileTimeout, and calls done with its result.
-func reconcileNow(api lifecycle.ReconcileAPI) lifecycle.ReconcileFunc {
-	return func(ctx context.Context, ev lifecycle.Event, done func(lifecycle.ReconcileResult)) {
-		rctx, cancel := context.WithTimeout(ctx, ReconcileTimeout)
-		defer cancel()
-		done(lifecycle.ReconcilePR(rctx, api, ev))
-	}
 }

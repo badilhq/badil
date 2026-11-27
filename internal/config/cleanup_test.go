@@ -132,20 +132,3 @@ func TestLoadSweepSchedule(t *testing.T) {
 		})
 	}
 }
-
-func TestLoadCleanupTTL(t *testing.T) {
-	t.Run("unset", func(t *testing.T) {
-		unsetEnv(t, "CLEANUP_TTL")
-		ttl, err := config.LoadCleanupTTL()
-		if err != nil || ttl != 0 {
-			t.Errorf("LoadCleanupTTL() = %v, %v, want 0, nil", ttl, err)
-		}
-	})
-	t.Run("negative", func(t *testing.T) {
-		t.Setenv("CLEANUP_TTL", "-1h")
-		const want = `CLEANUP_TTL must be a positive duration, got "-1h"`
-		if _, err := config.LoadCleanupTTL(); err == nil || err.Error() != want {
-			t.Errorf("LoadCleanupTTL() err = %v, want %q", err, want)
-		}
-	})
-}

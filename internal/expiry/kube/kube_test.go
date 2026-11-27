@@ -150,7 +150,7 @@ func TestStore_ConflictKeepsOtherWriter(t *testing.T) {
 		if updates > 1 {
 			return false, nil, nil
 		}
-		// The other writer (the cleanup CronJob) wrote its record first.
+		// Another writer of the server (its sweep, catch-up or a deploy) wrote its record first.
 		addRecord(t, c, api, "a1")
 		return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "configmaps"}, kube.ConfigMapName, nil)
 	})
