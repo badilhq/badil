@@ -237,8 +237,6 @@ A preview namespace starts empty: `preview-apps` creates it with no Secrets and 
 - the service chart: `imagePullSecrets` on the pod, or External Secrets `ExternalSecret` objects backed by a cluster-wide `ClusterSecretStore`;
 - the Kyverno example [`examples/kyverno/preview-secrets.yaml`](../examples/kyverno/README.md#preview-secrets) (Kyverno v1.19.0 or later), which copies Secrets from one namespace into every preview namespace.
 
-A service chart built on the [`app`](../charts/app) chart can set `app.envFrom` but not `imagePullSecrets` yet: for private images it needs node-level registry credentials, or a chart that renders its own pod spec.
-
 ### Namespace guard (optional)
 
 badil refuses a new preview whose namespace already exists and is not a preview (see [Namespace in use](EVENTS.md#namespace-in-use)), but only for the previews it writes itself. A preview file written to the gitops repo by anything else, or a namespace created between badil's check and the renderer's sync, still lets the renderer adopt that namespace, and the teardown then deletes it with everything in it. The namespace guard closes that gap in the cluster: a ValidatingAdmissionPolicy refuses any update or delete of a namespace by the ServiceAccount of the renderer that deploys previews unless the namespace already carries the label `badil.dev/preview`, whoever wrote the preview file. Requests from any other user, and the renderer's creation of a namespace, are not affected.

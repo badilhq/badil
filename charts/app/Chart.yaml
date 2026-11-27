@@ -1,6 +1,0 @@
-apiVersion: v2
-name: app
-description: Generic service chart for badil preview services
-version: 0.3.0
-appVersion: "0.1.0"
-home: https://github.com/badilhq/badil
