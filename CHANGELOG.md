@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.33.0](https://github.com/badilhq/badil/compare/v0.32.0...v0.33.0) (2026-11-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* **chart:** charts/app is no longer published; published versions stay on ghcr.io/badilhq/charts. Service charts are the user's.
+* **chart:** the namespaceGuard chart values are removed; apply examples/namespace-guard instead.
+* **chart:** the cleanup CronJob (cleanup.enabled, cleanup.schedule) and the badil cleanup command are removed; the sweep runs in badil serve every cleanup.interval.
+* **cli:** badil verify-app is removed; badil serve checks the App credentials at startup.
+
+### Features
+
+* **chart:** move the namespace guard from the chart to an example ([#171](https://github.com/badilhq/badil/issues/171)) ([1d016e5](https://github.com/badilhq/badil/commit/1d016e525d10d85a13ac787e956b2f1d1b724672))
+* **chart:** run the cleanup sweep in the server only ([#170](https://github.com/badilhq/badil/issues/170)) ([e88697f](https://github.com/badilhq/badil/commit/e88697f4d74082f4a82c3cf35c688022a4375149))
+* **chart:** stop shipping the app service chart ([#172](https://github.com/badilhq/badil/issues/172)) ([5ced2d8](https://github.com/badilhq/badil/commit/5ced2d800935afd5be4c2cd6377ad479361a629d))
+* **cli:** remove the verify-app command ([#169](https://github.com/badilhq/badil/issues/169)) ([9e9777a](https://github.com/badilhq/badil/commit/9e9777a055611a3288bd4f87efd7216667fd4f83))
+
+
+### Documentation
+
+* state badil's scope and add a kyverno recipe for preview secrets ([#168](https://github.com/badilhq/badil/issues/168)) ([6d23580](https://github.com/badilhq/badil/commit/6d23580a90956f96839755f99755a79d683c370a))
+
 ## [0.32.0](https://github.com/badilhq/badil/compare/v0.31.0...v0.32.0) (2026-11-27)
 
 
