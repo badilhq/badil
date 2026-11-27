@@ -8,7 +8,7 @@ From an empty cluster to a first preview. Contract details live in the [Configur
 - An ingress controller with TLS for the badil webhook URL (GitHub calls it over https), plus wildcard DNS when preview URLs are used.
 - A GitHub gitops repo, and service repos whose CI pushes images tagged as the `imageTag` format of `badil.yaml` renders the commit SHA (the full SHA by default), all under the one account (user or org) the App is installed on. `/v1/deploy` must send the full SHA: see [`imageTag`](CONFIGURATION.md#imagetag).
 - Service images pullable from the preview namespaces: `preview-apps` creates each namespace fresh, with no `imagePullSecrets`. Use public images, or one of the ways in [Images and secrets in previews](#images-and-secrets-in-previews-optional).
-- `kubectl` and Helm 3.8+. The `badil` CLI is optional (`verify-app`, `list`, `wait`): see [Install the badil CLI](#install-the-badil-cli).
+- `kubectl` and Helm 3.8+. The `badil` CLI is optional (`list`, `wait`): see [Install the badil CLI](#install-the-badil-cli).
 
 ## 2. Gitops repo
 
@@ -75,13 +75,9 @@ Choose the https host GitHub will call, e.g. `https://badil.example.com`, and cr
    EOF
    chmod 600 .env
    ```
-4. Create the gitops repo token. The App has Contents read only: badil pushes to the gitops repo with a token of its own (see [Gitops repo credentials](CONFIGURATION.md#gitops-repo-credentials)). On GitHub, create a machine user, a GitHub account for badil alone, give it write access to the gitops repo only, and create for it a fine-grained personal access token with access to the gitops repo only and the repository permission Contents read and write. Put the token into `GITOPS_REPO_TOKEN` in `.env`.
-5. Optional: check the credentials. With `.env` loaded, `badil verify-app` prints the App and its installations; it needs the CLI ([Install the badil CLI](#install-the-badil-cli)).
 
-   ```bash
-   . ./.env
-   badil verify-app
-   ```
+   `badil serve` checks the App ID, key and installation ID at startup and exits with the GitHub error when one is wrong.
+4. Create the gitops repo token. The App has Contents read only: badil pushes to the gitops repo with a token of its own (see [Gitops repo credentials](CONFIGURATION.md#gitops-repo-credentials)). On GitHub, create a machine user, a GitHub account for badil alone, give it write access to the gitops repo only, and create for it a fine-grained personal access token with access to the gitops repo only and the repository permission Contents read and write. Put the token into `GITOPS_REPO_TOKEN` in `.env`.
 
 `.env` and the PEM are secrets: keep them out of git and store them in a secret manager. The PEM is the only copy; if lost, generate a new private key in the App settings.
 
@@ -413,7 +409,7 @@ To upgrade badil:
 |---|---|---|
 | Deliveries return 404 on `POST /` | The webhook URL lacks `/webhooks/github` | Set the App's webhook URL to `<base>/webhooks/github` |
 | Deliveries return 401 `invalid signature` | `github-webhook-secret` differs from the App's webhook secret | Make the Secret key and the App's webhook secret match, then restart badil |
-| Deliveries return 403 `installation not allowed` | `config.githubInstallationId` is wrong, or the repo is under another account | Set the ID listed by `badil verify-app`; install the App on repos of that account only |
+| Deliveries return 403 `installation not allowed` | `config.githubInstallationId` is wrong, or the repo is under another account | Set the ID the App's install URL ends with; install the App on repos of that account only |
 | Deliveries time out or fail to connect | The ingress or DNS is unreachable from GitHub | Expose the host publicly over https and check from outside with `curl -s -o /dev/null -w '%{http_code}' -X POST https://<host>/webhooks/github`, which answers `401` |
 | `preview reconcile failed … badil.yaml: …` in `kubectl logs -n badil deploy/badil` | `badil.yaml` is malformed; the error names the key | Fix that key in `badil.yaml` |
 | `preview reconcile skipped … reason="repo not in catalog"` | The `services.<name>.repo` URL isn't `<GITHUB_URL>/<owner>/<repo>[.git]` (`GITHUB_URL` defaults to `https://github.com`) | Fix the URL in `badil.yaml` |

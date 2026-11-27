@@ -20,7 +20,6 @@ ngrok http 8080
 # Create the App by hand and write .env: see "Create the GitHub App" below
 # Create a token with Contents write on the gitops repo and set it in .env (GITOPS_REPO_TOKEN=...)
 
-make dev-verify            # confirms the credentials are good and shows installation IDs
 make dev-serve             # starts the server
 make dev-cleanup           # runs one cleanup sweep (CLEANUP_TTL=168h make dev-cleanup to also expire idle previews)
 ```
@@ -69,7 +68,7 @@ Open the gitops repo on GitHub to confirm the commit landed on `main`, with `pr-
 
 ## Verify webhook plumbing
 
-GitHub App settings → **Advanced** → **Recent Deliveries** → pick any → **Redeliver**. The server answers 200 and logs one line per event type (`webhook ping`, `webhook installation`, `webhook installation_repositories`, `webhook pull_request`, `webhook push`); other event types log `unhandled webhook event` (or `webhook parse failed` if go-github doesn't know the type). A 401 means the webhook secret in `.env` doesn't match what GitHub has — fix on either side. A 403 means the delivery's installation is not `GITHUB_INSTALLATION_ID`: the `webhook installation rejected` log shows the received `installation_id`; compare it with `badil verify-app`.
+GitHub App settings → **Advanced** → **Recent Deliveries** → pick any → **Redeliver**. The server answers 200 and logs one line per event type (`webhook ping`, `webhook installation`, `webhook installation_repositories`, `webhook pull_request`, `webhook push`); other event types log `unhandled webhook event` (or `webhook parse failed` if go-github doesn't know the type). A 401 means the webhook secret in `.env` doesn't match what GitHub has — fix on either side. A 403 means the delivery's installation is not `GITHUB_INSTALLATION_ID`: the `webhook installation rejected` log shows the received `installation_id`; compare it with the ID the App's install URL ends with (`/settings/installations/<ID>`).
 
 To exercise the handler without GitHub, sign the body yourself. The HMAC covers the exact body bytes, so use `printf '%s'` (no trailing newline), never `echo`:
 
@@ -186,8 +185,8 @@ rm /tmp/badil-mock.env
 | Symptom | Cause | Fix |
 |---|---|---|
 | Deliveries return 404 on `POST /` (Recent Deliveries, or `http request … path=/ status=404` in the logs) | The App's webhook URL lacks `/webhooks/github` | In the App settings, set **Webhook URL** to `<base>/webhooks/github` |
-| `badil verify-app` returns `401 A JSON web token could not be decoded` | `GITHUB_APP_ID` and `dev.private-key.pem` don't match | Regenerate the private key from the App settings page and replace `dev.private-key.pem` |
-| `badil verify-app` shows `Installations (0)` | App created but not installed anywhere | Open the App settings, click **Install App**, pick repos |
+| `badil serve` exits with `github app check: GET /app: … 401 A JSON web token could not be decoded` | `GITHUB_APP_ID` and `dev.private-key.pem` don't match | Regenerate the private key from the App settings page and replace `dev.private-key.pem` |
+| `badil serve` exits with `github app check: installation <ID> token: … response status "404 Not Found" …` | The App is not installed, or `GITHUB_INSTALLATION_ID` is wrong | Install the App and take the ID from the install URL (`/settings/installations/<ID>`) |
 | `badil serve` fails with `GITHUB_APP_ID is required` | `.env` not sourced | `source .env` first, or use `make dev-serve` which sources for you |
 | `badil serve` fails with `GITOPS_REPO_TOKEN is required` | `GITOPS_REPO_TOKEN` is not set in `.env` | Set it to a token with Contents write on the gitops repo |
 
@@ -224,4 +223,4 @@ Create the dev App by hand:
 
 The App has Contents read only: badil pushes to the gitops repo with `GITOPS_REPO_TOKEN`, a token with Contents write on the gitops repo (a fine-grained personal access token with access to that repo only). Without it, badil exits at start with `GITOPS_REPO_TOKEN is required`. See [Gitops repo credentials](docs/CONFIGURATION.md#gitops-repo-credentials).
 
-On another GitHub host (GitHub Enterprise), add `GITHUB_URL` and `GITHUB_API_URL` to `.env`: `verify-app` and `serve` read them (see [Server environment variables](docs/CONFIGURATION.md#server-environment-variables)).
+On another GitHub host (GitHub Enterprise), add `GITHUB_URL` and `GITHUB_API_URL` to `.env`: `serve` reads them (see [Server environment variables](docs/CONFIGURATION.md#server-environment-variables)).
