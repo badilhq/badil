@@ -43,7 +43,6 @@ func layerMap() map[string]placement {
 		module + "internal/forge/github":            {layer: adapter, component: "forge github"},
 		module + "internal/forge/github/githubtest": {layer: adapter, component: "forge github"},
 		module + "internal/github":                  {layer: adapter, component: "github"},
-		module + "internal/github/manifest":         {layer: adapter, component: "github manifest"},
 		module + "internal/namespace":               {layer: adapter, component: "namespace"},
 		module + "internal/status":                  {layer: adapter, component: "status"},
 		module + "internal/status/kube":             {layer: adapter, component: "status kube"},
@@ -68,13 +67,12 @@ func layerMap() map[string]placement {
 // components it may import.
 func allowedAdapterImports() map[string][]string {
 	return map[string][]string{
-		"forge github":    {"github"},
-		"github manifest": {"github"},
-		"server":          {"api"},
-		"apiclient":       {"api"},
-		"status kube":     {"status"},
-		"expiry kube":     {"expiry"},
-		"config":          {"github"},
+		"forge github": {"github"},
+		"server":       {"api"},
+		"apiclient":    {"api"},
+		"status kube":  {"status"},
+		"expiry kube":  {"expiry"},
+		"config":       {"github"},
 	}
 }
 

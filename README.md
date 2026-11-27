@@ -86,7 +86,6 @@ badil serve           # API + webhook server
 badil cleanup         # stale preview cleanup
 badil list            # list previews and their status
 badil wait            # wait for a PR's or a slug's preview to be ready
-badil bootstrap-app   # create a GitHub App (webhook from --webhook-url or an ngrok tunnel; see DEVELOPMENT.md)
 badil verify-app      # check GitHub App credentials, list installations
 badil version         # print the version (also badil --version)
 ```

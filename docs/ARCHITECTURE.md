@@ -39,7 +39,7 @@ badil is a few binaries and charts. Each service repo adds its own chart.
 |---|---|---|
 | `badil serve` | this repo | chi HTTP server: the GitHub webhook, the renderer's status callback, and the optional deploy and sync endpoints. Keeps each preview's status in memory and in a ConfigMap of its namespace. See the [HTTP API reference](API.md). |
 | `badil cleanup` | this repo | One-shot [cleanup sweep](#cleanup-sweep), run by a CronJob (hourly). |
-| `badil bootstrap-app` / `verify-app` | this repo | Create a GitHub App via the manifest flow / check credentials. |
+| `badil verify-app` | this repo | Check GitHub App credentials and list installations. |
 | `preview-apps` chart | this repo, [`charts/preview-apps`](../charts/preview-apps) | The [renderer](CONTRACT.md#preview-contract) badil ships: an AppProject, a Namespace, and one Argo CD Application per service and per dependency. Application annotations `preview.badil.dev/*` carry the PR metadata. |
 | ApplicationSet | this repo, [`examples/argocd`](../examples/argocd) | Git directory generator on `previews/*`. |
 | Service chart | each service repo | Built on the `app` chart, [`charts/app`](../charts/app). See the [Service repo contract](CONFIGURATION.md#service-repo-contract). |
@@ -187,14 +187,13 @@ badil's Go packages are grouped in layers, and each package imports only what it
 |---|---|---|
 | Domain | `internal/preview`, `internal/catalog` | The standard library, yaml.v3, doublestar, jsonschema and other domain packages. |
 | Use cases and ports | `internal/forge`, `internal/lifecycle`, `internal/app` | The same libraries, domain and use-case packages. |
-| Adapters | `internal/store` (with `internal/store/storetest`), `internal/forge/github` (with `internal/forge/github/githubtest`), `internal/github`, `internal/github/manifest`, `internal/namespace`, `internal/status`, `internal/status/kube`, `internal/expiry`, `internal/expiry/kube`, `internal/metrics`, `internal/server` (with `internal/server/mocks`), `internal/api`, `internal/apiclient`, `internal/config` | Any library, domain and use cases, and another adapter only as listed below. |
+| Adapters | `internal/store` (with `internal/store/storetest`), `internal/forge/github` (with `internal/forge/github/githubtest`), `internal/github`, `internal/namespace`, `internal/status`, `internal/status/kube`, `internal/expiry`, `internal/expiry/kube`, `internal/metrics`, `internal/server` (with `internal/server/mocks`), `internal/api`, `internal/apiclient`, `internal/config` | Any library, domain and use cases, and another adapter only as listed below. |
 | Tooling | `internal/chartvalues`, `internal/fakegithub`, `internal/archtest`, `cmd/schemagen`, `cmd/fakegithub` | Anything. |
 | Composition root | `cmd/badil` | Anything. |
 
 Allowed adapter imports:
 
 - `internal/forge/github` → `internal/github`
-- `internal/github/manifest` → `internal/github`
 - `internal/server` → `internal/api`
 - `internal/apiclient` → `internal/api`
 - `internal/status/kube` → `internal/status`
