@@ -8,7 +8,7 @@ From an empty cluster to a first preview. Contract details live in the [Configur
 - An ingress controller with TLS for the badil webhook URL (GitHub calls it over https), plus wildcard DNS when preview URLs are used.
 - A GitHub gitops repo, and service repos whose CI pushes images tagged as the `imageTag` format of `badil.yaml` renders the commit SHA (the full SHA by default), all under the one account (user or org) the App is installed on. `/v1/deploy` must send the full SHA: see [`imageTag`](CONFIGURATION.md#imagetag).
 - Service images pullable from the preview namespaces: `preview-apps` creates each namespace fresh, with no `imagePullSecrets`. Use public images, node-level registry credentials, or pull secrets set by the service chart.
-- `kubectl`, Helm 3.8+ and Go 1.27+ (for the `badil` CLI).
+- `kubectl` and Helm 3.8+. The `badil` CLI is optional (`verify-app`, `list`, `wait`): see [Install the badil CLI](#install-the-badil-cli).
 
 ## 2. Gitops repo
 
@@ -44,50 +44,44 @@ Choose the https host GitHub will call, e.g. `https://badil.example.com`, and cr
 
 ## 5. GitHub App
 
-1. Install the CLI:
+1. Create the App by hand:
+   - Repos in your personal account: profile picture → **Settings** → **Developer settings** → **GitHub Apps** → **New GitHub App**.
+   - Repos in an org: profile picture → **Your organizations** → **Settings** next to the org → **Developer settings** → **GitHub Apps** → **New GitHub App**. You need to own the org, or the org must have granted you permission to manage all its apps. The App is private, so it can only be installed on the account that owns it: org repos need an org-owned App.
 
-   ```bash
-   go install github.com/badilhq/badil/cmd/badil@latest
-   ```
+   Fill in:
+   - **GitHub App name**: unique on GitHub
+   - **Homepage URL**: any URL, e.g. `https://badil.example.com`
+   - **Webhook**: **Active**, with **Webhook URL** `https://badil.example.com/webhooks/github` (the host of [§4](#4-public-url-for-badil))
+   - **Webhook secret**: the output of `openssl rand -hex 32`; save the value
+   - **Repository permissions**: Contents read, Pull requests read and write, Metadata read
+   - **Subscribe to events**: **Pull request** and **Push**
+   - **Where can this GitHub App be installed?**: Only on this account
 
-   `$(go env GOPATH)/bin` must be on `PATH`. Use `@vX.Y.Z` to match a pinned chart. `badil version` prints the installed version.
-2. In an empty working directory, create the App. It writes `.env` and `dev.private-key.pem` there.
-   - Run it on a machine with a desktop browser signed in to GitHub, not over SSH on a remote host: it listens on `127.0.0.1` and waits 5 minutes for the browser redirect. Otherwise create the App by hand (item 6).
-   - The App is private, so it can only be installed on the account that owns it. When the repos are in an org, `--owner <org>` is required, and creating the App needs org owner (or App manager) rights.
-
-   ```bash
-   APP_NAME=my-badil            # unique on GitHub
-   GITOPS=https://github.com/my-org/gitops.git   # clone URL
-   ORG=my-org                      # org that owns the repos
-   ```
-
-   Repos in an org:
-
-   ```bash
-   badil bootstrap-app --name "$APP_NAME" \
-     --webhook-url https://badil.example.com \
-     --gitops-repo-url "$GITOPS" --owner "$ORG"
-   ```
-
-   Repos in your personal account:
-
-   ```bash
-   badil bootstrap-app --name "$APP_NAME" \
-     --webhook-url https://badil.example.com \
-     --gitops-repo-url "$GITOPS"
-   ```
-3. Install the App on the gitops repo and every service repo, all under that one account. badil accepts webhooks from that single installation only.
+   Click **Create GitHub App** and note the **App ID**. Under **Private keys**, click **Generate a private key**, and move the downloaded `.pem` to `dev.private-key.pem` in the directory where you write `.env` (item 3).
+2. Install the App on the gitops repo and every service repo, all under that one account. badil accepts webhooks from that single installation only. The installation ID is the number the browser URL ends with after install (`/settings/installations/<ID>`).
    The App subscribes to `pull_request` and `push`. An App created before `push` was added does not receive it: in the App settings, **Permissions & events** → **Subscribe to events**, tick **Push** and click **Save changes**. `push` needs Contents read, the App's only Contents permission, so installations approve nothing. Without it, a `badil.yaml` change reaches previews only at their next deploy or sweep, or through `POST /v1/sync`.
-4. In the same directory, list the installations:
+3. In the same directory, write `.env`:
+
+   ```bash
+   cat > .env <<EOF
+   export GITHUB_APP_ID=<from item 1>
+   export GITHUB_PRIVATE_KEY_PATH=./dev.private-key.pem
+   export GITHUB_WEBHOOK_SECRET=<from item 1>
+   export GITHUB_INSTALLATION_ID=<from item 2>
+   export GITOPS_REPO_URL=https://github.com/<your-org>/<your-gitops-repo>.git
+   export GITOPS_REPO_TOKEN=<from item 4>
+   export BADIL_DEPLOY_TOKEN=$(openssl rand -hex 32)
+   export LISTEN_ADDR=:8080
+   EOF
+   chmod 600 .env
+   ```
+4. Create the gitops repo token. The App has Contents read only: badil pushes to the gitops repo with a token of its own (see [Gitops repo credentials](CONFIGURATION.md#gitops-repo-credentials)). On GitHub, create a machine user, a GitHub account for badil alone, give it write access to the gitops repo only, and create for it a fine-grained personal access token with access to the gitops repo only and the repository permission Contents read and write. Put the token into `GITOPS_REPO_TOKEN` in `.env`.
+5. Optional: check the credentials. With `.env` loaded, `badil verify-app` prints the App and its installations; it needs the CLI ([Install the badil CLI](#install-the-badil-cli)).
 
    ```bash
    . ./.env
    badil verify-app
    ```
-
-   Put the listed `id=` into `GITHUB_INSTALLATION_ID` in `.env`, then run `. ./.env` again.
-5. Create the gitops repo token. The App has Contents read only: badil pushes to the gitops repo with a token of its own (see [Gitops repo credentials](CONFIGURATION.md#gitops-repo-credentials)). On GitHub, create a machine user, a GitHub account for badil alone, give it write access to the gitops repo only, and create for it a fine-grained personal access token with access to the gitops repo only and the repository permission Contents read and write. Put the token into `GITOPS_REPO_TOKEN` in `.env`, then run `. ./.env` again.
-6. Alternative: create the App by hand following [DEVELOPMENT.md Appendix B](../DEVELOPMENT.md#appendix-b--manual-app-creation-manifest-flow-fallback), with the webhook URL `<base>/webhooks/github`, and write the same `.env` keys yourself.
 
 `.env` and the PEM are secrets: keep them out of git and store them in a secret manager. The PEM is the only copy; if lost, generate a new private key in the App settings.
 
@@ -382,7 +376,7 @@ Set `preview.domain` in `badil.yaml`, create a wildcard DNS record `*.<domain>` 
 
 Upgrading from a release where `gitops-repo-token` was optional: badil no longer pushes as the App and does not start without the token. Before the `helm upgrade`, in this order:
 
-1. Create the gitops repo token as [§5](#5-github-app) item 5 says.
+1. Create the gitops repo token as [§5](#5-github-app) item 4 says.
 2. Add it to the Secret as `gitops-repo-token` (a merge patch keeps the other keys):
 
    ```bash

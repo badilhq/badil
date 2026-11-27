@@ -49,7 +49,6 @@ func rootCmd() *cobra.Command {
 	root.AddCommand(listCmd())
 	root.AddCommand(waitCmd())
 	root.AddCommand(verifyAppCmd())
-	root.AddCommand(bootstrapAppCmd())
 	root.AddCommand(versionCmd())
 	return root
 }
