@@ -249,6 +249,16 @@ jobs:
             exit 1
           fi
 
+      - name: Kyverno preview secrets example
+        run: |
+          got=$(yq -N '[.apiVersion, .kind] | join(" ")' examples/kyverno/preview-secrets.yaml)
+          want=$(printf '%s\n%s' 'rbac.authorization.k8s.io/v1 ClusterRole' 'policies.kyverno.io/v1 GeneratingPolicy')
+          if [ "$got" != "$want" ]; then
+            echo '::error::expected examples/kyverno/preview-secrets.yaml to be a rbac.authorization.k8s.io/v1 ClusterRole then a policies.kyverno.io/v1 GeneratingPolicy'
+            printf 'got:\n%s\n' "$got"
+            exit 1
+          fi
+
       - name: Render badil with all components
         run: helm template t charts/badil -f charts/badil/ci/test-values.yaml --set ingress.enabled=true,ingress.host=badil.example.com,cleanup.enabled=true,metrics.serviceMonitor.enabled=true,dashboard.enabled=true
 

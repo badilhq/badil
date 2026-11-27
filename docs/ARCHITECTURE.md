@@ -31,6 +31,20 @@ flowchart LR
 - Closing or unlabelling a PR, and the [cleanup sweep](#cleanup-sweep), unpin services or delete preview files; a push changing `badil.yaml`, or `POST /v1/sync`, resyncs every preview (see [Config sync](#config-sync)); Argo CD prunes what was removed.
 - `POST /v1/deploy` and `POST /v1/sync` exist only when `BADIL_DEPLOY_TOKEN` is set. The read routes, `GET /v1/previews` and the waits `GET /v1/wait` and `GET /v1/previews/{slug}/wait`, exist when `BADIL_READ_TOKEN` or `BADIL_DEPLOY_TOKEN` is set.
 
+## Scope
+
+badil has two core jobs. First, it turns pull request events into preview files in the gitops repo, under a published contract. Second, it reports on those previews through PR comments and its read API. Anything about how the workloads run, how the cluster is policed, or one-time setup is the cluster's, the charts' or the user's job.
+
+Out of scope:
+
+- building images;
+- workload secrets and registry credentials;
+- quotas;
+- network and pod security policy;
+- seed data;
+- testing the preview;
+- one-time setup (GitHub App creation).
+
 ## Components
 
 badil is a few binaries and charts. Each service repo adds its own chart.

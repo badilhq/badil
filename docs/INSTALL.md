@@ -7,7 +7,7 @@ From an empty cluster to a first preview. Contract details live in the [Configur
 - A Kubernetes cluster with Argo CD 3.1 or later (OCI chart source, Beta since v3.1.0), in any namespace. The `preview-apps` chart creates its AppProject and Applications in the namespace set by its `argocdNamespace` value (default `argocd`). When Argo CD runs elsewhere, set that namespace in the places [Adapt to your org](../examples/argocd/README.md#adapt-to-your-org) lists, and read `-n argocd` in the commands of this guide as your Argo CD namespace.
 - An ingress controller with TLS for the badil webhook URL (GitHub calls it over https), plus wildcard DNS when preview URLs are used.
 - A GitHub gitops repo, and service repos whose CI pushes images tagged as the `imageTag` format of `badil.yaml` renders the commit SHA (the full SHA by default), all under the one account (user or org) the App is installed on. `/v1/deploy` must send the full SHA: see [`imageTag`](CONFIGURATION.md#imagetag).
-- Service images pullable from the preview namespaces: `preview-apps` creates each namespace fresh, with no `imagePullSecrets`. Use public images, node-level registry credentials, or pull secrets set by the service chart.
+- Service images pullable from the preview namespaces: `preview-apps` creates each namespace fresh, with no `imagePullSecrets`. Use public images, or one of the ways in [Images and secrets in previews](#images-and-secrets-in-previews-optional).
 - `kubectl` and Helm 3.8+. The `badil` CLI is optional (`verify-app`, `list`, `wait`): see [Install the badil CLI](#install-the-badil-cli).
 
 ## 2. Gitops repo
@@ -232,6 +232,14 @@ Last successful sweep needs `cleanup.interval`; the spin-up panels need [Preview
 ### Preview limits (optional)
 
 A preview runs the code of its PRs in your cluster, with no limits unless you add them. badil sets no quota or network policy on previews. To cap each preview's resources and isolate its ingress, apply the Kyverno policy in [`examples/kyverno/`](../examples/kyverno/README.md) (Kyverno v1.19.0 or later): it creates a ResourceQuota, a LimitRange and an ingress NetworkPolicy in every preview namespace. Adapt its quota numbers and its ingress controller namespace first. Details: [Preview limits](CONFIGURATION.md#preview-limits).
+
+### Images and secrets in previews (optional)
+
+A preview namespace starts empty: `preview-apps` creates it with no Secrets and no `imagePullSecrets`, and badil holds no workload secrets. Private images and app secrets need one of:
+
+- node-level registry credentials: cloud nodes pulling from their registry with the node identity, or a kubelet credential provider;
+- the service chart: `imagePullSecrets` on the pod, or External Secrets `ExternalSecret` objects backed by a cluster-wide `ClusterSecretStore`;
+- the Kyverno example [`examples/kyverno/preview-secrets.yaml`](../examples/kyverno/README.md#preview-secrets) (Kyverno v1.19.0 or later), which copies Secrets from one namespace into every preview namespace.
 
 ### Namespace guard (optional)
 

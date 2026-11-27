@@ -9,6 +9,12 @@ Per-pull-request preview environments for teams running Kubernetes and ArgoCD. S
 
 Each labelled PR gets a preview in its own namespace, named after its branch or its `preview:<name>` label: the services changed in the PR run at their PR version, every other service runs at its branch (default `main`). badil writes the desired state to your gitops repo; your ArgoCD deploys it. badil never touches your previews directly: its only cluster access is its own status ConfigMaps (`badil-status-<slug>`), in its own namespace, and `get` on namespaces by name, to refuse a new preview whose namespace exists and is not a preview.
 
+## Scope
+
+badil has two core jobs. First, it turns pull request events into preview files in the gitops repo, under a published contract. Second, it reports on those previews through PR comments and its read API. Anything about how the workloads run, how the cluster is policed, or one-time setup is the cluster's, the charts' or the user's job.
+
+So badil never builds images, never writes preview namespaces and holds no workload secrets; registry credentials, app secrets, quotas and network policy come from the cluster or the service charts (see [Images and secrets in previews](docs/INSTALL.md#images-and-secrets-in-previews-optional)).
+
 ## Why
 
 A shared staging environment makes changes wait in line to be validated and integrated. badil applies the practices from [AI Writes Code in Hours. It Still Takes Weeks to Ship.](https://medium.com/@aminebenseddik/ai-writes-code-in-hours-it-still-takes-weeks-to-ship-7fb07f87cc07):
