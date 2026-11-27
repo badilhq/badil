@@ -98,6 +98,8 @@ spec:
             name: app-env
 ```
 
+A service chart built on badil's [`app`](../../charts/app) chart can set the app Secret with `app.envFrom`, but has no `imagePullSecrets` value yet: for private images it needs node-level registry credentials, or a chart that renders its own pod spec.
+
 ### Remove
 
 ```sh
